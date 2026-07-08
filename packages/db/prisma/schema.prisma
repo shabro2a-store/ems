@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  EMPLOYEE
+  DRIVER
+  ADMIN
+}
+
+enum PunchKind {
+  IN
+  OUT
+}
+
+enum OverrideKind {
+  DAY_OFF
+  TIME_CHANGE
+}
+
+enum OverrideSource {
+  ADMIN_DIRECT
+  EMPLOYEE_REQUEST
+  EMPLOYEE_DAY_OFF
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AdjustmentKind {
+  BONUS
+  DEDUCTION
+}
+
+enum FlagKind {
+  WATCHED
+  MISSED_CHECKOUT
+  TRIP_OVER_THRESHOLD
+}
+
+model User {
+  id                   String   @id @default(cuid())
+  username             String   @unique
+  password_hash        String
+  role                 Role
+  branch_id            String?
+  branch               Branch?  @relation(fields: [branch_id], references: [id])
+  hourly_rate_cent     Int
+  is_active            Boolean  @default(true)
+  telegram_chat_id     String?
+  notify_daily_summary Boolean  @default(true)
+  notify_routine_pings Boolean  @default(true)
+  created_at           DateTime @default(now())
+  punches              Punch[]
+  rate_changes         RateChange[]
+  schedules            Schedule[]
+  schedule_overrides   ScheduleOverride[]
+  leave_requests       LeaveRequest[]
+  trips_as_driver     Trip[]    @relation("TripDriver")
+  advances             Advance[]
+  adjustments          Adjustment[]
+  flags                Flag[]
+  @@index([branch_id])
+}
+
+model Branch {
+  id                  String  @id @default(cuid())
+  name                String
+  lat                 Float
+  lng                 Float
+  gps_radius_m        Int     @default(50)
+  gps_accuracy_max_m  Int     @default(100)
+  absent_grace_min    Int     @default(15)
+  trip_threshold_min  Int     @default(30)
+  is_active           Boolean @default(true)
+  users               User[]
+  punches             Punch[]
+  trips               Trip[]
+  flags               Flag[]
+}
+
+model Punch {
+  id                 String   @id @default(cuid())
+  user_id            String
+  user               User     @relation(fields: [user_id], references: [id])
+  branch_id          String
+  branch             Branch   @relation(fields: [branch_id], references: [id])
+  kind               PunchKind
+  at                 DateTime
+  lat                Float
+  lng                Float
+  accuracy_m         Int
+  device_fp          String
+  ip                 String
+  corrected          Boolean  @default(false)
+  corrected_by       String?
+  correction_reason  String?
+  created_at         DateTime @default(now())
+  @@index([user_id, at])
+  @@index([branch_id, at])
+}
+
+model RateChange {
+  id              String   @id @default(cuid())
+  user_id         String
+  user            User     @relation(fields: [user_id], references: [id])
+  rate_cent       Int
+  effective_from  DateTime
+  created_at      DateTime @default(now())
+  @@index([user_id, effective_from])
+}
+
+model Schedule {
+  id        String @id @default(cuid())
+  user_id   String
+  user      User   @relation(fields: [user_id], references: [id])
+  weekday   Int
+  start_time String
+  end_time   String
+  @@unique([user_id, weekday])
+}
+
+model ScheduleOverride {
+  id          String   @id @default(cuid())
+  user_id     String
+  user        User     @relation(fields: [user_id], references: [id])
+  date        DateTime @db.Date
+  kind        OverrideKind
+  start_time  String?
+  end_time    String?
+  note        String?
+  source      OverrideSource
+  created_at  DateTime @default(now())
+  @@unique([user_id, date])
+}
+
+model LeaveRequest {
+  id           String   @id @default(cuid())
+  user_id      String
+  user         User     @relation(fields: [user_id], references: [id])
+  kind         OverrideKind
+  start_date   DateTime @db.Date
+  end_date     DateTime @db.Date
+  start_time   String?
+  end_time     String?
+  note         String?
+  status       RequestStatus
+  decided_by   String?
+  decided_at   DateTime?
+  created_at   DateTime @default(now())
+  @@index([user_id, status])
+}
+
+model Trip {
+  id                   String   @id @default(cuid())
+  driver_id            String
+  driver               User     @relation("TripDriver", fields: [driver_id], references: [id])
+  branch_id            String
+  branch               Branch   @relation(fields: [branch_id], references: [id])
+  out_at               DateTime
+  out_lat              Float
+  out_lng              Float
+  back_at              DateTime?
+  back_lat             Float?
+  back_lng             Float?
+  over_threshold       Boolean  @default(false)
+  threshold_alerted_at DateTime?
+  @@index([driver_id, out_at])
+}
+
+model Advance {
+  id          String   @id @default(cuid())
+  user_id     String
+  user        User     @relation(fields: [user_id], references: [id])
+  amount_cent Int
+  reason      String?
+  status      RequestStatus
+  decided_by  String?
+  decided_at  DateTime?
+  created_at  DateTime @default(now())
+  @@index([user_id, status])
+}
+
+model Adjustment {
+  id          String   @id @default(cuid())
+  user_id     String
+  user        User     @relation(fields: [user_id], references: [id])
+  period      DateTime @db.Date
+  kind        AdjustmentKind
+  amount_cent Int
+  reason      String
+  created_by  String
+  created_at  DateTime @default(now())
+  @@index([user_id, period])
+}
+
+model Flag {
+  id          String   @id @default(cuid())
+  kind        FlagKind
+  user_id     String?
+  user        User?    @relation(fields: [user_id], references: [id])
+  branch_id   String?
+  branch      Branch?  @relation(fields: [branch_id], references: [id])
+  context_json Json
+  created_at  DateTime @default(now())
+  notified_at DateTime?
+  @@index([created_at(sort: Desc)])
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actor_id     String
+  action       String
+  entity       String
+  entity_id    String
+  before_json  Json?
+  after_json   Json?
+  at           DateTime @default(now())
+  @@index([entity, entity_id])
+}
+
+model IdempotencyKey {
+  key          String
+  user_id      String
+  response_json Json
+  status_code  Int
+  created_at   DateTime @default(now())
+  expires_at   DateTime
+  @@id([key, user_id])
+  @@index([expires_at])
+}
+
+model RateLimitBucket {
+  identifier  String   @id
+  tokens      Int
+  refilled_at DateTime @default(now())
+}

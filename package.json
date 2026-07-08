@@ -1,0 +1,16 @@
+{
+  "name": "supermarket-ems",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  },
+  "packageManager": "pnpm@9.4.0"
+}

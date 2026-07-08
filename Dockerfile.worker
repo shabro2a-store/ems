@@ -1,0 +1,13 @@
+FROM node:20-alpine
+
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/*/package.json packages/*/
+COPY apps/*/package.json apps/*/
+RUN npm install -g pnpm@9.4.0 && pnpm install --frozen-lockfile
+COPY apps/worker/src ./apps/worker/src
+COPY packages ./packages
+RUN pnpm build --filter=worker
+
+EXPOSE 3001
+CMD ["node", "apps/worker/dist/index.js"]

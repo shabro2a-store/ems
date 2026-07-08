@@ -1,0 +1,18 @@
+{
+  "name": "worker",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "node src/index.ts",
+    "build": "tsc --outDir dist --rootDir src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/node-cron": "^3.0.11",
+    "typescript": "^5.5.3"
+  }
+}
