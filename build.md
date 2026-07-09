@@ -18,6 +18,19 @@
 
 **Authority hierarchy** (same as `spec.md`): the data model (`spec.md` §6), endpoints (`spec.md` §7), services (`spec.md` §8), and security (`spec.md` §9) win over anything else. If a phase description below conflicts with `spec.md`, `spec.md` wins.
 
+**Canonical decision rule when `build.md` and `spec.md` disagree:**
+
+| Conflict type | Winner | Example |
+|---|---|---|
+| Schema (tables, fields, types, constraints, comments documenting pending migrations) | `spec.md` §6 | Phase 0: schema file must include the CHECK constraint comments even though the raw-SQL migration is Phase 1's job |
+| Endpoints (path, method, body shape, response shape, auth) | `spec.md` §7 | Phase 5a must implement `/api/admin/users/:id/reset-password` returning `{ temp_password }` |
+| Service logic (payout, geofence, watched-flag resolution) | `spec.md` §8 | Phase 2.5 payout must read only from `RateChange`, not `User.hourly_rate_cent` |
+| Security (cookies, CSRF, rate limits, bcrypt rounds) | `spec.md` §9 | Login CSRF-exempt rule applies regardless of which phase builds login |
+| **Build order, phase scope, file naming, commit format** | `build.md` | Phase 5 split into 5a/5b; payout built in 2.5 not 3 |
+| **New tables/fields/endpoints not in either doc** | Neither — STOP | Update both docs first, then proceed |
+
+**When in doubt: `spec.md` for WHAT, `build.md` for WHEN and HOW.**
+
 ---
 
 ## Phase overview
