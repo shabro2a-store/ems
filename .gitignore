@@ -4,8 +4,8 @@
 *.d.ts.map
 
 # Per-phase verification harness files
-phase--reverify.md
-phase--verify.md
+phase-*-reverify.md
+phase-*-verify.md
 
 node_modules
 .next
