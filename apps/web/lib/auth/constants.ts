@@ -1,0 +1,14 @@
+export const SHOP_TZ = 'Asia/Beirut';
+export const BCRYPT_ROUNDS = 12;
+export const PUNCH_RATE_LIMIT_PER_MIN = 5;
+export const LOGIN_RATE_LIMIT_PER_MIN = 5;
+export const IDEMPOTENCY_TTL_HOURS = 24;
+export const MISSED_CHECKOUT_BUFFER_MIN = 5;
+export const ADMIN_NOW_POLL_INTERVAL_MS = 10_000;
+export const DRIVER_TRIP_POLL_INTERVAL_MS = 30_000;
+export const SESSION_TTL_EMPLOYEE_MIN = 120;
+export const SESSION_TTL_DRIVER_AFTER_SCHEDULE_MIN = 30;
+export const CSRF_COOKIE_NAME = 'csrf';
+export const ACCESS_COOKIE_NAME = 'ems_access';
+export const REFRESH_COOKIE_NAME = 'ems_refresh';
+export const SEED_DEFAULT_PASSWORD = 'change-me';

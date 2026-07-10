@@ -427,22 +427,50 @@ fix(phase-N): <one-line summary>   # for bug fixes
 
 | Item | Status |
 |---|---|
-| Monorepo scaffold (pnpm + workspaces) | ⏳ Pending Builder report |
-| `packages/db/prisma/schema.prisma` copied verbatim from `spec.md` §6 | ⏳ |
-| `packages/notify/src/{types,console}.ts` stubbed | ⏳ |
-| `packages/time/src/index.ts` (date-fns-tz v2 API names) | ⏳ |
-| `docker-compose.yml` (web, worker, db) | ⏳ |
-| `Dockerfile.web`, `Dockerfile.worker` | ⏳ |
-| `apps/web/app/page.tsx` placeholder | ⏳ |
-| `apps/worker/src/index.ts` logs "cron runner started" | ⏳ |
-| `.env.example` with all env var names from §9 | ⏳ |
-| `.gitignore` | ⏳ |
-| `AGENTS.md` conventions file | ⏳ |
-| `pnpm install` clean | ⏳ |
-| Postgres healthy in Docker | ⏳ |
-| `prisma generate` works | ⏳ |
-| `pnpm --filter web dev` serves http://localhost:3000 | ⏳ |
-| `pnpm --filter worker dev` starts | ⏳ |
-| Initial commit on `main` | ⏳ |
+| Monorepo scaffold (pnpm + workspaces) | ✅ |
+| `packages/db/prisma/schema.prisma` copied verbatim from `spec.md` §6 | ✅ |
+| `packages/notify/src/{types,console}.ts` stubbed | ✅ |
+| `packages/time/src/index.ts` (date-fns-tz v2 API names) | ✅ |
+| `docker-compose.yml` (web, worker, db) | ✅ |
+| `Dockerfile.web`, `Dockerfile.worker` | ✅ |
+| `apps/web/app/page.tsx` placeholder | ✅ |
+| `apps/worker/src/index.ts` logs "cron runner started" | ✅ |
+| `.env.example` with all env var names from §9 | ✅ |
+| `.gitignore` | ✅ |
+| `AGENTS.md` conventions file | ✅ |
+| `pnpm install` clean | ✅ |
+| Postgres healthy in Docker | ✅ |
+| `prisma generate` works | ✅ |
+| `pnpm --filter web dev` serves http://localhost:3000 | ✅ |
+| `pnpm --filter worker dev` starts | ✅ |
+| Initial commit on `main` | ✅ |
+| CHECK constraint comments restored (fix(phase-0)) | ✅ commit `63bdacf` |
+| .gitignore + docs committed (phase-0 hygiene) | ✅ commit `6f91abf` |
 
-**When Builder reports back, mark each ✅ or ❌ here. ❌ blocks Phase 1.**
+**Phase 0 status: COMPLETE.** Git history:
+```
+6f91abf phase-0: add .gitignore and commit documentation
+63bdacf fix(phase-0): restore spec §6 inline comments for raw-SQL migrations
+d5e4c65 phase-0: monorepo bootstrap
+```
+
+---
+
+## 13. Phase 1 — Auth + DB foundation + seed
+
+| Deliverable | Status |
+|---|---|
+| `apps/web/app/api/auth/login/route.ts` — POST, sets JWT cookies | ⏳ Phase 1 |
+| `apps/web/app/api/auth/logout/route.ts` | ⏳ Phase 1 |
+| `apps/web/app/api/auth/refresh/route.ts` | ⏳ Phase 1 |
+| `apps/web/middleware.ts` — JWT decode, role guard | ⏳ Phase 1 |
+| `apps/web/lib/auth/{session,jwt,csrf,password}.ts` | ⏳ Phase 1 |
+| `apps/web/lib/db/prisma.ts` — singleton client | ⏳ Phase 1 |
+| `apps/web/app/(public)/login/page.tsx` | ⏳ Phase 1 |
+| `apps/web/app/(app)/admin/page.tsx` placeholder | ⏳ Phase 1 |
+| `apps/web/app/(app)/employee/page.tsx` placeholder | ⏳ Phase 1 |
+| `packages/db/prisma/seed.ts` — admin + 3 branches + 3 employees + RateChange rows | ⏳ Phase 1 |
+| Raw-SQL migration: CHECK constraints + partial unique + REVOKE | ⏳ Phase 1 |
+| `apps/web/lib/services/audit.ts` (writeAuditLog helper) | ⏳ Phase 1 |
+| Unit tests: session, password, csrf, jwt | ⏳ Phase 1 |
+| **End-of-Phase-1 invariant:** 3 RateChange rows after seed (1 per non-admin user) | ⏳ |
