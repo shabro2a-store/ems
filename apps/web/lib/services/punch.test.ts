@@ -1,0 +1,370 @@
+import { describe, it, expect, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => {
+  type Store = {
+    users: Map<string, { id: string; username: string; is_active: boolean; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN'; branch_id: string; branch: unknown; hourly_rate_cent: number; password_hash: string; telegram_chat_id: string | null; notify_daily_summary: boolean; notify_routine_pings: boolean; created_at: Date }>;
+    branches: Map<string, { id: string; name: string; lat: number; lng: number; gps_radius_m: number; gps_accuracy_max_m: number; absent_grace_min: number; trip_threshold_min: number; is_active: boolean }>;
+    punches: { id: string; user_id: string; branch_id: string; kind: 'IN' | 'OUT'; at: Date; lat: number; lng: number; accuracy_m: number; device_fp: string; ip: string; corrected: boolean; corrected_by: string | null; correction_reason: string | null; created_at: Date }[];
+    overrides: { id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }[];
+    trips: { id: string; driver_id: string; back_at: Date | null }[];
+    audits: { id: string }[];
+    punchSeq: number;
+    auditSeq: number;
+  };
+  const store: Store = {
+    users: new Map(),
+    branches: new Map(),
+    punches: [],
+    overrides: [],
+    trips: [],
+    audits: [],
+    punchSeq: 0,
+    auditSeq: 0,
+  };
+  return {
+    store,
+    prisma: {} as Record<string, any>,
+  };
+});
+
+vi.mock('@/lib/db/prisma', () => ({ prisma: mocks.prisma as unknown as Record<string, unknown> }));
+
+const store = mocks.store;
+
+function resetStore() {
+  store.users.clear();
+  store.branches.clear();
+  store.punches.length = 0;
+  store.overrides.length = 0;
+  store.trips.length = 0;
+  store.audits.length = 0;
+  store.punchSeq = 0;
+  store.auditSeq = 0;
+}
+
+function wireMocks() {
+  mocks.prisma.user.findUnique = async ({ where, include }: { where: { id: string }; include?: { branch: true } }) => {
+    return store.users.get(where.id) ?? null;
+  };
+  mocks.prisma.scheduleOverride.findUnique = async ({
+    where,
+  }: {
+    where: { user_id_date: { user_id: string; date: Date } };
+  }) => {
+    return (
+      store.overrides.find(
+        (o) =>
+          o.user_id === where.user_id_date.user_id &&
+          o.date.getTime() === where.user_id_date.date.getTime(),
+      ) ?? null
+    );
+  };
+  mocks.prisma.trip.findFirst = async ({
+    where,
+  }: {
+    where: { driver_id: string; back_at: null };
+  }) => {
+    return store.trips.find((t) => t.driver_id === where.driver_id && t.back_at === null) ?? null;
+  };
+  mocks.prisma.punch.findFirst = async ({
+    where,
+    orderBy,
+  }: {
+    where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt: Date } };
+    orderBy?: { at: 'asc' | 'desc' };
+  }) => {
+    const filtered = store.punches
+      .filter((p) => p.user_id === where.user_id && p.kind === where.kind)
+      .filter((p) => (where.at?.gt ? p.at > where.at.gt : true))
+      .sort((a, b) =>
+        orderBy?.at === 'desc' ? b.at.getTime() - a.at.getTime() : a.at.getTime() - b.at.getTime(),
+      );
+    return filtered[0] ?? null;
+  };
+  mocks.prisma.punch.create = async ({ data }: { data: { user_id: string; branch_id: string; kind: 'IN' | 'OUT'; at: Date; lat: number; lng: number; accuracy_m: number; device_fp: string; ip: string } }) => {
+    store.punchSeq += 1;
+    const p = {
+      id: `p${store.punchSeq}`,
+      ...data,
+      corrected: false,
+      corrected_by: null,
+      correction_reason: null,
+      created_at: new Date(),
+    };
+    store.punches.push(p);
+    return p;
+  };
+  mocks.prisma.auditLog.create = async () => {
+    store.auditSeq += 1;
+    const a = { id: `a${store.auditSeq}` };
+    store.audits.push(a);
+    return a;
+  };
+}
+
+function makeBranch(partial: Record<string, unknown> = {}) {
+  return {
+    id: 'b1',
+    name: 'Hamra',
+    lat: 33.8962,
+    lng: 35.4827,
+    gps_radius_m: 50,
+    gps_accuracy_max_m: 100,
+    absent_grace_min: 15,
+    trip_threshold_min: 30,
+    is_active: true,
+    ...partial,
+  };
+}
+
+function makeUser(id: string, branch: ReturnType<typeof makeBranch>, role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' = 'EMPLOYEE') {
+  return {
+    id,
+    username: id,
+    is_active: true,
+    role,
+    branch_id: branch.id,
+    branch,
+    hourly_rate_cent: 200,
+    password_hash: 'x',
+    telegram_chat_id: null as string | null,
+    notify_daily_summary: true,
+    notify_routine_pings: true,
+    created_at: new Date(),
+  };
+}
+
+import { punchEmployee } from './punch';
+
+describe('punchEmployee', () => {
+  it('rejects with DAY_OFF_PUNCH_BLOCKED when ScheduleOverride{DAY_OFF} exists for today', async () => {
+    resetStore();
+    wireMocks();
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    const today = new Date('2026-07-10T08:00:00Z');
+    store.overrides.push({
+      id: 'o1',
+      user_id: user.id,
+      date: new Date('2026-07-10T00:00:00Z'),
+      kind: 'DAY_OFF',
+    });
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      now: today,
+    });
+    expect('code' in r).toBe(true);
+    if ('code' in r) expect(r.code).toBe('DAY_OFF_PUNCH_BLOCKED');
+    expect(store.punches.length).toBe(0);
+  });
+
+  it('rejects driver with open trip before reaching geofence', async () => {
+    resetStore();
+    wireMocks();
+    const branch = makeBranch();
+    const user = makeUser('u1', branch, 'DRIVER');
+    store.users.set(user.id, user);
+    store.trips.push({ id: 't1', driver_id: user.id, back_at: null });
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+    });
+    expect('code' in r).toBe(true);
+    if ('code' in r) expect(r.code).toBe('OPEN_TRIP_EXISTS');
+    expect(store.punches.length).toBe(0);
+  });
+
+  it('rejects with LOW_GPS_ACCURACY when accuracy > max', async () => {
+    resetStore();
+    wireMocks();
+    const branch = makeBranch({ gps_accuracy_max_m: 100 });
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 200,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+    });
+    expect('code' in r).toBe(true);
+    if ('code' in r) expect(r.code).toBe('LOW_GPS_ACCURACY');
+    expect(store.punches.length).toBe(0);
+  });
+
+  it('rejects with OUT_OF_GEOFENCE when outside radius', async () => {
+    resetStore();
+    wireMocks();
+    const branch = makeBranch({ gps_radius_m: 50 });
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.91,
+      lng: 35.5,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+    });
+    expect('code' in r).toBe(true);
+    if ('code' in r) expect(r.code).toBe('OUT_OF_GEOFENCE');
+    expect(store.punches.length).toBe(0);
+  });
+
+  it('rejects ALREADY_PUNCHED_IN when IN and session already open', async () => {
+    resetStore();
+    wireMocks();
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    const earlier = new Date(Date.now() - 60 * 60_000);
+    store.punches.push({
+      id: 'p1',
+      user_id: user.id,
+      branch_id: branch.id,
+      kind: 'IN',
+      at: earlier,
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy_m: 10,
+      device_fp: 'fp',
+      ip: '1.2.3.4',
+      corrected: false,
+      corrected_by: null,
+      correction_reason: null,
+      created_at: earlier,
+    });
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+    });
+    expect('code' in r).toBe(true);
+    if ('code' in r) expect(r.code).toBe('ALREADY_PUNCHED_IN');
+  });
+
+  it('happy path: IN inserts all 5 evidence fields + audit log', async () => {
+    resetStore();
+    wireMocks();
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+
+    const result = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.89621,
+      lng: 35.48271,
+      accuracy: 12,
+      deviceFp: 'fp-123',
+      ip: '203.0.113.7',
+    });
+
+    expect('punch' in result).toBe(true);
+    if ('punch' in result) {
+      expect(result.punch.kind).toBe('IN');
+      expect(result.punch.lat).toBe(33.89621);
+      expect(result.punch.lng).toBe(35.48271);
+      expect(result.punch.accuracy_m).toBe(12);
+      expect(result.punch.device_fp).toBe('fp-123');
+      expect(result.punch.ip).toBe('203.0.113.7');
+      expect(result.minutes_since_in).toBe(0);
+    }
+    expect(store.audits.length).toBe(1);
+    expect(store.punches.length).toBe(1);
+  });
+
+  it('happy path: OUT after IN yields minutes_since_in > 0', async () => {
+    resetStore();
+    wireMocks();
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    const earlier = new Date(Date.now() - 90 * 60_000);
+    store.punches.push({
+      id: 'p1',
+      user_id: user.id,
+      branch_id: branch.id,
+      kind: 'IN',
+      at: earlier,
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy_m: 10,
+      device_fp: 'fp',
+      ip: '1.2.3.4',
+      corrected: false,
+      corrected_by: null,
+      correction_reason: null,
+      created_at: earlier,
+    });
+
+    const result = await punchEmployee({
+      userId: 'u1',
+      kind: 'OUT',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+    });
+
+    expect('punch' in result).toBe(true);
+    if ('punch' in result) {
+      expect(result.punch.kind).toBe('OUT');
+      expect(result.minutes_since_in).toBeGreaterThanOrEqual(89);
+      expect(result.minutes_since_in).toBeLessThanOrEqual(91);
+    }
+  });
+
+  it('guard order: day-off blocks before open-trip and before geofence', async () => {
+    resetStore();
+    wireMocks();
+    const branch = makeBranch();
+    const user = makeUser('u1', branch, 'DRIVER');
+    store.users.set(user.id, user);
+    store.trips.push({ id: 't1', driver_id: user.id, back_at: null });
+    store.overrides.push({
+      id: 'o1',
+      user_id: user.id,
+      date: new Date('2026-07-10T00:00:00Z'),
+      kind: 'DAY_OFF',
+    });
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.91,
+      lng: 35.5,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      now: new Date('2026-07-10T08:00:00Z'),
+    });
+    expect('code' in r).toBe(true);
+    if ('code' in r) expect(r.code).toBe('DAY_OFF_PUNCH_BLOCKED');
+  });
+});
