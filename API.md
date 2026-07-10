@@ -460,17 +460,66 @@ d5e4c65 phase-0: monorepo bootstrap
 
 | Deliverable | Status |
 |---|---|
-| `apps/web/app/api/auth/login/route.ts` — POST, sets JWT cookies | ⏳ Phase 1 |
-| `apps/web/app/api/auth/logout/route.ts` | ⏳ Phase 1 |
-| `apps/web/app/api/auth/refresh/route.ts` | ⏳ Phase 1 |
-| `apps/web/middleware.ts` — JWT decode, role guard | ⏳ Phase 1 |
-| `apps/web/lib/auth/{session,jwt,csrf,password}.ts` | ⏳ Phase 1 |
-| `apps/web/lib/db/prisma.ts` — singleton client | ⏳ Phase 1 |
-| `apps/web/app/(public)/login/page.tsx` | ⏳ Phase 1 |
-| `apps/web/app/(app)/admin/page.tsx` placeholder | ⏳ Phase 1 |
-| `apps/web/app/(app)/employee/page.tsx` placeholder | ⏳ Phase 1 |
-| `packages/db/prisma/seed.ts` — admin + 3 branches + 3 employees + RateChange rows | ⏳ Phase 1 |
-| Raw-SQL migration: CHECK constraints + partial unique + REVOKE | ⏳ Phase 1 |
-| `apps/web/lib/services/audit.ts` (writeAuditLog helper) | ⏳ Phase 1 |
-| Unit tests: session, password, csrf, jwt | ⏳ Phase 1 |
-| **End-of-Phase-1 invariant:** 3 RateChange rows after seed (1 per non-admin user) | ⏳ |
+| `apps/web/app/api/auth/login/route.ts` — POST, sets JWT cookies | ✅ commit `f3fbef4` |
+| `apps/web/app/api/auth/logout/route.ts` | ✅ |
+| `apps/web/app/api/auth/refresh/route.ts` | ✅ |
+| `apps/web/middleware.ts` — JWT decode, role guard | ✅ |
+| `apps/web/lib/auth/{session,jwt,csrf,password,cookies,constants}.ts` | ✅ |
+| `apps/web/lib/db/prisma.ts` — singleton client | ✅ |
+| `apps/web/app/(public)/login/page.tsx` | ✅ |
+| `apps/web/app/(app)/{admin,employee,driver}/page.tsx` placeholders | ✅ |
+| `packages/db/prisma/seed.ts` — admin + 3 branches + 3 employees + 3 RateChange rows | ✅ |
+| Raw-SQL migration: 5 CHECK constraints + partial unique + partial index + REVOKE | ✅ `migrations/20260709232637_add_constraints/migration.sql` |
+| `apps/web/lib/services/audit.ts` (writeAuditLog helper) | ✅ |
+| Unit tests: session, password, csrf, jwt | ✅ 28 tests pass |
+| **End-of-Phase-1 invariant:** exactly 3 RateChange rows after seed | ✅ verified by Builder |
+| **Dependency:** bcryptjs (justified — pure JS, Windows native-build workaround) | ✅ |
+| **Deviation:** `Secure` cookie only set in production (NODE_ENV guard) | ⚠️ ACCEPTED — documented for RUNBOOK |
+| **Deviation:** REVOKE wrapped in `IF EXISTS` for shadow-DB idempotency | ⚠️ ACCEPTED — pure additive safety |
+| **Scope creep:** `packages/time` placeholder tests + `vitest run` script change | ⚠️ REVERT — Phase 2.5's job |
+| **Scope creep:** `GET /api/me/ping` + `GET /api/admin/ping` placeholders | ⚠️ REVERT — not in Phase 1 scope |
+| **Hygiene:** 4 `_ck*.cjs` files left in `packages/db/` | ❌ CLEANUP REQUIRED |
+| **Branch:** `master` instead of `main` | ⚠️ rename when pushing to GitHub |
+
+**Phase 1 status: CODE COMPLETE, hygiene + scope cleanup required.** Git history:
+```
+f3fbef4 phase-1: auth + seed + raw-sql migration
+6f91abf phase-0: add .gitignore and commit documentation
+27f0c1b phase-0: add .gitignore and commit documentation
+63bdacf fix(phase-0): restore spec §6 inline comments for raw-SQL migrations
+d5e4c65 phase-0: monorepo bootstrap
+```
+
+---
+
+## 14. Phase 1 cleanup + scope-revert prompt (queued)
+
+Before Phase 2 begins, two cleanups:
+
+1. Delete `packages/db/_ck*.cjs` (4 files). Update `.gitignore` if not already covered (add `packages/db/_*.cjs`).
+2. Decide on the two scope-creep items:
+   - **Option A — keep:** The time tests + ping endpoints are useful and harmless. Document them in `API.md` §13.
+   - **Option B — revert:** Remove the time tests (Phase 2.5 will add real ones) and remove the ping endpoints (Phase 2 will add real `/api/me/punch` and Phase 5a will add real admin endpoints).
+
+**My recommendation: Option A for the ping endpoints** (they're 4 lines each and give you a working "is auth wired?" health check), **Option B for the time tests** (they're premature — Phase 2.5 will write the real TDD suite for `findScheduleInPast24h` and you don't want conflicting tests).
+
+Owner (you) decides. Tell me A or B and I'll queue the cleanup commit.
+
+---
+
+## 14b. Phase 1 — Owner decisions (locked)
+
+**Decision (locked 2026-07-10):**
+- **KEEP ping endpoints** `GET /api/me/ping` and `GET /api/admin/ping`. They are useful for post-launch health-checks and the future AI monitoring agent (decision rationale: monitoring agent needs `curl`able endpoints that prove auth wiring is intact without depending on the punch/business-logic endpoints being healthy). Documented in §15.
+- **KEEP placeholder time tests** in `packages/time`. Phase 2.5 will replace them with the full TDD suite (decision rationale: tests will be overwritten, not merged — they serve as a placeholder so the test runner exits clean during Phase 1).
+
+**Cleanup commit still needed:** delete `_ck*.cjs` files + extend `.gitignore` to prevent recurrence.
+
+### §15. Health-check endpoints (kept from Phase 1, used post-launch)
+
+| Method | Path | Auth | Returns | Use case |
+|---|---|---|---|---|
+| GET | `/api/me/ping` | employee/driver/admin | `{ userId, role, branchId }` | Verify JWT + middleware + role guard. Used by monitoring agent + manual smoke tests. |
+| GET | `/api/admin/ping` | admin | `{ userId, role }` | Verify admin-only auth. Used by monitoring agent before admin-specific operations. |
+
+These are **not** in `spec.md` §7.1–§7.5. They're a Phase 1 addition. Future phases may replace them with richer `/api/health/me` etc., but for v1 they're stable and intentional.
