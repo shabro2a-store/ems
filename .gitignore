@@ -13,3 +13,10 @@ dist
 .env
 *.log
 .DS_Store
+
+# Throwaway verification scripts
+packages/db/_*.cjs
+_ck*.cjs
+
+# Per-phase cleanup prompt files
+phase-*-cleanup-commit-*.md
