@@ -1,35 +1,88 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mocks = vi.hoisted(() => {
-  type Store = {
-    users: Map<string, { id: string; username: string; is_active: boolean; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN'; branch_id: string; branch: unknown; hourly_rate_cent: number; password_hash: string; telegram_chat_id: string | null; notify_daily_summary: boolean; notify_routine_pings: boolean; created_at: Date }>;
-    branches: Map<string, { id: string; name: string; lat: number; lng: number; gps_radius_m: number; gps_accuracy_max_m: number; absent_grace_min: number; trip_threshold_min: number; is_active: boolean }>;
-    punches: { id: string; user_id: string; branch_id: string; kind: 'IN' | 'OUT'; at: Date; lat: number; lng: number; accuracy_m: number; device_fp: string; ip: string; corrected: boolean; corrected_by: string | null; correction_reason: string | null; created_at: Date }[];
-    overrides: { id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }[];
-    trips: { id: string; driver_id: string; back_at: Date | null }[];
-    audits: { id: string }[];
-    punchSeq: number;
-    auditSeq: number;
-  };
-  const store: Store = {
-    users: new Map(),
-    branches: new Map(),
-    punches: [],
-    overrides: [],
-    trips: [],
-    audits: [],
-    punchSeq: 0,
-    auditSeq: 0,
-  };
-  return {
-    store,
-    prisma: {} as Record<string, any>,
-  };
-});
+type Store = {
+  users: Map<string, {
+    id: string;
+    username: string;
+    is_active: boolean;
+    role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
+    branch_id: string;
+    branch: {
+      id: string;
+      name: string;
+      lat: number;
+      lng: number;
+      gps_radius_m: number;
+      gps_accuracy_max_m: number;
+      absent_grace_min: number;
+      trip_threshold_min: number;
+      is_active: boolean;
+    };
+    hourly_rate_cent: number;
+    password_hash: string;
+    telegram_chat_id: string | null;
+    notify_daily_summary: boolean;
+    notify_routine_pings: boolean;
+    created_at: Date;
+  }>;
+  branches: Map<string, {
+    id: string;
+    name: string;
+    lat: number;
+    lng: number;
+    gps_radius_m: number;
+    gps_accuracy_max_m: number;
+    absent_grace_min: number;
+    trip_threshold_min: number;
+    is_active: boolean;
+  }>;
+  punches: Array<{
+    id: string;
+    user_id: string;
+    branch_id: string;
+    kind: 'IN' | 'OUT';
+    at: Date;
+    lat: number;
+    lng: number;
+    accuracy_m: number;
+    device_fp: string;
+    ip: string;
+    corrected: boolean;
+    corrected_by: string | null;
+    correction_reason: string | null;
+    created_at: Date;
+  }>;
+  overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }>;
+  trips: Array<{ id: string; driver_id: string; back_at: Date | null }>;
+  audits: Array<{ id: string }>;
+  punchSeq: number;
+  auditSeq: number;
+};
 
-vi.mock('@/lib/db/prisma', () => ({ prisma: mocks.prisma as unknown as Record<string, unknown> }));
+const store: Store = {
+  users: new Map(),
+  branches: new Map(),
+  punches: [],
+  overrides: [],
+  trips: [],
+  audits: [],
+  punchSeq: 0,
+  auditSeq: 0,
+};
 
-const store = mocks.store;
+const mocks = vi.hoisted(() => ({
+  user: { findUnique: vi.fn() },
+  scheduleOverride: { findUnique: vi.fn() },
+  trip: { findFirst: vi.fn() },
+  punch: { findFirst: vi.fn(), create: vi.fn() },
+  auditLog: { create: vi.fn() },
+}));
+
+vi.mock('@/lib/db/prisma', () => ({
+  prisma: mocks as unknown as Record<string, unknown>,
+}));
+
+import { punchEmployee } from './punch';
 
 function resetStore() {
   store.users.clear();
@@ -40,66 +93,6 @@ function resetStore() {
   store.audits.length = 0;
   store.punchSeq = 0;
   store.auditSeq = 0;
-}
-
-function wireMocks() {
-  mocks.prisma.user.findUnique = async ({ where, include }: { where: { id: string }; include?: { branch: true } }) => {
-    return store.users.get(where.id) ?? null;
-  };
-  mocks.prisma.scheduleOverride.findUnique = async ({
-    where,
-  }: {
-    where: { user_id_date: { user_id: string; date: Date } };
-  }) => {
-    return (
-      store.overrides.find(
-        (o) =>
-          o.user_id === where.user_id_date.user_id &&
-          o.date.getTime() === where.user_id_date.date.getTime(),
-      ) ?? null
-    );
-  };
-  mocks.prisma.trip.findFirst = async ({
-    where,
-  }: {
-    where: { driver_id: string; back_at: null };
-  }) => {
-    return store.trips.find((t) => t.driver_id === where.driver_id && t.back_at === null) ?? null;
-  };
-  mocks.prisma.punch.findFirst = async ({
-    where,
-    orderBy,
-  }: {
-    where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt: Date } };
-    orderBy?: { at: 'asc' | 'desc' };
-  }) => {
-    const filtered = store.punches
-      .filter((p) => p.user_id === where.user_id && p.kind === where.kind)
-      .filter((p) => (where.at?.gt ? p.at > where.at.gt : true))
-      .sort((a, b) =>
-        orderBy?.at === 'desc' ? b.at.getTime() - a.at.getTime() : a.at.getTime() - b.at.getTime(),
-      );
-    return filtered[0] ?? null;
-  };
-  mocks.prisma.punch.create = async ({ data }: { data: { user_id: string; branch_id: string; kind: 'IN' | 'OUT'; at: Date; lat: number; lng: number; accuracy_m: number; device_fp: string; ip: string } }) => {
-    store.punchSeq += 1;
-    const p = {
-      id: `p${store.punchSeq}`,
-      ...data,
-      corrected: false,
-      corrected_by: null,
-      correction_reason: null,
-      created_at: new Date(),
-    };
-    store.punches.push(p);
-    return p;
-  };
-  mocks.prisma.auditLog.create = async () => {
-    store.auditSeq += 1;
-    const a = { id: `a${store.auditSeq}` };
-    store.audits.push(a);
-    return a;
-  };
 }
 
 function makeBranch(partial: Record<string, unknown> = {}) {
@@ -134,16 +127,69 @@ function makeUser(id: string, branch: ReturnType<typeof makeBranch>, role: 'EMPL
   };
 }
 
-import { punchEmployee } from './punch';
+beforeEach(() => {
+  vi.clearAllMocks();
+  resetStore();
+
+  mocks.user.findUnique.mockImplementation(async ({ where, include }: { where: { id: string }; include?: { branch: true } }) => {
+    const u = store.users.get(where.id);
+    if (!u) return null;
+    if (include?.branch) return u;
+    const { branch: _b, ...rest } = u;
+    return rest;
+  });
+
+  mocks.scheduleOverride.findUnique.mockImplementation(async ({ where }: { where: { user_id_date: { user_id: string; date: Date } } }) => {
+    return (
+      store.overrides.find(
+        (o) =>
+          o.user_id === where.user_id_date.user_id &&
+          o.date.getTime() === where.user_id_date.date.getTime(),
+      ) ?? null
+    );
+  });
+
+  mocks.trip.findFirst.mockImplementation(async ({ where }: { where: { driver_id: string; back_at: null } }) => {
+    return store.trips.find((t) => t.driver_id === where.driver_id && t.back_at === null) ?? null;
+  });
+
+  mocks.punch.findFirst.mockImplementation(async ({ where, orderBy }: { where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt: Date } }; orderBy?: { at: 'asc' | 'desc' } }) => {
+    const filtered = store.punches
+      .filter((p) => p.user_id === where.user_id && p.kind === where.kind)
+      .filter((p) => (where.at?.gt ? p.at > where.at.gt : true))
+      .sort((a, b) =>
+        orderBy?.at === 'desc' ? b.at.getTime() - a.at.getTime() : a.at.getTime() - b.at.getTime(),
+      );
+    return filtered[0] ?? null;
+  });
+
+  mocks.punch.create.mockImplementation(async ({ data }: { data: { user_id: string; branch_id: string; kind: 'IN' | 'OUT'; at: Date; lat: number; lng: number; accuracy_m: number; device_fp: string; ip: string } }) => {
+    store.punchSeq += 1;
+    const p = {
+      id: `p${store.punchSeq}`,
+      ...data,
+      corrected: false,
+      corrected_by: null,
+      correction_reason: null,
+      created_at: new Date(),
+    };
+    store.punches.push(p);
+    return p;
+  });
+
+  mocks.auditLog.create.mockImplementation(async () => {
+    store.auditSeq += 1;
+    const a = { id: `a${store.auditSeq}` };
+    store.audits.push(a);
+    return a;
+  });
+});
 
 describe('punchEmployee', () => {
   it('rejects with DAY_OFF_PUNCH_BLOCKED when ScheduleOverride{DAY_OFF} exists for today', async () => {
-    resetStore();
-    wireMocks();
     const branch = makeBranch();
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
-    const today = new Date('2026-07-10T08:00:00Z');
     store.overrides.push({
       id: 'o1',
       user_id: user.id,
@@ -159,7 +205,7 @@ describe('punchEmployee', () => {
       accuracy: 10,
       deviceFp: 'fp',
       ip: '1.2.3.4',
-      now: today,
+      now: new Date('2026-07-10T08:00:00Z'),
     });
     expect('code' in r).toBe(true);
     if ('code' in r) expect(r.code).toBe('DAY_OFF_PUNCH_BLOCKED');
@@ -167,8 +213,6 @@ describe('punchEmployee', () => {
   });
 
   it('rejects driver with open trip before reaching geofence', async () => {
-    resetStore();
-    wireMocks();
     const branch = makeBranch();
     const user = makeUser('u1', branch, 'DRIVER');
     store.users.set(user.id, user);
@@ -189,8 +233,6 @@ describe('punchEmployee', () => {
   });
 
   it('rejects with LOW_GPS_ACCURACY when accuracy > max', async () => {
-    resetStore();
-    wireMocks();
     const branch = makeBranch({ gps_accuracy_max_m: 100 });
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
@@ -210,8 +252,6 @@ describe('punchEmployee', () => {
   });
 
   it('rejects with OUT_OF_GEOFENCE when outside radius', async () => {
-    resetStore();
-    wireMocks();
     const branch = makeBranch({ gps_radius_m: 50 });
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
@@ -231,8 +271,6 @@ describe('punchEmployee', () => {
   });
 
   it('rejects ALREADY_PUNCHED_IN when IN and session already open', async () => {
-    resetStore();
-    wireMocks();
     const branch = makeBranch();
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
@@ -268,8 +306,6 @@ describe('punchEmployee', () => {
   });
 
   it('happy path: IN inserts all 5 evidence fields + audit log', async () => {
-    resetStore();
-    wireMocks();
     const branch = makeBranch();
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
@@ -299,8 +335,6 @@ describe('punchEmployee', () => {
   });
 
   it('happy path: OUT after IN yields minutes_since_in > 0', async () => {
-    resetStore();
-    wireMocks();
     const branch = makeBranch();
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
@@ -341,8 +375,6 @@ describe('punchEmployee', () => {
   });
 
   it('guard order: day-off blocks before open-trip and before geofence', async () => {
-    resetStore();
-    wireMocks();
     const branch = makeBranch();
     const user = makeUser('u1', branch, 'DRIVER');
     store.users.set(user.id, user);

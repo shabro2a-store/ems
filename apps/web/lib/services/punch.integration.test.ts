@@ -1,0 +1,314 @@
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { todayInBeirut } from 'time';
+import { Role } from '@prisma/client';
+import {
+  getTestPrisma,
+  cleanDb,
+  seedTestBranch,
+  seedTestUser,
+  seedDayOffOverride,
+} from '../test-helpers/db';
+import { loginAs } from '../test-helpers/auth';
+
+const BASE_URL = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:3000';
+
+describe('punch integration (HTTP)', () => {
+  beforeEach(async () => {
+    await cleanDb();
+  });
+
+  afterAll(async () => {
+    await getTestPrisma().$disconnect();
+  });
+
+  it('Check 5: writes all 5 evidence fields per punch', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-c5', branch_id: branch.id });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `c5-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c5' }),
+    });
+    expect(res.status).toBe(200);
+
+    const punch = await getTestPrisma().punch.findFirst({
+      where: { user_id: user.id },
+      orderBy: { created_at: 'desc' },
+    });
+    expect(punch).not.toBeNull();
+    expect(punch?.lat).toBe(33.89621);
+    expect(punch?.lng).toBe(35.48271);
+    expect(punch?.accuracy_m).toBe(12);
+    expect(punch?.device_fp).toBe('test-fp-c5');
+    expect(punch?.ip).toBeTruthy();
+    expect(punch?.ip).not.toBe('');
+  });
+
+  it('Check 6: audit log entry per punch', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-c6', branch_id: branch.id });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `c6-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c6' }),
+    });
+    expect(res.status).toBe(200);
+
+    const audit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'Punch', actor_id: user.id },
+      orderBy: { at: 'desc' },
+    });
+    expect(audit).not.toBeNull();
+    expect(audit?.action).toBe('punch.create');
+    expect(audit?.entity).toBe('Punch');
+    expect(audit?.entity_id).toBeTruthy();
+
+    const punch = await getTestPrisma().punch.findFirst({ where: { user_id: user.id } });
+    expect(audit?.entity_id).toBe(punch?.id);
+  });
+
+  it('Check 7: idempotency-Key returns cached response on replay', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-c7', branch_id: branch.id });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const key = `c7-${Date.now()}-${Math.random()}`;
+    const body = JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c7' });
+
+    const r1 = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': key,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body,
+    });
+    expect(r1.status).toBe(200);
+    const j1 = await r1.json();
+
+    const r2 = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': key,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body,
+    });
+    expect(r2.status).toBe(200);
+    const j2 = await r2.json();
+
+    expect(j2).toEqual(j1);
+
+    const stored = await getTestPrisma().idempotencyKey.findUnique({
+      where: { key_user_id: { key, user_id: user.id } },
+    });
+    expect(stored).not.toBeNull();
+    expect(stored?.status_code).toBe(200);
+
+    const punchCount = await getTestPrisma().punch.count({ where: { user_id: user.id } });
+    expect(punchCount).toBe(1);
+  });
+
+  it('Check 8: 6th rapid punch attempt returns 429', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-c8', branch_id: branch.id });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const key = `c8-${Date.now()}-${i}-${Math.random()}`;
+      const body = JSON.stringify({ kind: i === 0 ? 'IN' : 'OUT', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c8' });
+      const r = await fetch(`${BASE_URL}/api/me/punch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': key,
+          'X-CSRF-Token': csrf,
+          Cookie: cookies,
+        },
+        body,
+      });
+      statuses.push(r.status);
+    }
+    expect(statuses).toContain(429);
+  });
+
+  it('Check 9: geofence rejection (outside radius)', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 50 });
+    const user = await seedTestUser({ username: 'emp-c9', branch_id: branch.id });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `c9-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.8895, lng: 35.5163, accuracy: 12, deviceFp: 'test-fp-c9' }),
+    });
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(JSON.stringify(body)).toContain('OUT_OF_GEOFENCE');
+  });
+
+  it('Check 10: low GPS accuracy rejected', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200, gps_accuracy_max_m: 100 });
+    const user = await seedTestUser({ username: 'emp-c10', branch_id: branch.id });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `c10-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 150, deviceFp: 'test-fp-c10' }),
+    });
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(JSON.stringify(body)).toContain('LOW_GPS_ACCURACY');
+  });
+
+  it('Check 11: /api/admin/now returns presence per branch', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const employee = await seedTestUser({ username: 'emp-c11', branch_id: branch.id });
+    const admin = await seedTestUser({ username: 'admin-c11', role: Role.ADMIN });
+
+    const eSession = await loginAs(employee.username, 'change-me');
+    const inRes = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `c11-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': eSession.csrf,
+        Cookie: eSession.cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c11' }),
+    });
+    expect(inRes.status).toBe(200);
+
+    const aSession = await loginAs(admin.username, 'change-me');
+    const nowRes = await fetch(`${BASE_URL}/api/admin/now`, {
+      method: 'GET',
+      headers: {
+        'X-CSRF-Token': aSession.csrf,
+        Cookie: aSession.cookies,
+      },
+    });
+    expect(nowRes.status).toBe(200);
+    const body = await nowRes.json();
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.data.branches)).toBe(true);
+    expect(Array.isArray(body.data.flags)).toBe(true);
+    expect(body.data.flags).toEqual([]);
+
+    const hamra = body.data.branches.find((b: { name: string }) => b.name === 'Hamra');
+    expect(hamra).toBeTruthy();
+    const presentIds = (hamra.present as Array<{ id: string }>).map((p) => p.id);
+    expect(presentIds).toContain(employee.id);
+    expect(Array.isArray(hamra.driversOut)).toBe(true);
+    expect(hamra.driversOut).toEqual([]);
+  });
+
+  it('Check 12: /api/me/today returns current session', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-c12', branch_id: branch.id });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const inRes = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `c12-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c12' }),
+    });
+    expect(inRes.status).toBe(200);
+
+    const todayRes = await fetch(`${BASE_URL}/api/me/today`, {
+      method: 'GET',
+      headers: {
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+    });
+    expect(todayRes.status).toBe(200);
+    const body = await todayRes.json();
+    expect(body.ok).toBe(true);
+    expect(typeof body.data.in_at).toBe('string');
+    expect(Number.isInteger(body.data.minutes_since_in)).toBe(true);
+    expect(body.data.minutes_since_in).toBeGreaterThanOrEqual(0);
+    expect(body.data.earned_today_cent).toBe(0);
+    expect(body.data.earned_month_cent).toBe(0);
+    expect(body.data.approved_advance_balance_cent).toBe(0);
+    expect(body.data.net_cent).toBe(0);
+  });
+
+  it('Check 13: day-off override blocks punch', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-c13', branch_id: branch.id });
+    const today = new Date(`${todayInBeirut(new Date())}T00:00:00.000Z`);
+    await seedDayOffOverride(user.id, today);
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `c13-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c13' }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(JSON.stringify(body)).toContain('DAY_OFF_PUNCH_BLOCKED');
+  });
+
+  it('Check 14: server-side geofence bypass test (high accuracy rejected)', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200, gps_accuracy_max_m: 100 });
+    const user = await seedTestUser({ username: 'emp-c14', branch_id: branch.id });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `c14-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 200, deviceFp: 'test-fp-c14' }),
+    });
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(JSON.stringify(body)).toContain('LOW_GPS_ACCURACY');
+
+    const punchCount = await getTestPrisma().punch.count({ where: { user_id: user.id } });
+    expect(punchCount).toBe(0);
+  });
+});
