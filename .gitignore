@@ -20,3 +20,6 @@ _ck*.cjs
 
 # Per-phase cleanup prompt files
 phase-*-cleanup-commit-*.md
+
+# Per-phase fix prompts
+phase-*-fix-prompt.md
