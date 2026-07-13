@@ -2,6 +2,7 @@ export const SHOP_TZ = 'Asia/Beirut';
 export const BCRYPT_ROUNDS = 12;
 export const PUNCH_RATE_LIMIT_PER_MIN = 5;
 export const LOGIN_RATE_LIMIT_PER_MIN = 5;
+export const ADVANCE_RATE_LIMIT_PER_MIN = 5;
 export const IDEMPOTENCY_TTL_HOURS = 24;
 export const MISSED_CHECKOUT_BUFFER_MIN = 5;
 export const ADMIN_NOW_POLL_INTERVAL_MS = 10_000;

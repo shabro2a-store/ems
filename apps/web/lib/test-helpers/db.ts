@@ -143,3 +143,96 @@ export async function seedDayOffOverride(userId: string, date: Date) {
     },
   });
 }
+
+export interface PunchOverrides {
+  user_id: string;
+  branch_id: string;
+  kind?: 'IN' | 'OUT';
+  at?: Date;
+  lat?: number;
+  lng?: number;
+  accuracy_m?: number;
+  device_fp?: string;
+  ip?: string;
+}
+
+export async function seedTestPunch(overrides: PunchOverrides) {
+  const prisma = getTestPrisma();
+  return prisma.punch.create({
+    data: {
+      user_id: overrides.user_id,
+      branch_id: overrides.branch_id,
+      kind: overrides.kind ?? 'IN',
+      at: overrides.at ?? new Date(),
+      lat: overrides.lat ?? 33.8962,
+      lng: overrides.lng ?? 35.4827,
+      accuracy_m: overrides.accuracy_m ?? 12,
+      device_fp: overrides.device_fp ?? 'test-fp',
+      ip: overrides.ip ?? '127.0.0.1',
+    },
+  });
+}
+
+export interface AdvanceOverrides {
+  user_id: string;
+  amount_cent?: number;
+  reason?: string | null;
+  status?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  decided_by?: string | null;
+  decided_at?: Date | null;
+}
+
+export async function seedTestAdvance(overrides: AdvanceOverrides) {
+  const prisma = getTestPrisma();
+  return prisma.advance.create({
+    data: {
+      user_id: overrides.user_id,
+      amount_cent: overrides.amount_cent ?? 5000,
+      reason: overrides.reason ?? null,
+      status: overrides.status ?? 'PENDING',
+      decided_by: overrides.decided_by ?? null,
+      decided_at: overrides.decided_at ?? null,
+    },
+  });
+}
+
+export interface AdjustmentOverrides {
+  user_id: string;
+  period?: Date;
+  kind?: 'BONUS' | 'DEDUCTION';
+  amount_cent?: number;
+  reason?: string;
+  created_by: string;
+}
+
+export async function seedTestAdjustment(overrides: AdjustmentOverrides) {
+  const prisma = getTestPrisma();
+  const period = overrides.period ?? new Date(`${new Date().toISOString().slice(0, 7)}-01T00:00:00.000Z`);
+  return prisma.adjustment.create({
+    data: {
+      user_id: overrides.user_id,
+      period,
+      kind: overrides.kind ?? 'BONUS',
+      amount_cent: overrides.amount_cent ?? 1000,
+      reason: overrides.reason ?? 'test',
+      created_by: overrides.created_by,
+    },
+  });
+}
+
+export interface RateChangeOverrides {
+  user_id: string;
+  rate_cent: number;
+  effective_from?: Date;
+}
+
+export async function seedTestRateChange(overrides: RateChangeOverrides) {
+  const prisma = getTestPrisma();
+  return prisma.rateChange.create({
+    data: {
+      user_id: overrides.user_id,
+      rate_cent: overrides.rate_cent,
+      effective_from: overrides.effective_from ?? new Date(),
+    },
+  });
+}

@@ -10,6 +10,13 @@ export default defineConfig({
     environment: 'node',
     include: ['lib/**/*.test.ts', 'lib/**/__tests__/**/*.test.ts'],
     testTimeout: 30_000,
+    fileParallelism: false,
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
   },
   resolve: {
     alias: {
