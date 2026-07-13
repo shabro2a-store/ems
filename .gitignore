@@ -23,3 +23,6 @@ phase-*-cleanup-commit-*.md
 
 # Per-phase fix prompts
 phase-*-fix-prompt.md
+
+# Catch-all for any phase-* prompt/harness files
+phase-*.md
