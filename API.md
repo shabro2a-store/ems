@@ -481,8 +481,10 @@ d5e4c65 phase-0: monorepo bootstrap
 | **Hygiene:** 4 `_ck*.cjs` files left in `packages/db/` | ❌ CLEANUP REQUIRED |
 | **Branch:** `master` instead of `main` | ⚠️ rename when pushing to GitHub |
 
-**Phase 1 status: CODE COMPLETE, hygiene + scope cleanup required.** Git history:
+**Phase 1 status: ✅ COMPLETE.** Git history:
 ```
+4861eb9 docs(phase-1): update API.md status table and decisions
+889a637 fix(phase-1): extend .gitignore for throwaway scripts
 f3fbef4 phase-1: auth + seed + raw-sql migration
 6f91abf phase-0: add .gitignore and commit documentation
 27f0c1b phase-0: add .gitignore and commit documentation
@@ -515,6 +517,16 @@ Owner (you) decides. Tell me A or B and I'll queue the cleanup commit.
 
 **Cleanup commit still needed:** delete `_ck*.cjs` files + extend `.gitignore` to prevent recurrence.
 
+---
+
+## 14c. Phase 2 — Verification gap (locked 2026-07-12)
+
+**The verification gap:** Phase 2 had 16 verification checks. Builder ran 7 via `pnpm test` + smoke tests. Verifier ran checks via psql + curl. The local Windows verifier environment **lacks `psql` and scripted cookie/CSRF helpers**, so checks 5–14 (DB inspections + live HTTP smoke tests) were marked `UNABLE`.
+
+**Decision (locked):** Move all DB-level and HTTP-level verification into **automated integration tests** under `apps/web/lib/**/*.integration.test.ts` that use the Docker Postgres connection directly. `pnpm test` then exercises both unit + integration paths. This removes the dependency on `psql` and curl-with-cookies on the verifier machine.
+
+**No other phases are affected** — the missing checks were about Phase 2 endpoints only. Phases 3+ will follow the same integration-test pattern from the start (see §16 Decision Lock-In).
+
 ### §15. Health-check endpoints (kept from Phase 1, used post-launch)
 
 | Method | Path | Auth | Returns | Use case |
@@ -523,3 +535,22 @@ Owner (you) decides. Tell me A or B and I'll queue the cleanup commit.
 | GET | `/api/admin/ping` | admin | `{ userId, role }` | Verify admin-only auth. Used by monitoring agent before admin-specific operations. |
 
 These are **not** in `spec.md` §7.1–§7.5. They're a Phase 1 addition. Future phases may replace them with richer `/api/health/me` etc., but for v1 they're stable and intentional.
+
+### §16. Decision Lock-In — Integration tests required from Phase 3 onward
+
+**Lock-in date:** 2026-07-12.
+**Trigger:** Phase 2 verification gap revealed that psql + curl-based checks are environmentally fragile.
+**Scope:** applies to Phases 3, 4, 5a, 5b, 6 — every new endpoint and service must have an integration test under `apps/web/lib/**/*.integration.test.ts`.
+
+**Pattern:**
+- Uses the same Postgres connection as production (set `DATABASE_URL` to the Docker DB).
+- Each test creates its own fixtures via `apps/web/lib/test-helpers/` (e.g. `createTestUser`, `createTestBranch`, `loginAs`).
+- Each test cleans up its own data in `afterEach` (no cross-test pollution).
+- Integration tests run via `pnpm test` and replace the curl+psql verify steps entirely.
+
+**Files added in Phase 2 cleanup (pending):**
+- `apps/web/lib/test-helpers/db.ts` — Prisma test client + cleanup helpers
+- `apps/web/lib/test-helpers/auth.ts` — `loginAs(role)` returns cookies + CSRF token
+- `apps/web/lib/services/punch.integration.test.ts` — covers Checks 5–14 of phase-2-verify.md
+
+**What this replaces going forward:** every verify prompt's "psql ..." and "curl ..." steps. Verification becomes "run `pnpm test` and confirm all integration tests pass."
