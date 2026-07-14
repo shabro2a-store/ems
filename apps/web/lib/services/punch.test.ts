@@ -55,6 +55,7 @@ type Store = {
   overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }>;
   trips: Array<{ id: string; driver_id: string; back_at: Date | null }>;
   audits: Array<{ id: string }>;
+  flags: Array<{ id: string; user_id: string; kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; notified_at: Date | null; context_json: unknown; created_at: Date }>;
   punchSeq: number;
   auditSeq: number;
 };
@@ -66,6 +67,7 @@ const store: Store = {
   overrides: [],
   trips: [],
   audits: [],
+  flags: [],
   punchSeq: 0,
   auditSeq: 0,
 };
@@ -76,6 +78,7 @@ const mocks = vi.hoisted(() => ({
   trip: { findFirst: vi.fn() },
   punch: { findFirst: vi.fn(), create: vi.fn() },
   auditLog: { create: vi.fn() },
+  flag: { findFirst: vi.fn(), updateMany: vi.fn() },
 }));
 
 vi.mock('@/lib/db/prisma', () => ({
@@ -91,6 +94,7 @@ function resetStore() {
   store.overrides.length = 0;
   store.trips.length = 0;
   store.audits.length = 0;
+  store.flags.length = 0;
   store.punchSeq = 0;
   store.auditSeq = 0;
 }
@@ -182,6 +186,20 @@ beforeEach(() => {
     const a = { id: `a${store.auditSeq}` };
     store.audits.push(a);
     return a;
+  });
+
+  mocks.flag.findFirst.mockImplementation(async ({ where }: { where: { kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; user_id: string; notified_at: Date | null; orderBy?: { created_at: 'asc' | 'desc' } } }) => {
+    const found = store.flags
+      .filter((f) => f.kind === where.kind && f.user_id === where.user_id && f.notified_at === where.notified_at)
+      .sort((a, b) => (where.orderBy?.created_at === 'desc' ? b.created_at.getTime() - a.created_at.getTime() : a.created_at.getTime() - b.created_at.getTime()));
+    return found[0] ?? null;
+  });
+
+  mocks.flag.updateMany.mockImplementation(async ({ where, data }: { where: { id: string; notified_at: Date | null }; data: { notified_at: Date } }) => {
+    const f = store.flags.find((x) => x.id === where.id);
+    if (!f || f.notified_at !== where.notified_at) return { count: 0 };
+    f.notified_at = data.notified_at;
+    return { count: 1 };
   });
 });
 
@@ -398,5 +416,108 @@ describe('punchEmployee', () => {
     });
     expect('code' in r).toBe(true);
     if ('code' in r) expect(r.code).toBe('DAY_OFF_PUNCH_BLOCKED');
+  });
+});
+
+describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
+  it('resolves the oldest WATCHED flag and fires notifier when claim wins', async () => {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    store.flags.push({
+      id: 'f1',
+      user_id: user.id,
+      kind: 'WATCHED',
+      notified_at: null,
+      context_json: { scheduled_start: '09:00' },
+      created_at: new Date('2026-07-10T09:00:00Z'),
+    });
+
+    const sent: unknown[] = [];
+    await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      notifier: { send: async (p) => { sent.push(p); } },
+    });
+
+    expect(sent.length).toBe(1);
+    expect((sent[0] as { template: string }).template).toBe('watched.resolved');
+    expect(store.flags[0]!.notified_at).not.toBeNull();
+  });
+
+  it('does not fire notifier when no WATCHED flag exists', async () => {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+
+    const sent: unknown[] = [];
+    await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      notifier: { send: async (p) => { sent.push(p); } },
+    });
+    expect(sent.length).toBe(0);
+  });
+
+  it('does not fire notifier when claim count is 0 (concurrent claim lost the race)', async () => {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    store.flags.push({
+      id: 'f1',
+      user_id: user.id,
+      kind: 'WATCHED',
+      notified_at: null,
+      context_json: {},
+      created_at: new Date(),
+    });
+    mocks.flag.updateMany.mockResolvedValue({ count: 0 });
+
+    const sent: unknown[] = [];
+    await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      notifier: { send: async (p) => { sent.push(p); } },
+    });
+    expect(sent.length).toBe(0);
+  });
+
+  it('selects oldest WATCHED flag first (orderBy created_at asc)', async () => {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    store.flags.push(
+      { id: 'f-newer', user_id: user.id, kind: 'WATCHED', notified_at: null, context_json: {}, created_at: new Date('2026-07-10T10:00:00Z') },
+      { id: 'f-older', user_id: user.id, kind: 'WATCHED', notified_at: null, context_json: {}, created_at: new Date('2026-07-10T09:00:00Z') },
+    );
+
+    const sent: Array<{ context: { watched: { id: string } } }> = [];
+    await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      notifier: { send: async (p) => { sent.push(p as unknown as { context: { watched: { id: string } } }); } },
+    });
+    expect(sent.length).toBe(1);
+    expect(sent[0]!.context.watched.id).toBe('f-older');
   });
 });

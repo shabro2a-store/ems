@@ -14,6 +14,11 @@ export function todayInBeirut(now: Date = new Date()): string {
   return inBeirut(now).date;
 }
 
+export function beirutWeekday(now: Date = new Date()): number {
+  const iso = Number(formatInTimeZone(now, SHOP_TZ, 'i'));
+  return iso === 7 ? 0 : iso;
+}
+
 export function scheduledToUtc(date: string, hhmm: string): Date {
   return zonedTimeToUtc(`${date} ${hhmm}`, SHOP_TZ);
 }

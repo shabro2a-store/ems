@@ -3,6 +3,7 @@ import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
 import { userHasApprovedDayOffToday } from './dayOff';
 import { writeAuditLog } from './audit';
+import { notifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
 
@@ -15,6 +16,7 @@ export interface PunchInput {
   deviceFp: string;
   ip: string;
   now?: Date;
+  notifier?: Notifier;
 }
 
 export type PunchErrorCode =
@@ -43,6 +45,7 @@ export async function punchEmployee(
   db: PrismaClient = defaultPrisma,
 ): Promise<PunchResult> {
   const now = input.now ?? new Date();
+  const notify = input.notifier ?? notifier;
 
   const user = await db.user.findUnique({
     where: { id: input.userId },
@@ -119,9 +122,7 @@ export async function punchEmployee(
     },
   });
 
-  // TODO(phase-4): wire watched-flag resolution inline here per spec.md §8.5
-  // (findFirst WATCHED flag for user, updateMany where notified_at IS NULL, fire Telegram on count=1).
-  // Phase 2 only writes the punch row + audit log.
+  await resolveWatchedFlag(db, user, punch, notify);
 
   await writeAuditLog({
     actorId: user.id,
@@ -148,6 +149,37 @@ export async function punchEmployee(
   }
 
   return { punch, minutes_since_in };
+}
+
+interface UserWithBranch {
+  id: string;
+  username: string;
+  branch_id: string | null;
+  branch: { id: string; name: string } | null;
+}
+
+export async function resolveWatchedFlag(
+  db: PrismaClient,
+  user: UserWithBranch,
+  punch: Punch,
+  notifierInstance: Notifier = notifier,
+): Promise<void> {
+  const candidate = await db.flag.findFirst({
+    where: { kind: 'WATCHED', user_id: user.id, notified_at: null },
+    orderBy: { created_at: 'asc' },
+  });
+  if (!candidate) return;
+  const claim = await db.flag.updateMany({
+    where: { id: candidate.id, notified_at: null },
+    data: { notified_at: new Date() },
+  });
+  if (claim.count !== 1) return;
+  await notifierInstance.send({
+    channel: 'telegram',
+    recipient: 'admin',
+    template: 'watched.resolved',
+    context: { user: { id: user.id, username: user.username }, punch, watched: candidate },
+  });
 }
 
 export async function currentOpenIn(

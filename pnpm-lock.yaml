@@ -78,9 +78,21 @@ importers:
 
   apps/worker:
     dependencies:
+      '@prisma/client':
+        specifier: ^5.17.0
+        version: 5.22.0(prisma@5.22.0)
+      db:
+        specifier: workspace:*
+        version: link:../../packages/db
       node-cron:
         specifier: ^3.0.3
         version: 3.0.3
+      notify:
+        specifier: workspace:*
+        version: link:../../packages/notify
+      time:
+        specifier: workspace:*
+        version: link:../../packages/time
     devDependencies:
       '@types/node':
         specifier: ^20.14.10

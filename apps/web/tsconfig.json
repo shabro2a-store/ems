@@ -20,7 +20,8 @@
     ],
     "paths": {
       "@/*": ["./*"],
-      "time": ["../../packages/time/src/index.ts"]
+      "time": ["../../packages/time/src/index.ts"],
+      "notify": ["../../packages/notify/src/index.ts"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

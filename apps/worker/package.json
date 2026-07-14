@@ -8,7 +8,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "node-cron": "^3.0.3"
+    "@prisma/client": "^5.17.0",
+    "db": "workspace:*",
+    "notify": "workspace:*",
+    "node-cron": "^3.0.3",
+    "time": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

@@ -236,3 +236,111 @@ export async function seedTestRateChange(overrides: RateChangeOverrides) {
     },
   });
 }
+
+export async function seedTestDriver(overrides: UserOverrides = {}) {
+  return seedTestUser({ ...overrides, role: Role.DRIVER });
+}
+
+export interface ScheduleOverrides {
+  user_id: string;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+}
+
+export async function seedTestSchedule(overrides: ScheduleOverrides) {
+  const prisma = getTestPrisma();
+  return prisma.schedule.create({
+    data: {
+      user_id: overrides.user_id,
+      weekday: overrides.weekday,
+      start_time: overrides.start_time,
+      end_time: overrides.end_time,
+    },
+  });
+}
+
+export interface TripOverrides {
+  driver_id: string;
+  branch_id: string;
+  out_at?: Date;
+  out_lat?: number;
+  out_lng?: number;
+  back_at?: Date | null;
+  back_lat?: number | null;
+  back_lng?: number | null;
+  over_threshold?: boolean;
+  threshold_alerted_at?: Date | null;
+}
+
+export async function seedTestTrip(overrides: TripOverrides) {
+  const prisma = getTestPrisma();
+  return prisma.trip.create({
+    data: {
+      driver_id: overrides.driver_id,
+      branch_id: overrides.branch_id,
+      out_at: overrides.out_at ?? new Date(),
+      out_lat: overrides.out_lat ?? 33.8962,
+      out_lng: overrides.out_lng ?? 35.4827,
+      back_at: overrides.back_at ?? null,
+      back_lat: overrides.back_lat ?? null,
+      back_lng: overrides.back_lng ?? null,
+      over_threshold: overrides.over_threshold ?? false,
+      threshold_alerted_at: overrides.threshold_alerted_at ?? null,
+    },
+  });
+}
+
+export interface LeaveRequestOverrides {
+  user_id: string;
+  kind: 'DAY_OFF' | 'TIME_CHANGE';
+  start_date: Date;
+  end_date: Date;
+  start_time?: string | null;
+  end_time?: string | null;
+  note?: string | null;
+  status?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  decided_by?: string | null;
+  decided_at?: Date | null;
+}
+
+export async function seedTestLeaveRequest(overrides: LeaveRequestOverrides) {
+  const prisma = getTestPrisma();
+  return prisma.leaveRequest.create({
+    data: {
+      user_id: overrides.user_id,
+      kind: overrides.kind,
+      start_date: overrides.start_date,
+      end_date: overrides.end_date,
+      start_time: overrides.start_time ?? null,
+      end_time: overrides.end_time ?? null,
+      note: overrides.note ?? null,
+      status: overrides.status ?? 'PENDING',
+      decided_by: overrides.decided_by ?? null,
+      decided_at: overrides.decided_at ?? null,
+    },
+  });
+}
+
+export interface FlagOverrides {
+  kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD';
+  user_id?: string | null;
+  branch_id?: string | null;
+  context_json?: unknown;
+  created_at?: Date;
+  notified_at?: Date | null;
+}
+
+export async function seedTestFlag(overrides: FlagOverrides) {
+  const prisma = getTestPrisma();
+  return prisma.flag.create({
+    data: {
+      kind: overrides.kind,
+      user_id: overrides.user_id ?? null,
+      branch_id: overrides.branch_id ?? null,
+      context_json: (overrides.context_json as object) ?? {},
+      created_at: overrides.created_at ?? new Date(),
+      notified_at: overrides.notified_at ?? null,
+    },
+  });
+}
