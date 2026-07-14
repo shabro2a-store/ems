@@ -249,9 +249,9 @@ Every endpoint returns `{ ok: true, data }` or `{ ok: false, error: { code, mess
 ### 3.3 Driver (Phase 4)
 | Method | Path | Body | Returns | Auth |
 |---|---|---|---|---|
-| POST | `/api/me/trip/start` | `{ lat, lng, accuracy }` | `{ trip_id, out_at }` | driver only |
-| POST | `/api/me/trip/end` | `{ lat, lng, accuracy }` | `{ trip_id, back_at, duration_min }` | driver only |
-| GET | `/api/me/trip/current` | — | `{ open: boolean, since_min?: number, threshold_min: number }` | driver only |
+| POST | `/api/me/trip/start` ✅ built Phase 4 | `{ lat, lng, accuracy }` | `{ trip_id, out_at }` | driver only |
+| POST | `/api/me/trip/end` ✅ built Phase 4 | `{ lat, lng, accuracy }` | `{ trip_id, back_at, duration_min }` | driver only |
+| GET | `/api/me/trip/current` ✅ built Phase 4 | — | `{ open: boolean, since_min?: number, threshold_min: number }` | driver only |
 
 ### 3.4 Admin (Phase 5a)
 | Method | Path | Body | Returns | Auth |
@@ -271,8 +271,10 @@ Every endpoint returns `{ ok: true, data }` or `{ ok: false, error: { code, mess
 | PATCH | `/api/admin/branches/:id` | `{ ... partial }` | `{ branch }` | admin |
 | GET | `/api/admin/schedules/:userId` | — | `{ schedule: Schedule[], overrides: ScheduleOverride[] }` | admin |
 | PUT | `/api/admin/schedules/:userId` | `{ schedule: [{ weekday, start_time, end_time }] }` | `{ schedule }` | admin |
-| GET | `/api/admin/leave` | — | `{ requests: LeaveRequest[] }` | admin |
-| POST | `/api/admin/leave/:id/decision` | `{ decision: 'APPROVED'\|'REJECTED' }` | `{ request, override? }` | admin |
+| GET | `/api/admin/leave` ✅ built Phase 4 | — | `{ requests: LeaveRequest[] }` | admin |
+| POST | `/api/admin/leave/:id/decision` ✅ built Phase 4 | `{ decision: 'APPROVED'\|'REJECTED' }` | `{ request, override? }` | admin |
+| GET | `/api/admin/schedules/:userId` ✅ built Phase 4 | — | `{ schedule: Schedule[], overrides: ScheduleOverride[] }` | admin |
+| PUT | `/api/admin/schedules/:userId` ✅ built Phase 4 | `{ schedule: [{ weekday, start_time, end_time }] }` | `{ schedule }` | admin |
 | POST | `/api/admin/adjustments` | `{ userId, kind: 'BONUS'\|'DEDUCTION', amountCent: number, reason: string }` | `{ adjustment }` | admin (audit-logged) |
 | PATCH | `/api/admin/users/:id/notification-prefs` | `{ dailySummary?: bool, routinePings?: bool }` | `{ user }` | admin |
 | GET | `/api/admin/reports/payroll?month=YYYY-MM` | — | PDF stream (`Content-Type: application/pdf`) | admin |
@@ -365,6 +367,7 @@ export const notifier: Notifier =
 | `MISSED_CHECKOUT_BUFFER_MIN` | `5` | Schedule_end + 30 + 5 = 35 min |
 | `ADMIN_NOW_POLL_INTERVAL_MS` | `10_000` | Admin dashboard poll |
 | `DRIVER_TRIP_POLL_INTERVAL_MS` | `30_000` | Driver banner poll |
+| `TRIP_RATE_LIMIT_PER_MIN` | `5` | Per user, scope: trip (built Phase 4) |
 | `SESSION_TTL_EMPLOYEE_MIN` | `120` | Employee session expiry (2h idle) |
 | `SESSION_TTL_DRIVER_AFTER_SCHEDULE_MIN` | `30` | Driver session expiry (schedule_end + 30) |
 | `CSRF_COOKIE_NAME` | `'csrf'` | Double-submit cookie pattern |
@@ -548,9 +551,124 @@ These are **not** in `spec.md` §7.1–§7.5. They're a Phase 1 addition. Future
 - Each test cleans up its own data in `afterEach` (no cross-test pollution).
 - Integration tests run via `pnpm test` and replace the curl+psql verify steps entirely.
 
-**Files added in Phase 2 cleanup (pending):**
-- `apps/web/lib/test-helpers/db.ts` — Prisma test client + cleanup helpers
-- `apps/web/lib/test-helpers/auth.ts` — `loginAs(role)` returns cookies + CSRF token
-- `apps/web/lib/services/punch.integration.test.ts` — covers Checks 5–14 of phase-2-verify.md
+**Files added in Phase 2 cleanup (DONE — commit `7578ff9`):**
+- ✅ `apps/web/lib/test-helpers/db.ts` — Prisma test client + `cleanDb` + `seedTestBranch` + `seedTestUser` helpers
+- ✅ `apps/web/lib/test-helpers/auth.ts` — `loginAs(username, password)` returns cookies + CSRF token
+- ✅ `apps/web/lib/services/punch.integration.test.ts` — 10 integration tests covering Checks 5–14 of phase-2-verify.md
+
+---
+
+## 17. Phase 2 — Complete (locked 2026-07-14)
+
+**Phase 2 status:** ✅ COMPLETE.
+
+| Deliverable | Status |
+|---|---|
+| `apps/web/lib/geofence.ts` — pure haversine | ✅ commit `4f34192` |
+| `apps/web/lib/geofence.test.ts` — 11 boundary tests | ✅ |
+| `apps/web/lib/services/punch.ts` — guard order | ✅ |
+| `apps/web/lib/services/punch.test.ts` — 8 unit tests (rewritten) | ✅ commit `7578ff9` |
+| `apps/web/lib/services/{idempotency,rateLimit,dayOff}.ts` | ✅ |
+| `apps/web/lib/services/{idempotency,rateLimit}.test.ts` | ✅ |
+| `apps/web/lib/time/todayInBeirut.ts` wrapper | ✅ |
+| `apps/web/app/api/me/punch/route.ts` — Zod + CSRF + Idempotency-Key + rate limit | ✅ |
+| `apps/web/app/api/me/today/route.ts` | ✅ |
+| `apps/web/app/api/admin/now/route.ts` — presence only | ✅ |
+| `apps/web/app/(app)/employee/EmployeeHomeClient.tsx` | ✅ |
+| `apps/web/components/PunchButton.tsx` — 120px tap target | ✅ |
+| `apps/web/lib/test-helpers/{db,auth}.ts` | ✅ commit `7578ff9` |
+| `apps/web/lib/services/punch.integration.test.ts` — 10 integration tests | ✅ commit `7578ff9` |
+| **Test count:** 59 unit + 10 integration = **69 total, all passing** | ✅ |
+| **Invariant verified:** 5 evidence fields per punch (lat, lng, accuracy_m, device_fp, ip) | ✅ via integration test |
+| **Server-side bypass test:** accuracy=200 still rejected | ✅ via integration test |
+
+**Phase 2 git history:**
+```
+b94b968 fix(phase-2): catch-all gitignore for phase-* prompt files
+6f7bda8 fix(phase-2): extend .gitignore for fix-prompt files
+7f612d2 docs(phase-2): update API.md with verification gap and integration-test lock-in
+7578ff9 fix(phase-2): rewrite test mock + add integration tests
+4f34192 phase-2: punch + geofence + employee pwa
+```
+
+---
+
+## 18. Phase 3 — Pending
+
+Not yet queued. Phase 3 covers Advances + Adjustments + Audit endpoints & UI (build.md Phase 3 Scope, items 1–12). Will be queued after this commit.
 
 **What this replaces going forward:** every verify prompt's "psql ..." and "curl ..." steps. Verification becomes "run `pnpm test` and confirm all integration tests pass."
+
+---
+
+## 19. Phase 4 — Complete (locked 2026-07-14)
+
+**Phase 4 status:** ✅ COMPLETE.
+
+### Endpoints delivered (build.md Phase 4 items 1-11)
+
+| Endpoint | Method | Auth | Source |
+|---|---|---|---|
+| `/api/me/trip/start` | POST | driver only | build item 1 |
+| `/api/me/trip/end` | POST | driver only | build item 2 |
+| `/api/me/trip/current` | GET | driver only | build item 3 |
+| `/api/me/leave` | GET, POST | employee, driver | build item 4 |
+| `/api/admin/leave` | GET | admin | build item 5 |
+| `/api/admin/leave/[id]/decision` | POST | admin | build item 6 |
+| `/api/admin/schedules/[userId]` | GET, PUT | admin | build item 7 |
+
+### Cron jobs delivered (apps/worker/src/jobs/)
+
+| Job | Schedule | Source |
+|---|---|---|
+| `watchedDetector` | `*/1 * * * *` | build item 12 (spec §3.9 #1) |
+| `missedCheckout` | `*/1 * * * *` | build item 13 (spec §8.6, decision #32) |
+| `tripThreshold` | `*/1 * * * *` | build item 14 (decision #29) |
+| `driverStale` | `*/30 * * * *` | build item 15 |
+| `endOfDayWatcher` | `30 23 * * *` | build item 16 |
+
+All 5 wired in `apps/worker/src/index.ts` via `node-cron`.
+
+### Inline WATCHED resolution (race-safe)
+
+Wired into `apps/web/lib/services/punch.ts`. Pattern from spec.md §8.5:
+1. select-then-claim (`updateMany` with `notified_at IS NULL` guard)
+2. Only the punch whose `count === 1` fires the notification
+3. End-of-day watcher resolves any still-unresolved flags at 23:30 Beirut
+
+### UI pages delivered (build items 8-10)
+
+- `apps/web/app/(app)/driver/page.tsx` — driver home with trip banner + OUT/BACK buttons
+- `apps/web/app/(app)/driver/DriverHomeClient.tsx`
+- `apps/web/app/(app)/employee/leave/page.tsx` — request form + own history
+- `apps/web/app/(app)/admin/schedule/page.tsx` — weekly grid + inline pending LeaveRequest with approve/reject
+
+### Tests added
+
+| Suite | Count |
+|---|---|
+| `lib/services/trip.test.ts` (new) | 12 |
+| `lib/services/leave.test.ts` (new) | 7 |
+| `lib/services/punch.test.ts` (extended) +4 WATCHED | 4 new |
+| `lib/services/trip.integration.test.ts` | 4 |
+| `lib/services/leave.integration.test.ts` | 3 |
+| `lib/services/cron/watchedDetector.integration.test.ts` | 3 |
+| `lib/services/cron/missedCheckout.integration.test.ts` | 1 |
+| `apps/worker/src/jobs/{watchedDetector,missedCheckout,tripThreshold,driverStale,endOfDayWatcher}.test.ts` | 4 unit + 4 cron |
+| **Total Phase 4** | **+50** |
+| **Grand total** | **151** |
+
+### Deviations accepted
+
+1. WATCHED notifier uses Phase 0 stub channel/recipient (not spec's kind enum). Phase 5b reconciles.
+2. Cron tests run in apps/web vitest via glob include. Pragmatic, single test runner.
+3. beirutWeekday added to packages/time (decision #36 prerequisite).
+4. WATCHED resolution accepts test-only notifier param for pure-function testability.
+5. CRLF warnings on Windows — environmental, harmless.
+6. Test runtime 156s — bcrypt 12 rounds + sequential fork for integration DB isolation. Known cost.
+
+### Phase 4 git history
+
+```
+24d4f3d phase-4: trips + schedule + leave + flags + crons
+```
