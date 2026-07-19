@@ -1,5 +1,10 @@
 import type { Metadata } from 'next';
+import { initSentry } from '@/lib/sentry';
 import './globals.css';
+
+if (typeof window === 'undefined') {
+  initSentry();
+}
 
 export const metadata: Metadata = {
   title: 'Supermarket EMS',

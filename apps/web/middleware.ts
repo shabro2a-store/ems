@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyToken } from './lib/auth/jwt';
 import { ACCESS_COOKIE_NAME } from './lib/auth/constants';
-// import { initSentry } from './lib/sentry';  // enabled once @sentry/nextjs is added
-// initSentry();
 
 const PUBLIC_API_PREFIXES = [
   '/api/auth/login',
