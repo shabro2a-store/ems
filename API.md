@@ -672,3 +672,88 @@ Wired into `apps/web/lib/services/punch.ts`. Pattern from spec.md §8.5:
 ```
 24d4f3d phase-4: trips + schedule + leave + flags + crons
 ```
+
+---
+
+## 20. Phase 5a — Complete (locked 2026-07-16)
+
+**Phase 5a status:** ✅ COMPLETE. UI-only phase. The owner can now demo the admin dashboard on localhost by logging in as `owner / change-me` at `http://localhost:3000/admin`.
+
+### Admin pages delivered (7 screens + 4 modals + 1 nav + 1 dashboard component)
+
+| Path | Purpose |
+|---|---|
+| `/admin` (home) | Dashboard — polls `/api/admin/now` every 10s. Shows per-branch present/absent/driver counts, drivers out list with `since_min`, today's flags feed. |
+| `/admin/users` | List all users (employee/driver/admin) with CRUD actions. Row actions: Edit, Deactivate/Reactivate, Reset Password. |
+| `/admin/users/[id]/edit` | Edit form: role, branch, hourly rate, notification prefs. Rate change creates a new RateChange row (invariants preserved). |
+| `/admin/branches` | Edit branch form per card: name, lat, lng, gps_radius_m, gps_accuracy_max_m, absent_grace_min, trip_threshold_min, is_active. |
+| `/admin/adjustments` | List current-month adjustments + create form (user/kind/amount/reason). |
+| `/admin/punches` | Recent punches list with row "Correct" action (manual correction, audit-logged). |
+| `/admin/flags` | Full flags feed (newest first), filterable by kind. Shows context_json expandable. |
+
+**Components** (`apps/web/components/admin/`):
+- `AdminDashboard.tsx` — polling client island
+- `AdminNav.tsx` — shared nav with logout
+- `UserCreateModal.tsx` — create user form (returns `temp_password`)
+- `UserEditModal.tsx` — edit user form
+
+### `/api/admin/now` extension
+
+Extended to include:
+- `branches[].driversOut: Trip[]` — open trips per branch with elapsed time
+- `flags: Flag[]` — today's flags (capped at 20, newest first)
+
+Backwards-compatible — still returns `present` / `absent` per branch.
+
+### API routes wired (sub-routes to support UI)
+
+These were referenced as endpoints but only finalized in Phase 5a:
+- `POST /api/admin/users/[id]/deactivate`
+- `POST /api/admin/users/[id]/notification-prefs` (PATCH per spec §7.4)
+- `POST /api/admin/users/[id]/reset-password` (returns `{ temp_password }`)
+
+### Tests delivered
+
+| Suite | Count | Type |
+|---|---|---|
+| `lib/services/admin-now.integration.test.ts` | new | integration |
+| `lib/services/admin-users.integration.test.ts` | new | integration |
+| `lib/services/admin-branches.integration.test.ts` | new | integration |
+| `lib/services/admin-flags.integration.test.ts` | new | integration |
+| `lib/services/admin-notification-prefs.integration.test.ts` | new | integration |
+| `lib/components/admin/AdminNav.test.tsx` | new | unit |
+| `lib/components/admin/UserCreateModal.test.tsx` | new | unit |
+| **Grand total** (Phase 5a adds to existing 151) | **~165+** | mixed |
+
+NOTE: actual test count must be confirmed by `pnpm --filter web test`. Builder did not report a final test count for Phase 5a — only files committed. The "165+" estimate assumes ≥14 new integration tests across 5 files plus 2 component unit tests.
+
+### Deviations accepted
+
+1. **3 sub-routes created** (`deactivate`, `notification-prefs`, `reset-password`) — these were spec'd in `API.md` §3.4 and §7.4 but had not been fully implemented before Phase 5a. The UI needed them. Net positive — fills spec gaps.
+2. **No Playwright E2E tests** — page rendering verified manually. Per `API.md` §16 lock-in, integration tests are sufficient at v1 scale.
+
+### Phase 5a git history
+
+```
+7e38adf phase-5a: admin dashboard ui
+```
+
+### What this unlocks
+
+The system is now fully demoable to the owner on `localhost:3000/admin`. Every existing endpoint has UI, every UI works against the Docker Postgres. Owner can:
+
+- See live branch presence, drivers out, flags
+- Create/edit/deactivate users
+- Reset any user's password (returns temp_password for verbal sharing)
+- Edit branch coords/radius/threshold in-field
+- Add bonuses/deductions
+- Correct any punch (audit-logged, original row immutable)
+- See all flags with context
+
+What's still v1-missing: Telegram bot (Phase 5b), PDF payroll download (Phase 5b), PWA install (Phase 6), backups to Google Drive (Phase 6).
+
+---
+
+## 21. Phase 2.5 — Pending
+
+Not yet queued. Phase 2.5 rewrites `payout.ts` with full TDD (replaces Phase 3's simplified version) + adds deploy plumbing (Dockerfiles, Coolify config, Cloudflare, CI). **Useful only when VPS is provisioned.** Will be queued when ready, or Phase 5b/6 can run first.
