@@ -819,11 +819,43 @@ de72c72 docs(phase-5a): mark Phase 5a complete + document admin UI + queue Phase
 
 ---
 
-## 21a. Phase 6b — Pending (Sentry follow-up + minor polish)
+## 21a. Phase 6b — Complete (locked 2026-07-19)
 
-The `@sentry/nextjs` dep + init wire-up from Phase 6a item 13 was deferred per AGENTS.md rule. Phase 6b adds it as a 5-line commit. Also folds in any minor polish items flushed from the audit (e.g. removing compose `version: '3.9'` deprecation warning).
+**Phase 6b status:** ✅ COMPLETE (commit `9cca701`).
 
-Will be queued after Phase 5b (Telegram) ships, since Sentry is non-blocking for pilot.
+### What landed
+
+- `@sentry/nextjs@10.66.0` installed in `apps/web/package.json` (justified per AGENTS.md: server-side error tracking per spec.md §3.11 Observability)
+- 146 transitive packages via pnpm (`@sentry/cli`, `@sentry/opentelemetry`, `@opentelemetry/*`, etc.)
+- `lib/sentry.ts` stub replaced with real `Sentry.init()` call
+- Wired into `apps/web/app/layout.tsx` (server component), NOT middleware — avoids Next 14 Edge runtime conflict
+- `middleware.ts` Sentry hook stub removed (cleanup)
+- Idempotent: `initialized` flag prevents HMR double-init
+
+### Why init in layout.tsx, not middleware
+
+Next.js 14 middleware runs on Edge runtime by default. `@sentry/nextjs` Sentry.init() works in Node runtime reliably but requires either `runtime: 'nodejs'` override (loses Edge benefits) or careful Edge-API usage. The standard pattern is to init SDKs in root layout, runs once per render, before any business logic. Trade-off: API routes don't render layout, so unhandled exceptions in API routes aren't caught by Sentry — accepted because we have audit log + integration tests covering API correctness.
+
+### Verified behavior
+
+| Env | Behavior |
+|---|---|
+| `SENTRY_DSN` unset (dev) | no-op, doesn't crash |
+| `NODE_ENV !== 'production'` | no-op |
+| `SENTRY_DSN=stub + NODE_ENV=production` | Sentry.init fires once per process |
+
+### Checks
+
+- `pnpm typecheck` clean across 6 workspace projects
+- `pnpm --filter web test` — 133 unit tests pass; 52 integration tests fail (Docker not running locally, same pre-existing condition as Phase 6a)
+
+### Git history (Phases 6a + 6b)
+
+```
+9cca701 fix(phase-6b): add @sentry/nextjs@10.66.0 dep, wire init in layout.tsx
+0311912 docs(phase-6a): mark Phase 6a complete + retro-section for skipped Phase 2.5
+93c9dcf fix(phase-6a): production hardening — CI, healthchecks, backup scripts, RUNBOOK, Sentry, AdminNav fix
+```
 
 ---
 
@@ -831,7 +863,7 @@ Will be queued after Phase 5b (Telegram) ships, since Sentry is non-blocking for
 
 Phase 7 will cover: PWA polish (manifest icons, sw.js offline shell), owner cheat sheet, structured logging, observability dashboards, advanced runbook additions.
 
-Will be queued after Phase 6b + 5b.
+Will be queued after Phase 5b.
 
 ---
 
