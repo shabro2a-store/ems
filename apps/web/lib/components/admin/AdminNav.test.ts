@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { NAV_ITEMS } from '../../../../components/admin/AdminNav';
+import { NAV_ITEMS } from '../../../components/admin/AdminNav';
 
 describe('<AdminNav> exports', () => {
   it('NAV_ITEMS includes all required admin sections', () => {

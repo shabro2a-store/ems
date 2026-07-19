@@ -3,7 +3,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-const NAV_ITEMS = [
+export interface NavItem {
+  href: string;
+  label: string;
+  match: (pathname: string) => boolean;
+}
+
+export const NAV_ITEMS: NavItem[] = [
   { href: '/admin', label: 'Dashboard', match: (p: string) => p === '/admin' },
   { href: '/admin/users', label: 'Users', match: (p: string) => p.startsWith('/admin/users') },
   { href: '/admin/branches', label: 'Branches', match: (p: string) => p.startsWith('/admin/branches') },

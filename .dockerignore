@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env*
+!.env.example
+coverage
+**/*.test.ts
+**/*.test.tsx
+**/__tests__/**
+*.tsbuildinfo
+.vscode
+.idea
