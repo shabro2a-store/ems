@@ -5,7 +5,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ems
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in Coolify env}
       POSTGRES_DB: ems
     volumes:
       - db_data:/var/lib/postgresql/data
@@ -22,10 +22,11 @@ services:
       dockerfile: Dockerfile.web
     ports:
       - '3000:3000'
-    env_file: .env
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?set in .env}@db:5432/ems
+      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in Coolify env}@db:5432/ems
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in Coolify env}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?set PUBLIC_APP_URL in Coolify env}
     depends_on:
       db:
         condition: service_healthy
@@ -35,10 +36,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
-    env_file: .env
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?set in .env}@db:5432/ems
+      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in Coolify env}@db:5432/ems
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in Coolify env}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?set PUBLIC_APP_URL in Coolify env}
     depends_on:
       db:
         condition: service_healthy
