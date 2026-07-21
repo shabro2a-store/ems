@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "node src/index.ts",
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
     "build": "tsc --outDir dist --rootDir src",
     "typecheck": "tsc --noEmit"
   },
@@ -12,7 +13,8 @@
     "db": "workspace:*",
     "notify": "workspace:*",
     "node-cron": "^3.0.3",
-    "time": "workspace:*"
+    "time": "workspace:*",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
