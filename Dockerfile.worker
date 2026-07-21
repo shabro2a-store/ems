@@ -1,12 +1,16 @@
 FROM node:20-alpine
-RUN apk add --no-cache libc6-compat
 WORKDIR /app
-RUN npm install -g pnpm@9.4.0
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY packages/*/package.json packages/*/
-COPY apps/*/package.json apps/*/
+RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/db/package.json packages/db/
+COPY packages/notify/package.json packages/notify/
+COPY packages/pdf/package.json packages/pdf/
+COPY packages/time/package.json packages/time/
+COPY apps/web/package.json apps/web/
+COPY apps/worker/package.json apps/worker/
 RUN pnpm install --no-frozen-lockfile
-COPY . .
+COPY packages ./packages
+COPY apps ./apps
 USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e "process.exit(0)"
-CMD ["npx", "tsx", "apps/worker/src/index.ts"]
+CMD ["pnpm", "--filter=worker", "start"]
