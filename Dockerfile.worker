@@ -1,7 +1,7 @@
 FROM node:20-alpine
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/db/package.json packages/db/
 COPY packages/notify/package.json packages/notify/
 COPY packages/pdf/package.json packages/pdf/
