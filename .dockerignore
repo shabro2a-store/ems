@@ -1,5 +1,8 @@
 node_modules
+**/node_modules
+**/node_modules/**
 .next
+**/.next
 .git
 .env*
 !.env.example
@@ -10,3 +13,4 @@ coverage
 *.tsbuildinfo
 .vscode
 .idea
+
