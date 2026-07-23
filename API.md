@@ -920,3 +920,64 @@ b966aa3 fix(phase-6c): make local docker compose build work end-to-end
 4. Login as `owner` / `change-me`
 5. Should see admin dashboard (Phase 5a)
 6. From second browser, login as `emp1` / `change-me`, try punch in (will need to mock GPS in Chrome devtools to Hamra coords)
+
+---
+
+## 25. Phase 7-Record-Location — Complete (locked 2026-07-23)
+
+**Status:** ✅ COMPLETE. Admin can now capture real branch GPS coordinates from their browser instead of guessing or typing manually.
+
+### What was added
+
+- **`Record Location` button** on each branch card in `/admin/branches`. Green button next to the Edit button.
+- Click → browser asks "Allow location?" → admin clicks Allow.
+- Uses `navigator.geolocation.getCurrentPosition` with `enableHighAccuracy: true`.
+- Auto-fills the edit form's lat/lng inputs with captured coordinates (6 decimal places).
+- Shows accuracy in meters (e.g. "Captured at ±12m accuracy").
+- Friendly error if denied / unavailable.
+- Once filled, admin clicks Save to commit.
+
+### Files modified (3)
+
+- `apps/web/app/(app)/admin/branches/page.tsx` — added `getCurrentPosition()` helper, `recordLocation()` handler, green button, accuracy message UI
+- `apps/web/lib/services/admin-branches.integration.test.ts` — added test "PATCH updates lat/lng from GPS capture"
+- `packages/db/prisma/seed.ts` — collapsed from 3 placeholder branches to 2 (`Home Office`, `Tarek Jdedi`) with 0,0 coords. Made seed idempotent (clears existing data first).
+
+### Seed now creates
+
+| Username | Role | Branch |
+|---|---|---|
+| `owner` | ADMIN | (none) |
+| `emp1` | EMPLOYEE | Home Office (0.0, 0.0) — set via Record Location |
+| `emp2` | EMPLOYEE | Tarek Jdedi (0.0, 0.0) — set via Record Location |
+
+### Git commits
+
+```
+72c3cdf feat(phase-7-record-location): admin can capture branch GPS via browser
+e2fa713 docs(phase-6c): mark Phase 6c complete - first end-to-end local docker compose build
+b966aa3 fix(phase-6c): make local docker compose build work end-to-end
+```
+
+All pushed to `shabro2a-store/ems` on GitHub.
+
+### How to use the new feature
+
+1. Login as `owner` / `change-me` at http://localhost:3000/login
+2. Click **Branches** in the admin nav
+3. Find **Home Office** card → click the green **📍 Record Location** button
+4. Browser prompts for permission → click **Allow**
+5. Page shows "Captured at ±Nm accuracy" with the edit form pre-filled
+6. Click **Save** to persist the coordinates
+7. Repeat for **Tarek Jdedi**
+
+After both branches have real coordinates, `emp1` (Home Office) and `emp2` (Tarek Jdedi) can punch in/out from their actual locations.
+
+### What's still deferred
+
+- **PWA install** — employees can install app on phone home screen. Phase 7.
+- **Telegram alerts** — owner doesn't get phone alerts yet. Phase 5b.
+- **PDF payroll** — owner can't download monthly PDF yet. Phase 5b.
+- **VPS deploy** — Phase 2.5 (Coolify + Cloudflare).
+
+These are all post-launch items per the original spec.
