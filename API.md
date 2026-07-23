@@ -981,3 +981,41 @@ After both branches have real coordinates, `emp1` (Home Office) and `emp2` (Tare
 - **VPS deploy** — Phase 2.5 (Coolify + Cloudflare).
 
 These are all post-launch items per the original spec.
+
+---
+
+## 26. Phase 7-Local-Cookies — Complete (locked 2026-07-23)
+
+**Issue:** Admin cookies had `Secure` flag on local HTTP, blocking auth. Build-time `NODE_ENV=production` was being baked in unconditionally, even when running locally over `http://localhost`.
+
+**Fix:** `apps/web/lib/auth/cookies.ts` now derives `secure` from:
+1. `PUBLIC_APP_URL` starts with `https://` (production behind TLS proxy)
+2. `x-forwarded-proto` header is `https` (alt signal)
+3. `NODE_ENV === 'production'` AND no `PUBLIC_APP_URL` (legacy fallback)
+
+Otherwise (local HTTP dev), cookies are not Secure.
+
+**Build stays in `NODE_ENV=production`** so Next.js pages prerender correctly. The cookie `Secure` flag is now decoupled from build-time env.
+
+**Verified:** `/api/auth/login` returns cookies without `Secure` flag on local. `/api/admin/branches` returns the 2 seeded branches (Home Office, Tarek Jdedi). The `/admin/branches` page client component fetches and renders the **📍 Record Location** button for both branches.
+
+### Git commit
+
+```
+8b4cc0d fix(local-cookies): use PUBLIC_APP_URL to determine Secure flag
+```
+
+Pushed to `shabro2a-store/ems`.
+
+### How to capture branch locations now
+
+1. Open http://localhost:3000/login
+2. Login as `owner / change-me`
+3. Click **Branches** in the admin nav
+4. Each of **Home Office** and **Tarek Jdedi** shows the green **📍 Record Location** button
+5. Click → browser asks "Allow location?" → Allow
+6. Edit form fills with captured lat/lng (±accuracy in meters)
+7. Click **Save** to persist
+8. Both branches now have real GPS coords
+
+**Then** `emp1` (Home Office) and `emp2` (Tarek Jdedi) can punch in/out from their real locations via Chrome devtools → Sensors → mock GPS at branch coords.
