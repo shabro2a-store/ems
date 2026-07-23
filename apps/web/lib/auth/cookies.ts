@@ -3,10 +3,21 @@ import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME, CSRF_COOKIE_NAME } from './con
 
 export function setAuthCookies(accessToken: string, refreshToken: string, csrfToken: string): void {
   const store = cookies();
-  const isProd = process.env.NODE_ENV === 'production';
+  // Cookies are Secure only when the app is actually served over HTTPS.
+  // Detection order:
+  //   1. PUBLIC_APP_URL starts with https:// — production behind a TLS proxy.
+  //   2. forwarded-proto header is https — same thing, alternative source.
+  //   3. NODE_ENV === 'production' AND no PUBLIC_APP_URL — legacy fallback.
+  //   4. Otherwise (local dev over http://localhost): NOT secure.
+  const appUrl = process.env.PUBLIC_APP_URL ?? '';
+  const forwardedProto = (store as unknown as { get?: (k: string) => unknown }).get?.('x-forwarded-proto');
+  const isHttps =
+    appUrl.startsWith('https://') ||
+    forwardedProto === 'https' ||
+    (process.env.NODE_ENV === 'production' && !appUrl.startsWith('http://'));
   const baseAttrs = {
     httpOnly: true,
-    secure: isProd,
+    secure: isHttps,
     sameSite: 'lax' as const,
     path: '/',
   };
@@ -14,7 +25,7 @@ export function setAuthCookies(accessToken: string, refreshToken: string, csrfTo
   store.set(REFRESH_COOKIE_NAME, refreshToken, { ...baseAttrs, maxAge: 60 * 60 * 24 * 7 });
   store.set(CSRF_COOKIE_NAME, csrfToken, {
     httpOnly: false,
-    secure: isProd,
+    secure: isHttps,
     sameSite: 'lax',
     path: '/',
     maxAge: 60 * 60 * 24 * 7,
