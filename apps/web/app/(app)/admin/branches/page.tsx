@@ -51,6 +51,25 @@ function toEditable(b: Branch): EditState {
   };
 }
 
+async function getCurrentPosition(timeoutMs = 10000): Promise<{ lat: number; lng: number; accuracy: number }> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new Error('Geolocation not available in this browser. Use HTTPS or localhost.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        }),
+      (err) => reject(new Error(err.message || 'Location capture failed')),
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
+    );
+  });
+}
+
 export default function AdminBranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [editing, setEditing] = useState<EditState | null>(null);
@@ -58,6 +77,9 @@ export default function AdminBranchesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [locatingId, setLocatingId] = useState<string | null>(null);
+  const [locateMsg, setLocateMsg] = useState<string | null>(null);
+  const [lastFix, setLastFix] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
 
   async function load() {
     const res = await fetch('/api/admin/branches', { credentials: 'include' });
@@ -76,6 +98,34 @@ export default function AdminBranchesPage() {
     setEditing(toEditable(b));
     setErr(null);
     setSaved(false);
+  }
+
+  async function recordLocation(b: Branch) {
+    setErr(null);
+    setLocateMsg(null);
+    setLocatingId(b.id);
+    try {
+      const fix = await getCurrentPosition();
+      setLastFix(fix);
+      // Auto-open the edit form with the captured coords filled in
+      setEditing({
+        id: b.id,
+        name: b.name,
+        lat: fix.lat.toFixed(6),
+        lng: fix.lng.toFixed(6),
+        gps_radius_m: String(b.gps_radius_m),
+        gps_accuracy_max_m: String(b.gps_accuracy_max_m),
+        absent_grace_min: String(b.absent_grace_min),
+        trip_threshold_min: String(b.trip_threshold_min),
+        is_active: b.is_active,
+      });
+      setSaved(false);
+      setLocateMsg(`Captured at ±${Math.round(fix.accuracy)}m accuracy. Review and click Save.`);
+    } catch (e) {
+      setLocateMsg(e instanceof Error ? e.message : 'Location capture failed');
+    } finally {
+      setLocatingId(null);
+    }
   }
 
   async function save() {
@@ -120,6 +170,18 @@ export default function AdminBranchesPage() {
       <AdminNav username={username || 'admin'} flagCount={0} />
       <main className="p-4 max-w-5xl mx-auto">
         <h1 className="text-xl font-semibold mb-4">Branches</h1>
+        {locateMsg && (
+          <div
+            data-testid="locate-message"
+            className={`mb-3 text-sm rounded px-3 py-2 ${
+              locateMsg.startsWith('Captured')
+                ? 'bg-emerald-50 text-emerald-800'
+                : 'bg-amber-50 text-amber-800'
+            }`}
+          >
+            {locateMsg}
+          </div>
+        )}
         {err && <div className="mb-3 text-red-600 text-sm">{err}</div>}
         {saved && <div className="mb-3 text-green-600 text-sm">Saved.</div>}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -156,12 +218,22 @@ export default function AdminBranchesPage() {
                   </div>
                 </dl>
                 {!isEditing ? (
-                  <button
-                    onClick={() => startEdit(b)}
-                    className="mt-3 w-full min-h-[56px] rounded bg-blue-600 text-white text-base"
-                  >
-                    Edit
-                  </button>
+                  <div className="mt-3 space-y-2">
+                    <button
+                      onClick={() => startEdit(b)}
+                      className="w-full min-h-[56px] rounded bg-blue-600 text-white text-base"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => recordLocation(b)}
+                      disabled={locatingId === b.id}
+                      data-testid={`record-location-${b.id}`}
+                      className="w-full min-h-[56px] rounded bg-emerald-600 text-white text-base disabled:opacity-50"
+                    >
+                      {locatingId === b.id ? 'Capturing GPS…' : '📍 Record Location'}
+                    </button>
+                  </div>
                 ) : (
                   <div className="mt-3 space-y-2">
                     <label className="block">

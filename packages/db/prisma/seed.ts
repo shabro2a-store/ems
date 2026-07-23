@@ -13,9 +13,10 @@ interface BranchSeed {
 }
 
 const BRANCHES: BranchSeed[] = [
-  { name: 'Hamra', lat: 33.8962, lng: 35.4827 },
-  { name: 'Achrafieh', lat: 33.8895, lng: 35.5163 },
-  { name: 'Verdun', lat: 33.8912, lng: 35.4871 },
+  // Branch 1: Your house — replace with actual lat/lng from Google Maps pin
+  { name: 'Home Office', lat: 0, lng: 0 },
+  // Branch 2: Tarek Jdedi — replace with actual lat/lng from Google Maps pin
+  { name: 'Tarek Jdedi', lat: 0, lng: 0 },
 ];
 
 const DEFAULT_HOURLY_RATE_CENT = 200;
@@ -27,13 +28,31 @@ async function main() {
 
   const passwordHash = await bcrypt.hash(SEED_DEFAULT_PASSWORD, BCRYPT_ROUNDS);
 
+  // Clean ALL existing data (in dependency order) so we can re-seed cleanly.
+  // Idempotent — safe to run multiple times.
   await prisma.$transaction(async (tx) => {
-    const existing = await tx.user.findUnique({ where: { username: 'owner' } });
-    if (existing) {
-      console.log('seed: admin already exists, skipping user creation');
-      return;
-    }
+    await tx.auditLog.deleteMany();
+    await tx.adjustment.deleteMany();
+    await tx.advance.deleteMany();
+    await tx.punch.deleteMany();
+    await tx.trip.deleteMany();
+    await tx.scheduleOverride.deleteMany();
+    await tx.leaveRequest.deleteMany();
+    await tx.schedule.deleteMany();
+    await tx.rateChange.deleteMany();
+    await tx.idempotencyKey.deleteMany();
+    await tx.rateLimitBucket.deleteMany();
+    await tx.flag.deleteMany();
+    // Detach users from branches before deleting branches
+    await tx.user.updateMany({ data: { branch_id: null } });
+    await tx.user.deleteMany();
+    await tx.branch.deleteMany();
+  });
 
+  console.log('seed: cleared existing data');
+
+  await prisma.$transaction(async (tx) => {
+    // Admin (owner)
     await tx.user.create({
       data: {
         username: 'owner',
@@ -87,7 +106,7 @@ async function main() {
     }
   });
 
-  console.log('seed: complete');
+  console.log(`seed: complete (${BRANCHES.length} branches, ${BRANCHES.length} employees, 1 admin)`);
 }
 
 main()

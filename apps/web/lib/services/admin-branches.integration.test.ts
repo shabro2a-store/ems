@@ -96,4 +96,28 @@ describe('admin-branches integration', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('PATCH updates lat/lng from GPS capture (record-location flow)', async () => {
+    const admin = await seedTestUser({ username: 'b-admin5', role: Role.ADMIN });
+    const branch = await seedTestBranch({ name: 'Capture Target' });
+    const session = await loginAs(admin.username, 'change-me');
+
+    // Simulate the coords a browser would capture from navigator.geolocation
+    const capturedFix = { lat: 33.89382, lng: 35.50176 }; // Beirut-ish
+    const res = await fetch(`${BASE_URL}/api/admin/branches/${branch.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idemKey('br5'),
+        'X-CSRF-Token': session.csrf,
+        Cookie: session.cookies,
+      },
+      body: JSON.stringify({ lat: capturedFix.lat, lng: capturedFix.lng }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; data?: { branch: { lat: number; lng: number } } };
+    expect(body.ok).toBe(true);
+    expect(body.data?.branch.lat).toBeCloseTo(capturedFix.lat, 5);
+    expect(body.data?.branch.lng).toBeCloseTo(capturedFix.lng, 5);
+  });
 });
