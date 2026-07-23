@@ -32,6 +32,7 @@ export default function AdminPayrollPage() {
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [totals, setTotals] = useState<PayrollTotals | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   async function load() {
     setErr(null);
@@ -51,16 +52,42 @@ export default function AdminPayrollPage() {
     load();
   }, [month]);
 
+  async function downloadPdf() {
+    setPdfBusy(true);
+    try {
+      const res = await fetch(
+        `/api/admin/reports/payroll?month=${encodeURIComponent(month)}`,
+        { credentials: 'include' },
+      );
+      if (!res.ok) {
+        const body = await res.text();
+        setErr(`PDF failed: ${res.status} ${body.slice(0, 200)}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payroll-${month}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   return (
     <main className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Payroll</h1>
         <button
-          disabled
-          className="rounded bg-gray-300 text-gray-700 px-3 py-2 text-sm"
-          title="PDF export — Phase 5b"
+          onClick={downloadPdf}
+          disabled={pdfBusy}
+          className="rounded bg-emerald-600 text-white px-3 py-2 text-sm disabled:opacity-50"
         >
-          Download PDF (Phase 5b)
+          {pdfBusy ? 'Generating…' : '📄 Download PDF'}
         </button>
       </div>
 
