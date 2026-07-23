@@ -1,10 +1,13 @@
 import cron from 'node-cron';
-import { notifier } from 'notify';
+import { getNotifier } from 'notify';
 import { runWatchedDetector } from './jobs/watchedDetector';
 import { runMissedCheckout } from './jobs/missedCheckout';
 import { runTripThreshold } from './jobs/tripThreshold';
 import { runDriverStale } from './jobs/driverStale';
 import { runEndOfDayWatcher } from './jobs/endOfDayWatcher';
+import { runDailySummary } from './jobs/dailySummary';
+
+const notifier = getNotifier();
 
 console.log('cron runner started');
 
@@ -23,11 +26,13 @@ cron.schedule('*/1 * * * *', safe('missedCheckout', () => runMissedCheckout({ no
 cron.schedule('*/1 * * * *', safe('tripThreshold', () => runTripThreshold({ notifier })));
 cron.schedule('*/30 * * * *', safe('driverStale', () => runDriverStale({ notifier })));
 cron.schedule('30 23 * * *', safe('endOfDayWatcher', () => runEndOfDayWatcher({ notifier })));
+cron.schedule('0 23 * * *', safe('dailySummary', () => runDailySummary({ notifier })));
 
 console.log('cron schedule registered:');
 console.log('  */1     watchedDetector, missedCheckout, tripThreshold');
 console.log('  */30    driverStale');
 console.log('  30 23   endOfDayWatcher');
+console.log('  0 23    dailySummary');
 
 process.on('SIGTERM', () => {
   console.log('worker received SIGTERM, shutting down');

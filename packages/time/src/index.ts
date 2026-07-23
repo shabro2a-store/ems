@@ -22,3 +22,19 @@ export function beirutWeekday(now: Date = new Date()): number {
 export function scheduledToUtc(date: string, hhmm: string): Date {
   return zonedTimeToUtc(`${date} ${hhmm}`, SHOP_TZ);
 }
+
+/**
+ * Returns the UTC [start, end) range for the given Beirut-local day.
+ * start = midnight in Beirut, end = midnight of the next day in Beirut.
+ */
+export function todayInBeirutDateRange(date: string): { startUtc: Date; endUtc: Date } {
+  const startLocal = `${date} 00:00:00`;
+  const startUtc = zonedTimeToUtc(startLocal, SHOP_TZ);
+  // end = start of next day. Add 24h UTC roughly; then normalize by converting
+  // a Beirut-local next-day-midnight.
+  const nextDate = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000);
+  // Format nextDate as YYYY-MM-DD in Beirut tz, build next-day midnight
+  const nextDateStr = formatInTimeZone(nextDate, SHOP_TZ, 'yyyy-MM-dd');
+  const endUtc = zonedTimeToUtc(`${nextDateStr} 00:00:00`, SHOP_TZ);
+  return { startUtc, endUtc };
+}

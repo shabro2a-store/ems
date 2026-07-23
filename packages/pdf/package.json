@@ -5,7 +5,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@react-pdf/renderer": "^3.4.4"
+  },
   "devDependencies": {
+    "@types/react": "^18.3.3",
     "typescript": "^5.5.3"
   }
 }
