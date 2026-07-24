@@ -1019,3 +1019,41 @@ Pushed to `shabro2a-store/ems`.
 8. Both branches now have real GPS coords
 
 **Then** `emp1` (Home Office) and `emp2` (Tarek Jdedi) can punch in/out from their real locations via Chrome devtools → Sensors → mock GPS at branch coords.
+
+---
+
+## 27. UX Backlog & Pilot Plan (locked 2026-07-24)
+
+**Status:** `UX_BACKLOG.md` and `PILOT_PLAN.md` written at repo root. Captured owner feedback ("UI needs change, UX is what needs changing") and outlined the single-branch pilot scope. No code changes yet — both are planning docs.
+
+**UX_BACKLOG.md** contains 10 guessed UX issues (empty states, loading skeletons, mobile responsiveness, error messages, etc.) ranked by likely impact. Owner to add/remove during continued testing.
+
+**PILOT_PLAN.md** outlines scope of the single-branch pilot (Home Office + 2 users), pre-flight checklist, success criteria, risk register, and rollback plan.
+
+### Git commits
+
+Last 5 commits:
+```
+3acee3b docs(phase-7-local-cookies): document the Secure-flag fix
+8b4cc0d fix(local-cookies): use PUBLIC_APP_URL to determine Secure flag
+861d8c8 feat(admin/payroll): wire up Download PDF button to /api/admin/reports/payroll
+d1f3447 feat(phase-5b): Telegram notifications + PDF payroll + daily summary
+f0bc8b4 docs(phase-7-record-location): document new branch GPS capture feature
+```
+
+### What works locally (verified 2026-07-24)
+
+- ✅ Login (cookies fix in place)
+- ✅ Admin dashboard (10s polling)
+- ✅ Branches page with Record Location button
+- ✅ PDF payroll download (PDF-1.3, ~2.5KB)
+- ✅ All 3 containers healthy (db, web, worker)
+
+### What's still pending
+
+- ❌ Telegram bot (build, unverified — no real bot)
+- ❌ Tarek Jdedi branch coords (still 0,0)
+- ❌ Home Office branch coords (still 0,0)
+- ❌ UX polish (per UX_BACKLOG.md)
+- ❌ Single-branch pilot (per PILOT_PLAN.md)
+- ❌ Production deploy (Coolify / VPS)
