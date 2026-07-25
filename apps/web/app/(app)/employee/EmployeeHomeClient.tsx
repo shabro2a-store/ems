@@ -134,6 +134,39 @@ export default function EmployeeHomeClient({ branch }: { branch: { name: string;
     [status, fetchToday],
   );
 
+  const devPunch = useCallback(
+    async (kind: 'IN' | 'OUT') => {
+      setBusy(true);
+      setBanner(null);
+      try {
+        const csrf = csrfFromCookie();
+        const r = await fetch('/api/me/punch/dev', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key':
+              `dev-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            'X-CSRF-Token': csrf ?? '',
+          },
+          body: JSON.stringify({ kind }),
+        });
+        const j = await r.json();
+        if (j.ok) {
+          setBanner(`[DEV] ${kind === 'IN' ? 'Checked in' : 'Checked out'} (no GPS).`);
+          await fetchToday();
+        } else {
+          setBanner(`[DEV] Error: ${j.error?.code ?? 'UNKNOWN'} — ${j.error?.message ?? ''}`);
+        }
+      } catch (e) {
+        setBanner(`[DEV] Network error: ${e instanceof Error ? e.message : 'unknown'}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [fetchToday],
+  );
+
   const isIn = Boolean(today?.in_at);
 
   return (
@@ -179,6 +212,36 @@ export default function EmployeeHomeClient({ branch }: { branch: { name: string;
       <p className="mt-6 text-xs text-gray-500">
         Branch radius {branch.gps_radius_m}m. GPS must be within radius and accuracy ≤ {branch.gps_accuracy_max_m}m.
       </p>
+
+      {/* Dev-only bypass: visible only when NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS=true.
+          In dev (laptop), this is true by default. In production, set to false. */}
+      {process.env.NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS === 'true' && (
+        <div className="mt-4 p-3 rounded border border-dashed border-amber-300 bg-amber-50 text-xs">
+          <div className="font-semibold text-amber-900 mb-1">Dev bypass (laptop only)</div>
+          <div className="text-amber-800 mb-2">
+            Skips GPS + geofence. Punches recorded at branch center. Use only for
+            testing on a machine without GPS (like this laptop).
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => devPunch('IN')}
+              className="flex-1 min-h-[44px] rounded bg-amber-600 text-white px-3 py-2 text-sm disabled:opacity-50"
+            >
+              Dev IN
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => devPunch('OUT')}
+              className="flex-1 min-h-[44px] rounded bg-amber-700 text-white px-3 py-2 text-sm disabled:opacity-50"
+            >
+              Dev OUT
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -22,7 +22,16 @@ export function validateCsrf(cookieValue: string | undefined, headerValue: strin
 export function csrfFromRequest(req: Request): boolean {
   const cookieHeader = req.headers.get('cookie') ?? '';
   const cookieMatch = cookieHeader.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE_NAME}=([^;]+)`));
-  const cookieToken = cookieMatch?.[1];
+  const rawCookie = cookieMatch?.[1];
+  // Cookies are URL-encoded by the browser. The X-CSRF-Token header is typically
+  // already decoded by the client JS (decodeURIComponent). Compare them on the
+  // decoded form so both sides work.
+  let cookieToken: string | undefined;
+  try {
+    cookieToken = rawCookie ? decodeURIComponent(rawCookie) : undefined;
+  } catch {
+    cookieToken = rawCookie;
+  }
   const headerToken = req.headers.get('x-csrf-token') ?? undefined;
   return validateCsrf(cookieToken, headerToken);
 }

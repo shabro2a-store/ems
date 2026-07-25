@@ -1,0 +1,113 @@
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { headers } from 'next/headers';
+import { prisma } from '@/lib/db/prisma';
+import { csrfFromRequest } from '@/lib/auth/csrf';
+import { writeAuditLog } from '@/lib/services/audit';
+
+const DevPunchBody = z.object({
+  kind: z.enum(['IN', 'OUT']),
+  // No lat/lng/accuracy required — dev override always passes
+});
+
+function jsonError(code: string, message: string, status: number) {
+  return NextResponse.json({ ok: false, error: { code, message } }, { status });
+}
+
+export async function POST(req: Request) {
+  // Gate behind an explicit env var. Available in dev OR when explicitly enabled in prod.
+  // Production deployments should set ENABLE_DEV_ENDPOINTS=false (or omit it).
+  if (process.env.ENABLE_DEV_ENDPOINTS !== 'true') {
+    return jsonError('NOT_FOUND', 'Endpoint not available', 404);
+  }
+
+  const h = headers();
+  const userId = h.get('x-user-id');
+  if (!userId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
+
+  if (!csrfFromRequest(req)) {
+    return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
+  }
+
+  let body: z.infer<typeof DevPunchBody>;
+  try {
+    body = DevPunchBody.parse(await req.json());
+  } catch (err) {
+    return jsonError('INVALID_INPUT', 'Invalid body: ' + (err instanceof Error ? err.message : 'parse error'), 400);
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { branch: true },
+  });
+  if (!user || !user.branch) {
+    return jsonError('NOT_FOUND', 'User or branch not found', 404);
+  }
+
+  // Open session check
+  const lastIn = await prisma.punch.findFirst({
+    where: { user_id: userId, kind: 'IN' },
+    orderBy: { at: 'desc' },
+  });
+  const lastOut = lastIn
+    ? await prisma.punch.findFirst({
+        where: { user_id: userId, kind: 'OUT', at: { gt: lastIn.at } },
+      })
+    : null;
+  const hasOpenSession = Boolean(lastIn) && !lastOut;
+  if (body.kind === 'IN' && hasOpenSession) {
+    return jsonError('ALREADY_PUNCHED_IN', 'You have an open session', 409);
+  }
+  if (body.kind === 'OUT' && !hasOpenSession) {
+    return jsonError('NOT_PUNCHED_IN', 'No open session to close', 409);
+  }
+
+  const now = new Date();
+  // Use the user's branch coords as the GPS reading (dev override).
+  const punch = await prisma.punch.create({
+    data: {
+      user_id: userId,
+      branch_id: user.branch.id,
+      kind: body.kind,
+      at: now,
+      lat: user.branch.lat,
+      lng: user.branch.lng,
+      accuracy_m: 10, // synthetic — looks like good GPS
+      device_fp: 'dev-override',
+      ip: '127.0.0.1',
+    },
+  });
+
+  await writeAuditLog({
+    actorId: userId,
+    action: 'punch.dev-override',
+    entity: 'Punch',
+    entityId: punch.id,
+    after: {
+      kind: punch.kind,
+      at: punch.at.toISOString(),
+      branch_id: punch.branch_id,
+      note: 'dev-only bypass used (NODE_ENV !== production)',
+    },
+  });
+
+  // Compute minutes_since_in
+  let minutes_since_in: number | null = null;
+  if (body.kind === 'IN') {
+    minutes_since_in = 0;
+  } else if (lastIn) {
+    minutes_since_in = Math.max(0, Math.floor((now.getTime() - lastIn.at.getTime()) / 60_000));
+  }
+
+  return NextResponse.json({
+    ok: true,
+    data: {
+      at: punch.at.toISOString(),
+      kind: punch.kind,
+      minutes_since_in,
+      _dev: 'punch recorded via dev bypass (no GPS, no geofence check)',
+    },
+  });
+}
+
+export const dynamic = 'force-dynamic';
