@@ -20,6 +20,11 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const before = await prisma.user.findUnique({ where: { id: ctx.params.id } });
   if (!before) return jsonError('NOT_FOUND', 'User not found', 404);
 
+  // Never let an admin be deactivated — that could lock everyone out of the system.
+  if (before.role === 'ADMIN') {
+    return jsonError('FORBIDDEN', 'The admin account cannot be deactivated', 403);
+  }
+
   const user = await prisma.user.update({
     where: { id: ctx.params.id },
     data: { is_active: !before.is_active },

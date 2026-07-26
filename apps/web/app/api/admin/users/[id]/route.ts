@@ -35,9 +35,13 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const before = await prisma.user.findUnique({ where: { id: ctx.params.id } });
   if (!before) return jsonError('NOT_FOUND', 'User not found', 404);
 
-  let nextRole = body.role ?? before.role;
-  if (nextRole === 'ADMIN') {
-    body = { ...body, branchId: null };
+  // Protect the single admin account: you can't promote anyone to ADMIN, and you
+  // can't change the admin's role (which would demote/lock out the owner).
+  if (body.role === 'ADMIN') {
+    return jsonError('FORBIDDEN', 'Cannot promote a user to admin', 403);
+  }
+  if (before.role === 'ADMIN' && body.role !== undefined) {
+    return jsonError('FORBIDDEN', 'The admin account cannot be changed', 403);
   }
 
   const user = await prisma.$transaction(async (tx) => {

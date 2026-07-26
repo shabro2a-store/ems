@@ -37,6 +37,7 @@ export default function AdminEmployeesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
   const [schedUser, setSchedUser] = useState<User | null>(null);
+  const [pwTarget, setPwTarget] = useState<User | null>(null);
   const [tempPw, setTempPw] = useState<{ username: string; pw: string } | null>(null);
 
   async function load() {
@@ -83,12 +84,6 @@ export default function AdminEmployeesPage() {
     const res = await apiSend(`/api/admin/users/${u.id}/deactivate`);
     if (!res.ok) { setErr(errorMessage(res)); return; }
     await load();
-  }
-  async function resetPw(u: User) {
-    setErr(null);
-    const res = await apiSend<{ temp_password: string }>(`/api/admin/users/${u.id}/reset-password`);
-    if (!res.ok) { setErr(errorMessage(res)); return; }
-    setTempPw({ username: u.username, pw: res.data.temp_password });
   }
 
   return (
@@ -157,14 +152,18 @@ export default function AdminEmployeesPage() {
                           </td>
                           <td className="px-4 py-2.5">
                             <div className="flex justify-end gap-1.5">
-                              <Button size="sm" variant="secondary" onClick={() => { setErr(null); setEditUser(u); }}>Edit</Button>
                               {u.role !== 'ADMIN' && (
-                                <Button size="sm" variant="secondary" onClick={() => setSchedUser(u)}>Schedule</Button>
+                                <>
+                                  <Button size="sm" variant="secondary" onClick={() => { setErr(null); setEditUser(u); }}>Edit</Button>
+                                  <Button size="sm" variant="secondary" onClick={() => setSchedUser(u)}>Schedule</Button>
+                                </>
                               )}
-                              <Button size="sm" variant="ghost" onClick={() => resetPw(u)}>Reset PW</Button>
-                              <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
-                                {u.is_active ? 'Deactivate' : 'Activate'}
-                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setPwTarget(u)}>Set password</Button>
+                              {u.role !== 'ADMIN' && (
+                                <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
+                                  {u.is_active ? 'Deactivate' : 'Activate'}
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -196,6 +195,9 @@ export default function AdminEmployeesPage() {
       {schedUser && (
         <ScheduleModal user={schedUser} onClose={() => setSchedUser(null)} onSaved={() => { setSchedUser(null); setNotice('Schedule saved.'); }} />
       )}
+      {pwTarget && (
+        <SetPasswordModal user={pwTarget} onClose={() => setPwTarget(null)} onDone={(pw) => { setTempPw({ username: pwTarget.username, pw }); setPwTarget(null); }} />
+      )}
       {tempPw && (
         <Modal title="Temporary password" onClose={() => setTempPw(null)} footer={<Button onClick={() => setTempPw(null)}>Done</Button>}>
           <p className="text-sm text-muted">Share this with <b className="text-content">{tempPw.username}</b> — they'll be asked to change it on first login.</p>
@@ -224,6 +226,38 @@ function StatusChip({ st }: { st: Status }) {
   return <Badge tone="danger">Absent</Badge>;
 }
 function fmt(min: number) { const h = Math.floor(min / 60); return h ? `${h}h ${min % 60}m` : `${min}m`; }
+
+function SetPasswordModal({ user, onClose, onDone }: { user: User; onClose: () => void; onDone: (pw: string) => void }) {
+  const [pw, setPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(useRandom: boolean) {
+    setBusy(true); setErr(null);
+    const res = await apiSend<{ temp_password: string }>(`/api/admin/users/${user.id}/reset-password`, {
+      body: useRandom ? {} : { password: pw },
+    });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onDone(res.data.temp_password);
+  }
+
+  return (
+    <Modal title={`Set password · ${user.username}`} onClose={onClose}
+      footer={<>
+        <Button variant="secondary" onClick={() => submit(true)} loading={busy}>Generate random</Button>
+        <Button onClick={() => submit(false)} loading={busy} disabled={pw.length < 6}>Set password</Button>
+      </>}>
+      <div className="space-y-3">
+        <Field label="New password" htmlFor="spw" hint="At least 6 characters, or use Generate random.">
+          <Input id="spw" type="text" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Type a password" autoComplete="off" />
+        </Field>
+        <p className="text-xs text-muted">The user should change it after logging in.</p>
+        {err && <Alert tone="danger">{err}</Alert>}
+      </div>
+    </Modal>
+  );
+}
 
 function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branch[]; onClose: () => void; onCreated: (u: string, pw: string) => void }) {
   const [username, setUsername] = useState('');
@@ -258,7 +292,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
         <Field label="Temporary password" htmlFor="cp" hint="Share verbally; they change it on first login."><Input id="cp" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
         <Field label="Role" htmlFor="cr">
           <Select id="cr" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option><option value="ADMIN">Admin</option>
+            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option>
           </Select>
         </Field>
         {role !== 'ADMIN' && (
@@ -302,7 +336,7 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
       <form id="edit-emp" onSubmit={submit} className="space-y-4">
         <Field label="Role" htmlFor="er">
           <Select id="er" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option><option value="ADMIN">Admin</option>
+            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option>
           </Select>
         </Field>
         {role !== 'ADMIN' && (

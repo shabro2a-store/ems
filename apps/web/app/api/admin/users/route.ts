@@ -51,6 +51,11 @@ export async function POST(req: Request) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
 
+  // Admin accounts cannot be created through the app — there is a single owner
+  // account. Managerial roles will be added deliberately when the business grows.
+  if (body.role === 'ADMIN') {
+    return jsonError('FORBIDDEN', 'Admin accounts cannot be created here', 403);
+  }
   if (ROLES_FOR_BRANCH.has(body.role) && !body.branchId) {
     return jsonError('INVALID_INPUT', 'Branch required for non-admin role', 400);
   }

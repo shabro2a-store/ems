@@ -67,10 +67,15 @@ export async function GET(req: Request) {
     }),
   );
 
+  const branchName = branchId
+    ? (await prisma.branch.findUnique({ where: { id: branchId }, select: { name: true } }))?.name ?? null
+    : null;
+
   const doc = React.createElement(PayrollDocument, {
     month,
     generatedAt: new Date(),
     rows,
+    branchName,
   });
   const buffer = await renderToBuffer(doc as React.ReactElement);
 

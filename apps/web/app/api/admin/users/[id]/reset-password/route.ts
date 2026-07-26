@@ -28,7 +28,21 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const user = await prisma.user.findUnique({ where: { id: ctx.params.id } });
   if (!user) return jsonError('NOT_FOUND', 'User not found', 404);
 
-  const tempPassword = generateTempPassword();
+  // Admin may either set a chosen password or leave it blank for a random one.
+  let chosen: string | undefined;
+  try {
+    const body = await req.json().catch(() => ({}));
+    if (body && typeof body.password === 'string' && body.password.length > 0) {
+      if (body.password.length < 6 || body.password.length > 256) {
+        return jsonError('INVALID_INPUT', 'Password must be 6-256 characters', 400);
+      }
+      chosen = body.password;
+    }
+  } catch {
+    /* no body — fall through to random */
+  }
+
+  const tempPassword = chosen ?? generateTempPassword();
   const passwordHash = await bcrypt.hash(tempPassword, 12);
 
   await prisma.user.update({

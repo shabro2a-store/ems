@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState } from 'react';
 import { apiSend } from '@/lib/api';
+import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 
 export interface NavItem {
   href: string;
@@ -25,6 +27,7 @@ export interface AdminNavProps {
 
 export default function AdminNav({ username, flagCount }: AdminNavProps) {
   const pathname = usePathname();
+  const [pwOpen, setPwOpen] = useState(false);
 
   async function logout() {
     await apiSend('/api/auth/logout');
@@ -59,6 +62,13 @@ export default function AdminNav({ username, flagCount }: AdminNavProps) {
           )}
           <button
             type="button"
+            onClick={() => setPwOpen(true)}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-muted"
+          >
+            Password
+          </button>
+          <button
+            type="button"
             onClick={logout}
             className="rounded-lg border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-muted"
           >
@@ -66,6 +76,7 @@ export default function AdminNav({ username, flagCount }: AdminNavProps) {
           </button>
         </div>
       </div>
+      {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
       <nav className="mx-auto max-w-6xl overflow-x-auto px-2 sm:px-4">
         <ul className="flex gap-1 py-1.5 text-sm">
           {NAV_ITEMS.map((item) => {
