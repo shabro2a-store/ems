@@ -1,1059 +1,166 @@
-# API Contract — Supermarket EMS
+# API Contract — Shabro2a EMS
 
-**Source of truth:** `spec.md` §6 (schema), §7 (endpoints), §8 (services), §9 (security).
-**Status:** Phase 0 complete. No API endpoints yet. This document is **forward-declared** — every endpoint listed here has its final shape locked by `spec.md` §7. Future phases MUST NOT invent new endpoints or change shapes; if a real need appears, update `spec.md` first, then this file.
+Every HTTP endpoint the app exposes. See [SYSTEM_MAP.md](SYSTEM_MAP.md) for the data
+model and business rules.
 
-**Purpose:** Every function, endpoint, variable, table, and column that this system exposes or uses. Builders of Phase 1+ read this BEFORE `spec.md` to know exactly what's already locked. **If a future build prompt tries to introduce something not in this file, that's a red flag — stop and check `spec.md`.**
+## Conventions
+- **Envelope**: success `{ "ok": true, "data": {...} }`; error
+  `{ "ok": false, "error": { "code": "...", "message": "..." } }`.
+- **Auth**: a JWT in the httpOnly `ems_access` cookie. Middleware verifies it and
+  injects `x-user-id` / `x-user-role` / `x-user-branch-id` request headers (clients
+  cannot set these). Any `/api/me/*` or `/api/admin/*` request without a valid
+  session gets `401 UNAUTHORIZED`. Each route additionally checks the role.
+- **CSRF**: every state-changing request must send the `csrf` cookie value in an
+  `X-CSRF-Token` header (double-submit). Failure → `403 FORBIDDEN` "CSRF token mismatch".
+- **Idempotency**: POSTs marked *Idempotent* require an `Idempotency-Key` header;
+  a replay within 24h returns the original response.
+- **Rate limits**: login, punch, trip-start, advance — 5/min each → `429 RATE_LIMITED`
+  (with `Retry-After` except login).
+- **Money** is integer cents (USD). **Times** are ISO-8601 UTC; the business day is Asia/Beirut.
+- Secrets (e.g. `password_hash`) are never returned.
 
-**Authority hierarchy (canonical):**
-- `spec.md` §6/§7/§8/§9 wins for WHAT (schema, endpoints, service logic, security).
-- `build.md` wins for WHEN and HOW (phase order, file naming, commit format).
-- Anything new not in either doc: STOP, update both first, then proceed.
-- See `build.md` §"How to use this document" for the full table.
-
----
-
-## 1. Tables (Prisma models from `spec.md` §6)
-
-### `User`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `username` | `String @unique` | Login identifier |
-| `password_hash` | `String` | bcrypt(password, 12). Never plaintext |
-| `role` | `Role` enum | `EMPLOYEE` \| `DRIVER` \| `ADMIN` |
-| `branch_id` | `String?` | NULL for ADMIN (admins are global) |
-| `branch` | `Branch?` relation | |
-| `hourly_rate_cent` | `Int` | USD cents. **Display-only** — payout reads from `RateChange` |
-| `is_active` | `Boolean @default(true)` | Soft-disable; never delete |
-| `telegram_chat_id` | `String?` | Bot writes on `/start` |
-| `notify_daily_summary` | `Boolean @default(true)` | Admin rows only |
-| `notify_routine_pings` | `Boolean @default(true)` | Admin rows only |
-| `created_at` | `DateTime @default(now())` | |
-| **Back-relations** | `punches`, `rate_changes`, `schedules`, `schedule_overrides`, `leave_requests`, `trips_as_driver` (`@relation("TripDriver")`), `advances`, `adjustments`, `flags` | |
-
-### `Branch`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `name` | `String` | |
-| `lat` | `Float` | |
-| `lng` | `Float` | |
-| `gps_radius_m` | `Int @default(50)` | Per-branch configurable |
-| `gps_accuracy_max_m` | `Int @default(100)` | |
-| `absent_grace_min` | `Int @default(15)` | |
-| `trip_threshold_min` | `Int @default(30)` | |
-| `is_active` | `Boolean @default(true)` | Soft-disable |
-| **Back-relations** | `users`, `punches`, `trips`, `flags` | |
-
-### `Punch` (append-only)
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `user_id` | `String` | FK → User |
-| `branch_id` | `String` | FK → Branch (must be user's assigned branch) |
-| `kind` | `PunchKind` enum | `IN` \| `OUT` |
-| `at` | `DateTime` | UTC |
-| `lat` | `Float` | |
-| `lng` | `Float` | |
-| `accuracy_m` | `Int` | |
-| `device_fp` | `String` | |
-| `ip` | `String` | |
-| `corrected` | `Boolean @default(false)` | |
-| `corrected_by` | `String?` | |
-| `correction_reason` | `String?` | |
-| `created_at` | `DateTime @default(now())` | |
-| **Indexes** | `(user_id, at)`, `(branch_id, at)` | |
-
-### `RateChange` (append-only — single source of truth for rate)
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `user_id` | `String` | FK → User (non-admin only — admin has no RateChange) |
-| `rate_cent` | `Int` | USD cents |
-| `effective_from` | `DateTime` | UTC |
-| `created_at` | `DateTime @default(now())` | |
-| **Indexes** | `(user_id, effective_from)` | |
-| **Invariant** | Every non-admin user creation writes a RateChange in the same transaction. Every rate edit writes a new RateChange. | |
-
-### `Schedule`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `user_id` | `String` | FK → User |
-| `weekday` | `Int` | 0 = Sun ... 6 = Sat (matches JS Date.getDay()) |
-| `start_time` | `String` | "HH:MM" wall-clock Asia/Beirut |
-| `end_time` | `String` | "HH:MM" wall-clock Asia/Beirut |
-| **Constraints** | `@@unique([user_id, weekday])`, CHECK `weekday BETWEEN 0 AND 6`, CHECK `start_time ~ '^\d{2}:\d{2}$'`, CHECK `end_time ~ '^\d{2}:\d{2}$'` | |
-
-### `ScheduleOverride` (materialized schedule truth)
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `user_id` | `String` | FK → User |
-| `date` | `DateTime @db.Date` | YYYY-MM-DD in Asia/Beirut |
-| `kind` | `OverrideKind` enum | `DAY_OFF` \| `TIME_CHANGE` |
-| `start_time` | `String?` | |
-| `end_time` | `String?` | |
-| `note` | `String?` | |
-| `source` | `OverrideSource` enum | `ADMIN_DIRECT` \| `EMPLOYEE_REQUEST` \| `EMPLOYEE_DAY_OFF` |
-| `created_at` | `DateTime @default(now())` | |
-| **Constraints** | `@@unique([user_id, date])` | |
-
-### `LeaveRequest` (employee-facing request, writes ScheduleOverride on approval)
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `user_id` | `String` | FK → User |
-| `kind` | `OverrideKind` enum | |
-| `start_date` | `DateTime @db.Date` | |
-| `end_date` | `DateTime @db.Date` | |
-| `start_time` | `String?` | |
-| `end_time` | `String?` | |
-| `note` | `String?` | |
-| `status` | `RequestStatus` enum | `PENDING` \| `APPROVED` \| `REJECTED` |
-| `decided_by` | `String?` | |
-| `decided_at` | `DateTime?` | |
-| `created_at` | `DateTime @default(now())` | |
-| **Indexes** | `(user_id, status)` | |
-| **Constraints** | CHECK `end_date >= start_date` | |
-
-### `Trip`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `driver_id` | `String` | FK → User (`@relation("TripDriver")`) |
-| `branch_id` | `String` | FK → Branch |
-| `out_at` | `DateTime` | |
-| `out_lat` | `Float` | |
-| `out_lng` | `Float` | |
-| `back_at` | `DateTime?` | NULL while open |
-| `back_lat` | `Float?` | |
-| `back_lng` | `Float?` | |
-| `over_threshold` | `Boolean @default(false)` | |
-| `threshold_alerted_at` | `DateTime?` | Dedup: one alert per trip |
-| **Indexes** | `(driver_id, out_at)`, partial unique `(driver_id) WHERE back_at IS NULL`, partial index `(branch_id) WHERE back_at IS NULL` | |
-
-### `Advance`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `user_id` | `String` | FK → User |
-| `amount_cent` | `Int` | USD cents |
-| `reason` | `String?` | |
-| `status` | `RequestStatus` enum | `PENDING` \| `APPROVED` \| `REJECTED` (**no `PAID`**) |
-| `decided_by` | `String?` | |
-| `decided_at` | `DateTime?` | |
-| `created_at` | `DateTime @default(now())` | |
-| **Indexes** | `(user_id, status)` | |
-| **Constraint** | Cap at accrued earnings this month (decision #21): `approved_balance + new_amount <= accrued_earnings_this_month` | |
-
-### `Adjustment` (append-only)
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `user_id` | `String` | FK → User |
-| `period` | `DateTime @db.Date` | Always the 1st of the month, Asia/Beirut |
-| `kind` | `AdjustmentKind` enum | `BONUS` \| `DEDUCTION` |
-| `amount_cent` | `Int` | Non-negative; sign from `kind` (BONUS=+, DEDUCTION=-) |
-| `reason` | `String` | |
-| `created_by` | `String` | User.id (admin) |
-| `created_at` | `DateTime @default(now())` | |
-| **Indexes** | `(user_id, period)` | |
-| **Constraints** | CHECK `amount_cent >= 0`, CHECK `EXTRACT(DAY FROM period) = 1` | |
-
-### `Flag`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `kind` | `FlagKind` enum | `WATCHED` \| `MISSED_CHECKOUT` \| `TRIP_OVER_THRESHOLD` |
-| `user_id` | `String?` | FK → User (nullable for system flags) |
-| `branch_id` | `String?` | FK → Branch |
-| `context_json` | `Json` | |
-| `created_at` | `DateTime @default(now())` | |
-| `notified_at` | `DateTime?` | **One allowed UPDATE**: set on WATCHED resolution |
-| **Indexes** | `(created_at DESC)` | |
-
-### `AuditLog` (append-only, REVOKE UPDATE/DELETE)
-| Field | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `actor_id` | `String` | User.id of who did it |
-| `action` | `String` | e.g. `"user.create"`, `"punch.correct"`, `"advance.approve"` |
-| `entity` | `String` | e.g. `"User"`, `"Punch"`, `"Advance"` |
-| `entity_id` | `String` | |
-| `before_json` | `Json?` | |
-| `after_json` | `Json?` | |
-| `at` | `DateTime @default(now())` | |
-| **Indexes** | `(entity, entity_id)` | |
-| **DB-level** | `REVOKE UPDATE, DELETE ON "AuditLog" FROM ems_app` | |
-
-### `IdempotencyKey`
-| Field | Type | Notes |
-|---|---|---|
-| `key` | `String` | From `Idempotency-Key` header |
-| `user_id` | `String` | Scoped per user |
-| `response_json` | `Json` | Cached response |
-| `status_code` | `Int` | |
-| `created_at` | `DateTime @default(now())` | |
-| `expires_at` | `DateTime` | Created_at + 24h |
-| **PK** | `@@id([key, user_id])` | |
-| **Indexes** | `(expires_at)` for nightly cleanup | |
-
-### `RateLimitBucket`
-| Field | Type | Notes |
-|---|---|---|
-| `identifier` | `String` | Format: `"user:{user_id}:punch"` or `"login:{username}:{ip}"` |
-| `tokens` | `Int` | Token bucket |
-| `refilled_at` | `DateTime @default(now())` | |
-| **PK** | `@@id([identifier])` | |
+Common error codes: `UNAUTHORIZED` 401, `FORBIDDEN` 403, `INVALID_INPUT` 400,
+`NOT_FOUND` 404, `RATE_LIMITED` 429, plus domain codes noted per endpoint.
 
 ---
 
-## 2. Enums
+## Auth (public)
 
-| Enum | Values |
-|---|---|
-| `Role` | `EMPLOYEE`, `DRIVER`, `ADMIN` |
-| `PunchKind` | `IN`, `OUT` |
-| `OverrideKind` | `DAY_OFF`, `TIME_CHANGE` |
-| `OverrideSource` | `ADMIN_DIRECT`, `EMPLOYEE_REQUEST`, `EMPLOYEE_DAY_OFF` |
-| `RequestStatus` | `PENDING`, `APPROVED`, `REJECTED` |
-| `AdjustmentKind` | `BONUS`, `DEDUCTION` |
-| `FlagKind` | `WATCHED`, `MISSED_CHECKOUT`, `TRIP_OVER_THRESHOLD` |
+### POST /api/auth/login
+Body `{ username, password }`. Rate-limited per (username, ip).
+→ `200 { user: { id, username, role, branchId }, mustChangePassword }` and sets the
+`ems_access`, `ems_refresh`, `csrf` cookies. Errors: `INVALID_INPUT`, `RATE_LIMITED`,
+`UNAUTHORIZED` (unknown/inactive user or wrong password).
 
----
+### POST /api/auth/logout
+CSRF. Clears the auth cookies. → `200 { loggedOut: true }`.
 
-## 3. Endpoints (forward-declared from `spec.md` §7)
+### POST /api/auth/refresh
+CSRF. Reads the `ems_refresh` cookie, rotates access + refresh + csrf. → `200 { refreshed: true }`.
+Error: `UNAUTHORIZED`.
 
-Every endpoint returns `{ ok: true, data }` or `{ ok: false, error: { code, message } }`.
-
-### 3.1 Auth (Phase 1)
-| Method | Path | Body | Returns | Auth |
-|---|---|---|---|---|
-| POST | `/api/auth/login` | `{ username, password }` | sets cookies; `{ mustChangePassword?: bool }` | Public |
-| POST | `/api/auth/logout` | — | clears cookies | Any |
-| POST | `/api/auth/refresh` | — | new access token cookie | Any |
-
-### 3.2 Employee (Phase 2 onwards)
-| Method | Path | Body | Returns | Auth |
-|---|---|---|---|---|
-| POST | `/api/me/punch` | `{ kind: 'IN'\|'OUT', lat, lng, accuracy, deviceFp }` | `{ at, kind, minutes_since_in? }` | employee, driver |
-| GET | `/api/me/today` | — | `{ in_at?, minutes_since_in?, earned_today_cent, earned_month_cent, approved_advance_balance_cent, net_cent }` | employee, driver |
-| GET | `/api/me/advances` | — | `{ pending: number, approved_balance_cent: number }` | employee, driver |
-| POST | `/api/me/advances` | `{ amountCent: number, reason?: string }` | `{ id, status: 'PENDING' }` | employee, driver |
-| GET | `/api/me/leave` | — | `{ pending: number, upcoming: ScheduleOverride[] }` | employee, driver |
-| POST | `/api/me/leave` | `{ kind, start_date, end_date, start_time?, end_time?, note? }` | `{ id, status: 'PENDING' }` | employee, driver |
-| GET | `/api/me/payroll?month=YYYY-MM` | — | `{ hours, gross_cent, adjustments_cent, advances_cent, net_cent }` | employee, driver (own only) |
-
-### 3.3 Driver (Phase 4)
-| Method | Path | Body | Returns | Auth |
-|---|---|---|---|---|
-| POST | `/api/me/trip/start` ✅ built Phase 4 | `{ lat, lng, accuracy }` | `{ trip_id, out_at }` | driver only |
-| POST | `/api/me/trip/end` ✅ built Phase 4 | `{ lat, lng, accuracy }` | `{ trip_id, back_at, duration_min }` | driver only |
-| GET | `/api/me/trip/current` ✅ built Phase 4 | — | `{ open: boolean, since_min?: number, threshold_min: number }` | driver only |
-
-### 3.4 Admin (Phase 5a)
-| Method | Path | Body | Returns | Auth |
-|---|---|---|---|---|
-| GET | `/api/admin/now` | — | `{ branches: [{ id, name, present: User[], absent: User[], driversOut: Trip[] }], flags: Flag[] }` | admin |
-| GET | `/api/admin/pending` | — | `{ advances: Advance[] }` | admin |
-| POST | `/api/admin/advances/:id/decision` | `{ decision: 'APPROVED'\|'REJECTED' }` | `{ id, status }` | admin |
-| GET | `/api/admin/payroll?month=YYYY-MM` | — | `{ rows: [...], totals: {...} }` | admin |
-| POST | `/api/admin/punches/correct` | `{ punchId, newAt?, newBranchId?, reason }` | `{ punch: Punch }` | admin (audit-logged) |
-| GET | `/api/admin/users` | — | `{ users: User[] }` | admin |
-| POST | `/api/admin/users` | `{ username, password, role, branchId?, hourlyRateCent }` | `{ user, temp_password }` | admin |
-| PATCH | `/api/admin/users/:id` | `{ hourlyRateCent?, role?, branchId? }` | `{ user }` | admin (audit-logged) |
-| POST | `/api/admin/users/:id/deactivate` | — | `{ user }` | admin |
-| POST | `/api/admin/users/:id/reset-password` | — | `{ temp_password }` | admin |
-| GET | `/api/admin/branches` | — | `{ branches: Branch[] }` | admin |
-| POST | `/api/admin/branches` | `{ name, lat, lng, gps_radius_m?, gps_accuracy_max_m?, absent_grace_min?, trip_threshold_min? }` | `{ branch }` | admin |
-| PATCH | `/api/admin/branches/:id` | `{ ... partial }` | `{ branch }` | admin |
-| GET | `/api/admin/schedules/:userId` | — | `{ schedule: Schedule[], overrides: ScheduleOverride[] }` | admin |
-| PUT | `/api/admin/schedules/:userId` | `{ schedule: [{ weekday, start_time, end_time }] }` | `{ schedule }` | admin |
-| GET | `/api/admin/leave` ✅ built Phase 4 | — | `{ requests: LeaveRequest[] }` | admin |
-| POST | `/api/admin/leave/:id/decision` ✅ built Phase 4 | `{ decision: 'APPROVED'\|'REJECTED' }` | `{ request, override? }` | admin |
-| GET | `/api/admin/schedules/:userId` ✅ built Phase 4 | — | `{ schedule: Schedule[], overrides: ScheduleOverride[] }` | admin |
-| PUT | `/api/admin/schedules/:userId` ✅ built Phase 4 | `{ schedule: [{ weekday, start_time, end_time }] }` | `{ schedule }` | admin |
-| POST | `/api/admin/adjustments` | `{ userId, kind: 'BONUS'\|'DEDUCTION', amountCent: number, reason: string }` | `{ adjustment }` | admin (audit-logged) |
-| PATCH | `/api/admin/users/:id/notification-prefs` | `{ dailySummary?: bool, routinePings?: bool }` | `{ user }` | admin |
-| GET | `/api/admin/reports/payroll?month=YYYY-MM` | — | PDF stream (`Content-Type: application/pdf`) | admin |
-
-### 3.5 System (Phase 5b + Phase 6)
-| Method | Path | Body | Returns | Auth | Status |
-|---|---|---|---|---|---|
-| POST | `/api/telegram/webhook` | Telegram update | 200 | Telegram secret token | ⏳ Phase 5b |
-| GET | `/api/health` | — | `{ ok: true, uptime_s, version }` | Public | ✅ built Phase 6a |
-| GET | `/api/health/db` | — | `{ ok: true, latency_ms }` or 503 | Public | ✅ built Phase 6a |
+## Health (public)
+- **GET /api/health** → `200 { uptime_s, version }`.
+- **GET /api/health/db** → `200 { latency_ms }`, or `503 DB_UNREACHABLE` / `DB_SLOW`.
 
 ---
 
-## 4. Stable error codes (`spec.md` §4.8)
+## Employee / self (`/api/me/*`, any signed-in role)
 
-`UNAUTHORIZED` · `FORBIDDEN` · `INVALID_INPUT` · `OUT_OF_GEOFENCE` · `LOW_GPS_ACCURACY` · `ALREADY_PUNCHED_IN` · `OPEN_TRIP_EXISTS` · `DAY_OFF_PUNCH_BLOCKED` · `EXCEEDS_ACCRUED_EARNINGS` · `RATE_LIMITED` · `IDEMPOTENT_REPLAY`
+### GET /api/me/ping
+→ `200 { userId, role, branchId }`.
 
----
+### POST /api/me/punch  *(CSRF, Idempotent, rate-limited)*
+Body `{ kind: "IN"|"OUT", lat, lng, accuracy, deviceFp }`. Enforces day-off block,
+driver-open-trip block, geofence (accuracy + radius) and open-session rules; records
+a punch with full GPS evidence and audit; may resolve a WATCHED flag.
+→ `200 { at, kind, minutes_since_in }`. Errors: `DAY_OFF_PUNCH_BLOCKED` 409,
+`OPEN_TRIP_EXISTS` 409, `ALREADY_PUNCHED_IN` 409, `NOT_PUNCHED_IN` 409,
+`LOW_GPS_ACCURACY` 422, `OUT_OF_GEOFENCE` 422, plus the common ones.
 
-## 5. Pure functions (`spec.md` §3.5, §5, §8.3)
+### POST /api/me/punch/dev  *(CSRF; dev only)*
+Enabled only when `ENABLE_DEV_ENDPOINTS=true`, else `404`. Body `{ kind }`. Skips
+GPS/geofence (uses the branch centre) for testing on devices without GPS.
 
-| Function | Module | Signature | Phase |
-|---|---|---|---|
-| `verifyWithinGeofence` | `apps/web/lib/geofence.ts` | `(lat, lng, branches, accuracy) => { ok, nearest?, distance?, reason?: 'TOO_FAR'\|'LOW_GPS_ACCURACY' }` | 2.5 |
-| `todayInBeirut` | `packages/time/src/index.ts` | `(now?: Date) => string /* YYYY-MM-DD */` | 2.5 |
-| `inBeirut` | `packages/time/src/index.ts` | `(d: Date) => { date: string, hhmm: string }` | 2.5 |
-| `scheduledToUtc` | `packages/time/src/index.ts` | `(date: string, hhmm: string) => Date` | 2.5 |
-| `findScheduleInPast24h` | `packages/time/src/index.ts` | `(userId, now) => Schedule \| null` | 2.5 |
-| `payoutForUser` | `apps/web/lib/services/payout.ts` | `(userId: string, month: string, db) => { hours, grossCent, adjustmentsCent, advancesCent, netCent }` | 2.5 |
-| `writeAuditLog` | `apps/web/lib/services/audit.ts` | `(actor, action, entity, entityId, before?, after?) => Promise<AuditLog>` | 3 |
+### GET /api/me/today
+→ `200 { in_at, minutes_since_in, earned_today_cent, earned_month_cent,
+approved_advance_balance_cent, net_cent }` — real earnings for the caller.
 
----
+### GET /api/me/payroll?month=YYYY-MM
+→ `200 { hours, gross_cent, adjustments_cent, advances_cent, net_cent }`.
 
-## 6. Service-layer helpers (consumed by route handlers)
+### GET /api/me/advances  ·  GET /api/me/advances?view=list
+Summary `{ pending, approved_balance_cent }`, or `{ advances: [...] }` (latest 50).
 
-| Function | Module | Phase |
-|---|---|---|
-| `consumeIdempotencyKey` | `apps/web/lib/services/idempotency.ts` | 2 |
-| `consumeRateLimitToken` | `apps/web/lib/services/rateLimit.ts` | 2 |
-| `userHasApprovedDayOffToday` | `apps/web/lib/services/dayOff.ts` | 2 |
-| `resolveWatchedFlag` | `apps/web/lib/services/punch.ts` (called inside punch handler) | 4 |
-| `tripThresholdScan` | `apps/worker/src/jobs/tripThreshold.ts` | 4 |
-| `watchedDetectorScan` | `apps/worker/src/jobs/watchedDetector.ts` | 4 |
-| `missedCheckoutScan` | `apps/worker/src/jobs/missedCheckout.ts` | 4 |
-| `driverStaleScan` | `apps/worker/src/jobs/driverStale.ts` | 4 |
-| `endOfDayWatcherScan` | `apps/worker/src/jobs/endOfDayWatcher.ts` | 4 |
-| `dailySummaryScan` | `apps/worker/src/jobs/dailySummary.ts` | 5b |
+### POST /api/me/advances  *(CSRF, Idempotent, rate-limited)*
+Body `{ amountCent, reason? }`. Capped at accrued monthly gross minus approved balance.
+→ `200 { id, status: "PENDING" }`. Error: `EXCEEDS_ACCRUED_EARNINGS` 409.
 
----
+### GET /api/me/leave  ·  POST /api/me/leave  *(POST: CSRF, Idempotent)*
+Summary `{ pending, upcoming: [...] }`; request body
+`{ kind: "DAY_OFF"|"TIME_CHANGE", start_date, end_date, start_time?, end_time?, note? }`.
+→ `200 { id, status: "PENDING" }`. Error: `PAST_DATE` 400.
 
-## 7. Notification interface (`spec.md` §3.7)
+### Driver trips (role DRIVER)
+- **POST /api/me/trip/start** *(CSRF, Idempotent, rate-limited)* `{ lat, lng, accuracy }`
+  → `200 { trip_id, out_at }`. Errors: `OPEN_TRIP_EXISTS` 409, geofence 422, `NOT_DRIVER` 403.
+- **POST /api/me/trip/end** *(CSRF, Idempotent)* `{ lat, lng, accuracy }`
+  → `200 { trip_id, back_at, duration_min }`. Error: `NO_OPEN_TRIP` 409.
+- **GET /api/me/trip/current** → `200 { open, since_min?, threshold_min }`.
 
-```ts
-// packages/notify/src/types.ts
-export interface NotificationPayload {
-  kind: 'EXCEPTION' | 'ROUTINE_PING' | 'DAILY_SUMMARY';
-  template: string;          // e.g. 'watched.resolved', 'trip.over_threshold'
-  context: Record<string, unknown>;
-  recipientUserId?: string;  // defaults to admin
-}
-
-export interface Notifier {
-  send(payload: NotificationPayload): Promise<void>;
-}
-```
-
-Implementations:
-- `ConsoleNotifier` — Phase 0 (logs to stdout). Selected when `NODE_ENV !== 'production'`.
-- `TelegramNotifier` — Phase 5b. Sends via `https://api.telegram.org/bot{TOKEN}/sendMessage` with deep link.
-
-Factory in `packages/notify/src/index.ts`:
-```ts
-export const notifier: Notifier =
-  process.env.NODE_ENV === 'production'
-    ? new TelegramNotifier(env.TELEGRAM_BOT_TOKEN, env.PUBLIC_APP_URL)
-    : new ConsoleNotifier();
-```
+### POST /api/me/password  *(CSRF)*
+Change your own password. Body `{ currentPassword, newPassword }` (new ≥ 6 chars).
+→ `200 { changed: true }`. Error: `WRONG_PASSWORD` 400.
 
 ---
 
-## 8. Constants
+## Admin (`/api/admin/*`, role ADMIN)
 
-| Name | Value | Where used |
-|---|---|---|
-| `SHOP_TZ` | `'Asia/Beirut'` | All timezone conversions |
-| `BCRYPT_ROUNDS` | `12` | All password hashing |
-| `PUNCH_RATE_LIMIT_PER_MIN` | `5` | `RateLimitBucket` refill |
-| `LOGIN_RATE_LIMIT_PER_MIN` | `5` | `RateLimitBucket` refill |
-| `IDEMPOTENCY_TTL_HOURS` | `24` | `IdempotencyKey.expires_at` |
-| `MISSED_CHECKOUT_BUFFER_MIN` | `5` | Schedule_end + 30 + 5 = 35 min |
-| `ADMIN_NOW_POLL_INTERVAL_MS` | `10_000` | Admin dashboard poll |
-| `DRIVER_TRIP_POLL_INTERVAL_MS` | `30_000` | Driver banner poll |
-| `TRIP_RATE_LIMIT_PER_MIN` | `5` | Per user, scope: trip (built Phase 4) |
-| `SESSION_TTL_EMPLOYEE_MIN` | `120` | Employee session expiry (2h idle) |
-| `SESSION_TTL_DRIVER_AFTER_SCHEDULE_MIN` | `30` | Driver session expiry (schedule_end + 30) |
-| `CSRF_COOKIE_NAME` | `'csrf'` | Double-submit cookie pattern |
-| `ACCESS_COOKIE_NAME` | `'ems_access'` | JWT |
-| `REFRESH_COOKIE_NAME` | `'ems_refresh'` | JWT |
+### Dashboard
+- **GET /api/admin/overview?branchId=all|<id>** → live KPIs + per-employee status +
+  attention queue: `{ branches, branchId, kpis{ present, absent, driversOut,
+  driversOver, hoursToday, laborTodayCent }, people[], attention{ lateDrivers, flags,
+  pendingAdvances, pendingLeaves } }`.
+- **GET /api/admin/activity?branchId=&limit=** → `{ events: [{ id, type, username, at }] }`
+  (punches + trips, newest first).
+- **GET /api/admin/trends?branchId=&days=** → `{ points: [{ date, label, present, hours }] }`.
+- **GET /api/admin/now** → legacy presence snapshot `{ branches, flags }`.
+- **GET /api/admin/ping** → identity.
 
----
+### Employees
+- **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`).
+- **POST /api/admin/users** *(CSRF, Idempotent)* `{ username, password, role:
+  "EMPLOYEE"|"DRIVER", branchId, hourlyRateCent }` → `{ user, temp_password }`.
+  Creating an **ADMIN is rejected (403)**.
+- **PATCH /api/admin/users/[id]** *(CSRF)* `{ role?, branchId?, hourlyRateCent? }`
+  (a rate change inserts a new `RateChange`). Promoting to admin, or changing the
+  admin's role, is **rejected (403)**.
+- **POST /api/admin/users/[id]/reset-password** *(CSRF)* optional `{ password }` —
+  sets that password, or generates a random one. → `{ temp_password }`.
+- **POST /api/admin/users/[id]/deactivate** *(CSRF)* toggles active. Deactivating an
+  **admin is rejected (403)**.
+- **PATCH /api/admin/users/[id]/notification-prefs** *(CSRF)* `{ dailySummary?, routinePings? }`.
+- **GET /api/admin/schedules/[userId]** → `{ weeklySchedule, overrides, pendingLeaves }`.
+- **PUT /api/admin/schedules/[userId]** *(CSRF)* `{ weeklySchedule: [{ weekday 0-6,
+  start_time, end_time }] }` (full replace).
 
-## 9. Environment variables
+### Branches
+- **GET /api/admin/branches** → `{ branches: [...] }`.
+- **POST /api/admin/branches** *(CSRF)* `{ name, lat?, lng?, gpsRadiusM?,
+  gpsAccuracyMaxM?, absentGraceMin?, tripThresholdMin? }` → `{ branch }`.
+- **PATCH /api/admin/branches/[id]** *(CSRF)* any of the above fields + `isActive`.
+- **DELETE /api/admin/branches/[id]** *(CSRF)* → `{ deleted, archived }`. Hard-deletes
+  an empty branch; archives (is_active=false) one that has staff/punch/trip history.
 
-| Name | Example | Where used |
-|---|---|---|
-| `DATABASE_URL` | `postgresql://ems:ems@db:5432/ems` | Prisma |
-| `JWT_SECRET` | 64-byte random hex | JWT signing |
-| `TELEGRAM_BOT_TOKEN` | (from @BotFather) | Phase 5b |
-| `TELEGRAM_WEBHOOK_SECRET` | 32-byte random hex | Phase 5b |
-| `PUBLIC_APP_URL` | `https://app.example.com` | Deep links |
-| `SENTRY_DSN` | (Sentry project) | Phase 6 |
-| `BACKUP_GPG_PASSPHRASE_PATH` | `/run/secrets/backup.key` | Phase 6 |
-| `RCLONE_CONFIG` | (path to rclone.conf) | Phase 6 |
-| `NODE_ENV` | `production` \| `development` | Notifier selection |
+### Punches
+- **GET /api/admin/punches?branchId=&userId=&from=&to=&limit=** → `{ punches: [...] }`
+  (includes `corrected`, `correction_reason`, user, branch).
+- **POST /api/admin/punches/correct** *(CSRF, Idempotent)* `{ punchId, newAt?,
+  newBranchId?, reason }` — **persists** the correction (sets `corrected`,
+  `corrected_by`, `correction_reason`) and audits before/after. GPS evidence is kept.
 
----
+### Pay & approvals
+- **GET /api/admin/payroll?month=YYYY-MM&branchId=** → `{ rows[], totals, month,
+  branchId, branches }`.
+- **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
+  scoped to the branch filter.
+- **POST /api/admin/adjustments** *(CSRF, Idempotent)* `{ userId, kind:
+  "BONUS"|"DEDUCTION", amountCent, reason }` → `{ adjustment }`.
+- **GET /api/admin/advances** → pending `{ advances: [...] }`.
+- **POST /api/admin/advances/[id]/decision** *(CSRF, Idempotent)* `{ decision:
+  "APPROVED"|"REJECTED" }`. Error: `ALREADY_DECIDED` 409.
+- **GET /api/admin/leave?status=** → `{ requests: [...] }`.
+- **POST /api/admin/leave/[id]/decision** *(CSRF, Idempotent)* `{ decision }` →
+  `{ id, status, overrides_created }` (approval materializes ScheduleOverrides).
 
-## 10. Cron schedule (forward-declared from `spec.md` §3.9)
-
-| Cron expression | Job | Phase |
-|---|---|---|
-| `*/1 * * * *` | watched-flag detector | 4 |
-| `*/1 * * * *` | missed-checkout detector (schedule_end + 30 + 5 buffer) | 4 |
-| `*/1 * * * *` | trip threshold detector | 4 |
-| `*/30 * * * *` | driver-stale detector (no BACK in 4h) | 4 |
-| `0 2 * * *` | nightly backup + retention + idempotency cleanup | 6 |
-| `0 23 * * *` | daily closing summary | 5b |
-| `30 23 * * *` | end-of-day WATCHED resolver | 4 |
-
----
-
-## 11. Commit message format
-
-```
-phase-0: monorepo bootstrap
-phase-1: auth + seed
-phase-2: punch + geofence + employee pwa
-phase-2.5-staging: deploy plumbing
-phase-2.5-time: tests + impl
-phase-2.5-geofence: tests + impl
-phase-2.5-payout: tests + impl
-phase-3: advances + adjustments + audit
-phase-4: trips + schedule + leave + flags
-phase-5a: admin dashboard ui
-phase-5b: telegram + pdf + templates
-phase-6: polish + pwa + observability + backups
-fix(phase-N): <one-line summary>   # for bug fixes
-```
+### Flags
+- **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag
+  (sets `notified_at`); audited. → `{ id, resolved_at }`.
 
 ---
 
-## 12. What Phase 0 produced (status check)
-
-| Item | Status |
-|---|---|
-| Monorepo scaffold (pnpm + workspaces) | ✅ |
-| `packages/db/prisma/schema.prisma` copied verbatim from `spec.md` §6 | ✅ |
-| `packages/notify/src/{types,console}.ts` stubbed | ✅ |
-| `packages/time/src/index.ts` (date-fns-tz v2 API names) | ✅ |
-| `docker-compose.yml` (web, worker, db) | ✅ |
-| `Dockerfile.web`, `Dockerfile.worker` | ✅ |
-| `apps/web/app/page.tsx` placeholder | ✅ |
-| `apps/worker/src/index.ts` logs "cron runner started" | ✅ |
-| `.env.example` with all env var names from §9 | ✅ |
-| `.gitignore` | ✅ |
-| `AGENTS.md` conventions file | ✅ |
-| `pnpm install` clean | ✅ |
-| Postgres healthy in Docker | ✅ |
-| `prisma generate` works | ✅ |
-| `pnpm --filter web dev` serves http://localhost:3000 | ✅ |
-| `pnpm --filter worker dev` starts | ✅ |
-| Initial commit on `main` | ✅ |
-| CHECK constraint comments restored (fix(phase-0)) | ✅ commit `63bdacf` |
-| .gitignore + docs committed (phase-0 hygiene) | ✅ commit `6f91abf` |
-
-**Phase 0 status: COMPLETE.** Git history:
-```
-6f91abf phase-0: add .gitignore and commit documentation
-63bdacf fix(phase-0): restore spec §6 inline comments for raw-SQL migrations
-d5e4c65 phase-0: monorepo bootstrap
-```
-
----
-
-## 13. Phase 1 — Auth + DB foundation + seed
-
-| Deliverable | Status |
-|---|---|
-| `apps/web/app/api/auth/login/route.ts` — POST, sets JWT cookies | ✅ commit `f3fbef4` |
-| `apps/web/app/api/auth/logout/route.ts` | ✅ |
-| `apps/web/app/api/auth/refresh/route.ts` | ✅ |
-| `apps/web/middleware.ts` — JWT decode, role guard | ✅ |
-| `apps/web/lib/auth/{session,jwt,csrf,password,cookies,constants}.ts` | ✅ |
-| `apps/web/lib/db/prisma.ts` — singleton client | ✅ |
-| `apps/web/app/(public)/login/page.tsx` | ✅ |
-| `apps/web/app/(app)/{admin,employee,driver}/page.tsx` placeholders | ✅ |
-| `packages/db/prisma/seed.ts` — admin + 3 branches + 3 employees + 3 RateChange rows | ✅ |
-| Raw-SQL migration: 5 CHECK constraints + partial unique + partial index + REVOKE | ✅ `migrations/20260709232637_add_constraints/migration.sql` |
-| `apps/web/lib/services/audit.ts` (writeAuditLog helper) | ✅ |
-| Unit tests: session, password, csrf, jwt | ✅ 28 tests pass |
-| **End-of-Phase-1 invariant:** exactly 3 RateChange rows after seed | ✅ verified by Builder |
-| **Dependency:** bcryptjs (justified — pure JS, Windows native-build workaround) | ✅ |
-| **Deviation:** `Secure` cookie only set in production (NODE_ENV guard) | ⚠️ ACCEPTED — documented for RUNBOOK |
-| **Deviation:** REVOKE wrapped in `IF EXISTS` for shadow-DB idempotency | ⚠️ ACCEPTED — pure additive safety |
-| **Scope creep:** `packages/time` placeholder tests + `vitest run` script change | ⚠️ REVERT — Phase 2.5's job |
-| **Scope creep:** `GET /api/me/ping` + `GET /api/admin/ping` placeholders | ⚠️ REVERT — not in Phase 1 scope |
-| **Hygiene:** 4 `_ck*.cjs` files left in `packages/db/` | ❌ CLEANUP REQUIRED |
-| **Branch:** `master` instead of `main` | ⚠️ rename when pushing to GitHub |
-
-**Phase 1 status: ✅ COMPLETE.** Git history:
-```
-4861eb9 docs(phase-1): update API.md status table and decisions
-889a637 fix(phase-1): extend .gitignore for throwaway scripts
-f3fbef4 phase-1: auth + seed + raw-sql migration
-6f91abf phase-0: add .gitignore and commit documentation
-27f0c1b phase-0: add .gitignore and commit documentation
-63bdacf fix(phase-0): restore spec §6 inline comments for raw-SQL migrations
-d5e4c65 phase-0: monorepo bootstrap
-```
-
----
-
-## 14. Phase 1 cleanup + scope-revert prompt (queued)
-
-Before Phase 2 begins, two cleanups:
-
-1. Delete `packages/db/_ck*.cjs` (4 files). Update `.gitignore` if not already covered (add `packages/db/_*.cjs`).
-2. Decide on the two scope-creep items:
-   - **Option A — keep:** The time tests + ping endpoints are useful and harmless. Document them in `API.md` §13.
-   - **Option B — revert:** Remove the time tests (Phase 2.5 will add real ones) and remove the ping endpoints (Phase 2 will add real `/api/me/punch` and Phase 5a will add real admin endpoints).
-
-**My recommendation: Option A for the ping endpoints** (they're 4 lines each and give you a working "is auth wired?" health check), **Option B for the time tests** (they're premature — Phase 2.5 will write the real TDD suite for `findScheduleInPast24h` and you don't want conflicting tests).
-
-Owner (you) decides. Tell me A or B and I'll queue the cleanup commit.
-
----
-
-## 14b. Phase 1 — Owner decisions (locked)
-
-**Decision (locked 2026-07-10):**
-- **KEEP ping endpoints** `GET /api/me/ping` and `GET /api/admin/ping`. They are useful for post-launch health-checks and the future AI monitoring agent (decision rationale: monitoring agent needs `curl`able endpoints that prove auth wiring is intact without depending on the punch/business-logic endpoints being healthy). Documented in §15.
-- **KEEP placeholder time tests** in `packages/time`. Phase 2.5 will replace them with the full TDD suite (decision rationale: tests will be overwritten, not merged — they serve as a placeholder so the test runner exits clean during Phase 1).
-
-**Cleanup commit still needed:** delete `_ck*.cjs` files + extend `.gitignore` to prevent recurrence.
-
----
-
-## 14c. Phase 2 — Verification gap (locked 2026-07-12)
-
-**The verification gap:** Phase 2 had 16 verification checks. Builder ran 7 via `pnpm test` + smoke tests. Verifier ran checks via psql + curl. The local Windows verifier environment **lacks `psql` and scripted cookie/CSRF helpers**, so checks 5–14 (DB inspections + live HTTP smoke tests) were marked `UNABLE`.
-
-**Decision (locked):** Move all DB-level and HTTP-level verification into **automated integration tests** under `apps/web/lib/**/*.integration.test.ts` that use the Docker Postgres connection directly. `pnpm test` then exercises both unit + integration paths. This removes the dependency on `psql` and curl-with-cookies on the verifier machine.
-
-**No other phases are affected** — the missing checks were about Phase 2 endpoints only. Phases 3+ will follow the same integration-test pattern from the start (see §16 Decision Lock-In).
-
-### §15. Health-check endpoints (kept from Phase 1, used post-launch)
-
-| Method | Path | Auth | Returns | Use case |
-|---|---|---|---|---|
-| GET | `/api/me/ping` | employee/driver/admin | `{ userId, role, branchId }` | Verify JWT + middleware + role guard. Used by monitoring agent + manual smoke tests. |
-| GET | `/api/admin/ping` | admin | `{ userId, role }` | Verify admin-only auth. Used by monitoring agent before admin-specific operations. |
-
-These are **not** in `spec.md` §7.1–§7.5. They're a Phase 1 addition. Future phases may replace them with richer `/api/health/me` etc., but for v1 they're stable and intentional.
-
-### §16. Decision Lock-In — Integration tests required from Phase 3 onward
-
-**Lock-in date:** 2026-07-12.
-**Trigger:** Phase 2 verification gap revealed that psql + curl-based checks are environmentally fragile.
-**Scope:** applies to Phases 3, 4, 5a, 5b, 6 — every new endpoint and service must have an integration test under `apps/web/lib/**/*.integration.test.ts`.
-
-**Pattern:**
-- Uses the same Postgres connection as production (set `DATABASE_URL` to the Docker DB).
-- Each test creates its own fixtures via `apps/web/lib/test-helpers/` (e.g. `createTestUser`, `createTestBranch`, `loginAs`).
-- Each test cleans up its own data in `afterEach` (no cross-test pollution).
-- Integration tests run via `pnpm test` and replace the curl+psql verify steps entirely.
-
-**Files added in Phase 2 cleanup (DONE — commit `7578ff9`):**
-- ✅ `apps/web/lib/test-helpers/db.ts` — Prisma test client + `cleanDb` + `seedTestBranch` + `seedTestUser` helpers
-- ✅ `apps/web/lib/test-helpers/auth.ts` — `loginAs(username, password)` returns cookies + CSRF token
-- ✅ `apps/web/lib/services/punch.integration.test.ts` — 10 integration tests covering Checks 5–14 of phase-2-verify.md
-
----
-
-## 17. Phase 2 — Complete (locked 2026-07-14)
-
-**Phase 2 status:** ✅ COMPLETE.
-
-| Deliverable | Status |
-|---|---|
-| `apps/web/lib/geofence.ts` — pure haversine | ✅ commit `4f34192` |
-| `apps/web/lib/geofence.test.ts` — 11 boundary tests | ✅ |
-| `apps/web/lib/services/punch.ts` — guard order | ✅ |
-| `apps/web/lib/services/punch.test.ts` — 8 unit tests (rewritten) | ✅ commit `7578ff9` |
-| `apps/web/lib/services/{idempotency,rateLimit,dayOff}.ts` | ✅ |
-| `apps/web/lib/services/{idempotency,rateLimit}.test.ts` | ✅ |
-| `apps/web/lib/time/todayInBeirut.ts` wrapper | ✅ |
-| `apps/web/app/api/me/punch/route.ts` — Zod + CSRF + Idempotency-Key + rate limit | ✅ |
-| `apps/web/app/api/me/today/route.ts` | ✅ |
-| `apps/web/app/api/admin/now/route.ts` — presence only | ✅ |
-| `apps/web/app/(app)/employee/EmployeeHomeClient.tsx` | ✅ |
-| `apps/web/components/PunchButton.tsx` — 120px tap target | ✅ |
-| `apps/web/lib/test-helpers/{db,auth}.ts` | ✅ commit `7578ff9` |
-| `apps/web/lib/services/punch.integration.test.ts` — 10 integration tests | ✅ commit `7578ff9` |
-| **Test count:** 59 unit + 10 integration = **69 total, all passing** | ✅ |
-| **Invariant verified:** 5 evidence fields per punch (lat, lng, accuracy_m, device_fp, ip) | ✅ via integration test |
-| **Server-side bypass test:** accuracy=200 still rejected | ✅ via integration test |
-
-**Phase 2 git history:**
-```
-b94b968 fix(phase-2): catch-all gitignore for phase-* prompt files
-6f7bda8 fix(phase-2): extend .gitignore for fix-prompt files
-7f612d2 docs(phase-2): update API.md with verification gap and integration-test lock-in
-7578ff9 fix(phase-2): rewrite test mock + add integration tests
-4f34192 phase-2: punch + geofence + employee pwa
-```
-
----
-
-## 18. Phase 3 — Pending
-
-Not yet queued. Phase 3 covers Advances + Adjustments + Audit endpoints & UI (build.md Phase 3 Scope, items 1–12). Will be queued after this commit.
-
-**What this replaces going forward:** every verify prompt's "psql ..." and "curl ..." steps. Verification becomes "run `pnpm test` and confirm all integration tests pass."
-
----
-
-## 19. Phase 4 — Complete (locked 2026-07-14)
-
-**Phase 4 status:** ✅ COMPLETE.
-
-### Endpoints delivered (build.md Phase 4 items 1-11)
-
-| Endpoint | Method | Auth | Source |
-|---|---|---|---|
-| `/api/me/trip/start` | POST | driver only | build item 1 |
-| `/api/me/trip/end` | POST | driver only | build item 2 |
-| `/api/me/trip/current` | GET | driver only | build item 3 |
-| `/api/me/leave` | GET, POST | employee, driver | build item 4 |
-| `/api/admin/leave` | GET | admin | build item 5 |
-| `/api/admin/leave/[id]/decision` | POST | admin | build item 6 |
-| `/api/admin/schedules/[userId]` | GET, PUT | admin | build item 7 |
-
-### Cron jobs delivered (apps/worker/src/jobs/)
-
-| Job | Schedule | Source |
-|---|---|---|
-| `watchedDetector` | `*/1 * * * *` | build item 12 (spec §3.9 #1) |
-| `missedCheckout` | `*/1 * * * *` | build item 13 (spec §8.6, decision #32) |
-| `tripThreshold` | `*/1 * * * *` | build item 14 (decision #29) |
-| `driverStale` | `*/30 * * * *` | build item 15 |
-| `endOfDayWatcher` | `30 23 * * *` | build item 16 |
-
-All 5 wired in `apps/worker/src/index.ts` via `node-cron`.
-
-### Inline WATCHED resolution (race-safe)
-
-Wired into `apps/web/lib/services/punch.ts`. Pattern from spec.md §8.5:
-1. select-then-claim (`updateMany` with `notified_at IS NULL` guard)
-2. Only the punch whose `count === 1` fires the notification
-3. End-of-day watcher resolves any still-unresolved flags at 23:30 Beirut
-
-### UI pages delivered (build items 8-10)
-
-- `apps/web/app/(app)/driver/page.tsx` — driver home with trip banner + OUT/BACK buttons
-- `apps/web/app/(app)/driver/DriverHomeClient.tsx`
-- `apps/web/app/(app)/employee/leave/page.tsx` — request form + own history
-- `apps/web/app/(app)/admin/schedule/page.tsx` — weekly grid + inline pending LeaveRequest with approve/reject
-
-### Tests added
-
-| Suite | Count |
-|---|---|
-| `lib/services/trip.test.ts` (new) | 12 |
-| `lib/services/leave.test.ts` (new) | 7 |
-| `lib/services/punch.test.ts` (extended) +4 WATCHED | 4 new |
-| `lib/services/trip.integration.test.ts` | 4 |
-| `lib/services/leave.integration.test.ts` | 3 |
-| `lib/services/cron/watchedDetector.integration.test.ts` | 3 |
-| `lib/services/cron/missedCheckout.integration.test.ts` | 1 |
-| `apps/worker/src/jobs/{watchedDetector,missedCheckout,tripThreshold,driverStale,endOfDayWatcher}.test.ts` | 4 unit + 4 cron |
-| **Total Phase 4** | **+50** |
-| **Grand total** | **151** |
-
-### Deviations accepted
-
-1. WATCHED notifier uses Phase 0 stub channel/recipient (not spec's kind enum). Phase 5b reconciles.
-2. Cron tests run in apps/web vitest via glob include. Pragmatic, single test runner.
-3. beirutWeekday added to packages/time (decision #36 prerequisite).
-4. WATCHED resolution accepts test-only notifier param for pure-function testability.
-5. CRLF warnings on Windows — environmental, harmless.
-6. Test runtime 156s — bcrypt 12 rounds + sequential fork for integration DB isolation. Known cost.
-
-### Phase 4 git history
-
-```
-24d4f3d phase-4: trips + schedule + leave + flags + crons
-```
-
----
-
-## 20. Phase 5a — Complete (locked 2026-07-16)
-
-**Phase 5a status:** ✅ COMPLETE. UI-only phase. The owner can now demo the admin dashboard on localhost by logging in as `owner / change-me` at `http://localhost:3000/admin`.
-
-### Admin pages delivered (7 screens + 4 modals + 1 nav + 1 dashboard component)
-
-| Path | Purpose |
-|---|---|
-| `/admin` (home) | Dashboard — polls `/api/admin/now` every 10s. Shows per-branch present/absent/driver counts, drivers out list with `since_min`, today's flags feed. |
-| `/admin/users` | List all users (employee/driver/admin) with CRUD actions. Row actions: Edit, Deactivate/Reactivate, Reset Password. |
-| `/admin/users/[id]/edit` | Edit form: role, branch, hourly rate, notification prefs. Rate change creates a new RateChange row (invariants preserved). |
-| `/admin/branches` | Edit branch form per card: name, lat, lng, gps_radius_m, gps_accuracy_max_m, absent_grace_min, trip_threshold_min, is_active. |
-| `/admin/adjustments` | List current-month adjustments + create form (user/kind/amount/reason). |
-| `/admin/punches` | Recent punches list with row "Correct" action (manual correction, audit-logged). |
-| `/admin/flags` | Full flags feed (newest first), filterable by kind. Shows context_json expandable. |
-
-**Components** (`apps/web/components/admin/`):
-- `AdminDashboard.tsx` — polling client island
-- `AdminNav.tsx` — shared nav with logout
-- `UserCreateModal.tsx` — create user form (returns `temp_password`)
-- `UserEditModal.tsx` — edit user form
-
-### `/api/admin/now` extension
-
-Extended to include:
-- `branches[].driversOut: Trip[]` — open trips per branch with elapsed time
-- `flags: Flag[]` — today's flags (capped at 20, newest first)
-
-Backwards-compatible — still returns `present` / `absent` per branch.
-
-### API routes wired (sub-routes to support UI)
-
-These were referenced as endpoints but only finalized in Phase 5a:
-- `POST /api/admin/users/[id]/deactivate`
-- `POST /api/admin/users/[id]/notification-prefs` (PATCH per spec §7.4)
-- `POST /api/admin/users/[id]/reset-password` (returns `{ temp_password }`)
-
-### Tests delivered
-
-| Suite | Count | Type |
-|---|---|---|
-| `lib/services/admin-now.integration.test.ts` | new | integration |
-| `lib/services/admin-users.integration.test.ts` | new | integration |
-| `lib/services/admin-branches.integration.test.ts` | new | integration |
-| `lib/services/admin-flags.integration.test.ts` | new | integration |
-| `lib/services/admin-notification-prefs.integration.test.ts` | new | integration |
-| `lib/components/admin/AdminNav.test.tsx` | new | unit |
-| `lib/components/admin/UserCreateModal.test.tsx` | new | unit |
-| **Grand total** (Phase 5a adds to existing 151) | **~165+** | mixed |
-
-NOTE: actual test count must be confirmed by `pnpm --filter web test`. Builder did not report a final test count for Phase 5a — only files committed. The "165+" estimate assumes ≥14 new integration tests across 5 files plus 2 component unit tests.
-
-### Deviations accepted
-
-1. **3 sub-routes created** (`deactivate`, `notification-prefs`, `reset-password`) — these were spec'd in `API.md` §3.4 and §7.4 but had not been fully implemented before Phase 5a. The UI needed them. Net positive — fills spec gaps.
-2. **No Playwright E2E tests** — page rendering verified manually. Per `API.md` §16 lock-in, integration tests are sufficient at v1 scale.
-
-### Phase 5a git history
-
-```
-7e38adf phase-5a: admin dashboard ui
-```
-
-### What this unlocks
-
-The system is now fully demoable to the owner on `localhost:3000/admin`. Every existing endpoint has UI, every UI works against the Docker Postgres. Owner can:
-
-- See live branch presence, drivers out, flags
-- Create/edit/deactivate users
-- Reset any user's password (returns temp_password for verbal sharing)
-- Edit branch coords/radius/threshold in-field
-- Add bonuses/deductions
-- Correct any punch (audit-logged, original row immutable)
-- See all flags with context
-
-What's still v1-missing: Telegram bot (Phase 5b), PDF payroll download (Phase 5b), PWA install (Phase 6), backups to Google Drive (Phase 6).
-
----
-
-## 21. Phase 6a — Complete (locked 2026-07-19) — RETROACTIVE LABEL
-
-> **Why this section exists:** the original build.md Phase 2.5 (deploy plumbing + money functions TDD rewrite) was never executed as a single phase boundary. Phases 2 and 3 absorbed the money-functions work into their own commits. Production hardening work that should have been Phase 2.5 was instead done in this **Phase 6a** commit. Renaming the section so commit history matches what actually shipped.
-
-**Phase 6a status:** ✅ COMPLETE (commit `93c9dcf`). 13 items shipped based on the production-deployment audit.
-
-### Items shipped (13)
-
-| Item | File | Purpose |
-|---|---|---|
-| CI workflow | `.github/workflows/ci.yml` | Lint + typecheck + vitest on PRs. Required test infrastructure before any deploy. |
-| Health endpoint | `apps/web/app/api/health/route.ts` | `{ ok, uptime_s, version }`. Public. Used by Dockerfile HEALTHCHECK + UptimeRobot. |
-| DB health endpoint | `apps/web/app/api/health/db/route.ts` | `SELECT 1` with 50ms threshold. 503 on slow/unreachable. |
-| Web Dockerfile HEALTHCHECK | `Dockerfile.web` | Periodic liveness ping. |
-| Worker Dockerfile hardening | `Dockerfile.worker` | Full multi-stage runner, `USER worker` (UID 1001), HEALTHCHECK directive. |
-| `.dockerignore` × 3 | root, `apps/web`, `apps/worker` | Excludes test files + dev artifacts from production images. |
-| `.env.example` complete | repo root | 11 env vars per spec.md §9. Was 3 lines. |
-| `docker-compose.prod.yml` | repo root | Production overrides: restart policies, env-driven secrets, no bind-mounts. Reference for Coolify. |
-| `scripts/backup.sh` (real) | `scripts/backup.sh` | `pg_dump` → gpg → rclone. Retention: 7d/4w/3m. Real implementation, not placeholder. |
-| `scripts/restore.sh` (real) | `scripts/restore.sh` | Accepts dump path, decrypts, `pg_restore` (with `--force` gate). |
-| `RUNBOOK.md` | repo root | Operations, restore, common alerts, emergency contacts. |
-| Sentry stub | `apps/web/lib/sentry.ts` | Commented template — actual dep install deferred (AGENTS.md rule). See deviation below. |
-| AdminNav test fix | `apps/web/components/admin/AdminNav.tsx` | Exports `NAV_ITEMS` + `NavItem` type. Pre-existing unfixed bug from Phase 5a. |
-
-### Bonus fix (in scope because typecheck-blocking)
-- `apps/web/app/(app)/admin/punches/page.tsx` — removed bad `.catch(() => ({ ok: false }))` that caused Response narrowing to fail typecheck. Pre-existing Phase 5a error.
-
-### Deviations accepted
-
-1. **`@sentry/nextjs` not added** — AGENTS.md forbids new deps without justification. Sentry shippable via:
-   - Phase 6a follow-up commit (5 lines, dep + init wire-up)
-   - Or defer to Phase 6b polish
-   - Either way, `lib/sentry.ts` is a working stub: when the dep is installed + DSN is set, init runs automatically. Today it's a no-op.
-2. **Health integration tests under `lib/services/`** — vitest glob convention. Otherwise they wouldn't be picked up.
-3. **Worker Dockerfile `tsx` runtime** — known issue (item 4 in build prompt deviations). Add to RUNBOOK.
-
-### Tests added
-- `apps/web/lib/services/health.integration.test.ts` — `/api/health` returns 200
-- `apps/web/lib/services/health-db.integration.test.ts` — `/api/health/db` returns 200 with latency_ms
-
-**Total**: 175 baseline + 2 new health tests = 177. (52 existing integration tests fail in this env because Docker isn't running locally. CI will run them.)
-
-### Files (20 total)
-- Created: `.dockerignore`, `.github/workflows/ci.yml`, `RUNBOOK.md`, `apps/web/.dockerignore`, `apps/web/app/api/health/route.ts`, `apps/web/app/api/health/db/route.ts`, `apps/web/lib/sentry.ts`, `apps/web/lib/services/health.integration.test.ts`, `apps/web/lib/services/health-db.integration.test.ts`, `apps/worker/.dockerignore`, `docker-compose.prod.yml`
-- Modified: `.env.example`, `Dockerfile.web`, `Dockerfile.worker`, `apps/web/middleware.ts`, `apps/web/components/admin/AdminNav.tsx`, `apps/web/lib/components/admin/AdminNav.test.ts`, `apps/web/app/(app)/admin/punches/page.tsx`
-- Replaced: `scripts/backup.sh`, `scripts/restore.sh` (mode 100755)
-
-### Git history
-
-```
-93c9dcf fix(phase-6a): production hardening — CI, healthchecks, backup scripts, RUNBOOK, Sentry, AdminNav fix
-de72c72 docs(phase-5a): mark Phase 5a complete + document admin UI + queue Phase 2.5
-7e38adf phase-5a: admin dashboard ui
-```
-
-### What this unlocks
-
-- **CI gates merges** — push to `main` triggers tests before deploy
-- **Healthchecks work** — UptimeRobot can be configured, Dockerfile HEALTHCHECK directives pass
-- **Backups run nightly** — data isn't lost on container crash
-- **RUNBOOK.md documents ops** — anyone with VPS access can deploy, restore, debug
-- **AdminNav test fixed** — unblocks future admin UI test development
-
----
-
-## 21a. Phase 6b — Complete (locked 2026-07-19)
-
-**Phase 6b status:** ✅ COMPLETE (commit `9cca701`).
-
-### What landed
-
-- `@sentry/nextjs@10.66.0` installed in `apps/web/package.json` (justified per AGENTS.md: server-side error tracking per spec.md §3.11 Observability)
-- 146 transitive packages via pnpm (`@sentry/cli`, `@sentry/opentelemetry`, `@opentelemetry/*`, etc.)
-- `lib/sentry.ts` stub replaced with real `Sentry.init()` call
-- Wired into `apps/web/app/layout.tsx` (server component), NOT middleware — avoids Next 14 Edge runtime conflict
-- `middleware.ts` Sentry hook stub removed (cleanup)
-- Idempotent: `initialized` flag prevents HMR double-init
-
-### Why init in layout.tsx, not middleware
-
-Next.js 14 middleware runs on Edge runtime by default. `@sentry/nextjs` Sentry.init() works in Node runtime reliably but requires either `runtime: 'nodejs'` override (loses Edge benefits) or careful Edge-API usage. The standard pattern is to init SDKs in root layout, runs once per render, before any business logic. Trade-off: API routes don't render layout, so unhandled exceptions in API routes aren't caught by Sentry — accepted because we have audit log + integration tests covering API correctness.
-
-### Verified behavior
-
-| Env | Behavior |
-|---|---|
-| `SENTRY_DSN` unset (dev) | no-op, doesn't crash |
-| `NODE_ENV !== 'production'` | no-op |
-| `SENTRY_DSN=stub + NODE_ENV=production` | Sentry.init fires once per process |
-
-### Checks
-
-- `pnpm typecheck` clean across 6 workspace projects
-- `pnpm --filter web test` — 133 unit tests pass; 52 integration tests fail (Docker not running locally, same pre-existing condition as Phase 6a)
-
-### Git history (Phases 6a + 6b)
-
-```
-9cca701 fix(phase-6b): add @sentry/nextjs@10.66.0 dep, wire init in layout.tsx
-0311912 docs(phase-6a): mark Phase 6a complete + retro-section for skipped Phase 2.5
-93c9dcf fix(phase-6a): production hardening — CI, healthchecks, backup scripts, RUNBOOK, Sentry, AdminNav fix
-```
-
----
-
-## 22. Phase 7 — Pending
-
-Phase 7 will cover: PWA polish (manifest icons, sw.js offline shell), owner cheat sheet, structured logging, observability dashboards, advanced runbook additions.
-
-Will be queued after Phase 5b.
-
----
-
-## 23. Phase 5b — Next
-
-Phase 5b (Telegram + PDF) is the highest user-visible risk gap remaining — owner is currently blind to all flags/alerts. Will be queued immediately after this docs commit lands.
-
----
-
-## 24. Phase 6c — Complete (locked 2026-07-22)
-
-**Phase 6c status:** ✅ COMPLETE. **First successful end-to-end local Docker Compose build.** Owner can now demo the full system on `localhost:3000` by logging in as `owner / change-me`.
-
-### Verified working
-- `docker compose build` succeeds from clean state (no cache, no leftover artifacts)
-- `docker compose up -d` starts db + web + worker, all 3 healthy
-- `GET /api/health` returns `200 {"ok":true,"data":{"uptime_s":...,"version":"0.0.1"}}`
-- `POST /api/auth/login {owner, change-me}` returns `200` + JWT cookies + admin user object
-- Prisma migrations applied, seed data inserted (4 users, 3 branches)
-- Worker starts without crashing (cron jobs registered)
-
-### Issues fixed
-1. **TypeScript error in next build (silent failure)** — bypassed via `typescript.ignoreBuildErrors: true` in next.config.js. Real fix: find and type the offending `b` parameter.
-2. **Prisma client not generated in Docker build** — added `RUN pnpm --filter db exec prisma generate` to Dockerfile.
-3. **libssl.so.1.1 missing for Prisma on Alpine** — added `RUN apk add --no-cache openssl` to both builder and runtime stages.
-4. **pnpm workspace symlink resolution to Windows paths** — locked the lockfile fresh in build (`rm pnpm-lock.yaml && pnpm install`).
-5. **`.next` directory in wrong location** — changed COPY to use absolute path `/app/apps/web/.next` instead of relative.
-6. **WORKDIR `.next` standalone symlinks fail on Windows** — disabled `output: 'standalone'` in next.config.js (we don't need it; full build still works).
-
-### Files modified (5)
-- `Dockerfile.web` — added openssl, prisma generate, absolute .next path
-- `Dockerfile.worker` — added openssl, prisma generate
-- `docker-compose.yml` — production env vars, removed dev bind-mounts
-- `apps/web/next.config.js` — disabled standalone, ignoreBuildErrors
-- `apps/web/package.json` — start script = `next build && next start`
-- `.dockerignore` — added nested `**/node_modules/**` exclusion
-
-### Git commits
-```
-b966aa3 fix(phase-6c): make local docker compose build work end-to-end
-2b701fe fix(phase-6c): remove tsconfig.base.json from COPY (file doesn't exist in repo)
-862a95c fix(phase-6c): use corepack + explicit package.json copies (no glob expansion issues)
-```
-
-### What's next
-- **Phase 5b** (Telegram + PDF) — defer until after VPS deploy
-- **Phase 2.5** (deploy plumbing for VPS) — owner can now do this since local build works
-- The "tsconfig.base.json doesn't exist" mystery and the untyped 'b' parameter are still in the codebase; real fixes for these are cosmetic; the ignoreBuildErrors flag masks them.
-
-### Demo flow
-1. `cd C:\Users\Admin\Desktop\SH`
-2. `docker compose up -d` (Postgres already running, web + worker + new postgres)
-3. Open `http://localhost:3000/login`
-4. Login as `owner` / `change-me`
-5. Should see admin dashboard (Phase 5a)
-6. From second browser, login as `emp1` / `change-me`, try punch in (will need to mock GPS in Chrome devtools to Hamra coords)
-
----
-
-## 25. Phase 7-Record-Location — Complete (locked 2026-07-23)
-
-**Status:** ✅ COMPLETE. Admin can now capture real branch GPS coordinates from their browser instead of guessing or typing manually.
-
-### What was added
-
-- **`Record Location` button** on each branch card in `/admin/branches`. Green button next to the Edit button.
-- Click → browser asks "Allow location?" → admin clicks Allow.
-- Uses `navigator.geolocation.getCurrentPosition` with `enableHighAccuracy: true`.
-- Auto-fills the edit form's lat/lng inputs with captured coordinates (6 decimal places).
-- Shows accuracy in meters (e.g. "Captured at ±12m accuracy").
-- Friendly error if denied / unavailable.
-- Once filled, admin clicks Save to commit.
-
-### Files modified (3)
-
-- `apps/web/app/(app)/admin/branches/page.tsx` — added `getCurrentPosition()` helper, `recordLocation()` handler, green button, accuracy message UI
-- `apps/web/lib/services/admin-branches.integration.test.ts` — added test "PATCH updates lat/lng from GPS capture"
-- `packages/db/prisma/seed.ts` — collapsed from 3 placeholder branches to 2 (`Home Office`, `Tarek Jdedi`) with 0,0 coords. Made seed idempotent (clears existing data first).
-
-### Seed now creates
-
-| Username | Role | Branch |
-|---|---|---|
-| `owner` | ADMIN | (none) |
-| `emp1` | EMPLOYEE | Home Office (0.0, 0.0) — set via Record Location |
-| `emp2` | EMPLOYEE | Tarek Jdedi (0.0, 0.0) — set via Record Location |
-
-### Git commits
-
-```
-72c3cdf feat(phase-7-record-location): admin can capture branch GPS via browser
-e2fa713 docs(phase-6c): mark Phase 6c complete - first end-to-end local docker compose build
-b966aa3 fix(phase-6c): make local docker compose build work end-to-end
-```
-
-All pushed to `shabro2a-store/ems` on GitHub.
-
-### How to use the new feature
-
-1. Login as `owner` / `change-me` at http://localhost:3000/login
-2. Click **Branches** in the admin nav
-3. Find **Home Office** card → click the green **📍 Record Location** button
-4. Browser prompts for permission → click **Allow**
-5. Page shows "Captured at ±Nm accuracy" with the edit form pre-filled
-6. Click **Save** to persist the coordinates
-7. Repeat for **Tarek Jdedi**
-
-After both branches have real coordinates, `emp1` (Home Office) and `emp2` (Tarek Jdedi) can punch in/out from their actual locations.
-
-### What's still deferred
-
-- **PWA install** — employees can install app on phone home screen. Phase 7.
-- **Telegram alerts** — owner doesn't get phone alerts yet. Phase 5b.
-- **PDF payroll** — owner can't download monthly PDF yet. Phase 5b.
-- **VPS deploy** — Phase 2.5 (Coolify + Cloudflare).
-
-These are all post-launch items per the original spec.
-
----
-
-## 26. Phase 7-Local-Cookies — Complete (locked 2026-07-23)
-
-**Issue:** Admin cookies had `Secure` flag on local HTTP, blocking auth. Build-time `NODE_ENV=production` was being baked in unconditionally, even when running locally over `http://localhost`.
-
-**Fix:** `apps/web/lib/auth/cookies.ts` now derives `secure` from:
-1. `PUBLIC_APP_URL` starts with `https://` (production behind TLS proxy)
-2. `x-forwarded-proto` header is `https` (alt signal)
-3. `NODE_ENV === 'production'` AND no `PUBLIC_APP_URL` (legacy fallback)
-
-Otherwise (local HTTP dev), cookies are not Secure.
-
-**Build stays in `NODE_ENV=production`** so Next.js pages prerender correctly. The cookie `Secure` flag is now decoupled from build-time env.
-
-**Verified:** `/api/auth/login` returns cookies without `Secure` flag on local. `/api/admin/branches` returns the 2 seeded branches (Home Office, Tarek Jdedi). The `/admin/branches` page client component fetches and renders the **📍 Record Location** button for both branches.
-
-### Git commit
-
-```
-8b4cc0d fix(local-cookies): use PUBLIC_APP_URL to determine Secure flag
-```
-
-Pushed to `shabro2a-store/ems`.
-
-### How to capture branch locations now
-
-1. Open http://localhost:3000/login
-2. Login as `owner / change-me`
-3. Click **Branches** in the admin nav
-4. Each of **Home Office** and **Tarek Jdedi** shows the green **📍 Record Location** button
-5. Click → browser asks "Allow location?" → Allow
-6. Edit form fills with captured lat/lng (±accuracy in meters)
-7. Click **Save** to persist
-8. Both branches now have real GPS coords
-
-**Then** `emp1` (Home Office) and `emp2` (Tarek Jdedi) can punch in/out from their real locations via Chrome devtools → Sensors → mock GPS at branch coords.
-
----
-
-## 27. UX Backlog & Pilot Plan (locked 2026-07-24)
-
-**Status:** `UX_BACKLOG.md` and `PILOT_PLAN.md` written at repo root. Captured owner feedback ("UI needs change, UX is what needs changing") and outlined the single-branch pilot scope. No code changes yet — both are planning docs.
-
-**UX_BACKLOG.md** contains 10 guessed UX issues (empty states, loading skeletons, mobile responsiveness, error messages, etc.) ranked by likely impact. Owner to add/remove during continued testing.
-
-**PILOT_PLAN.md** outlines scope of the single-branch pilot (Home Office + 2 users), pre-flight checklist, success criteria, risk register, and rollback plan.
-
-### Git commits
-
-Last 5 commits:
-```
-3acee3b docs(phase-7-local-cookies): document the Secure-flag fix
-8b4cc0d fix(local-cookies): use PUBLIC_APP_URL to determine Secure flag
-861d8c8 feat(admin/payroll): wire up Download PDF button to /api/admin/reports/payroll
-d1f3447 feat(phase-5b): Telegram notifications + PDF payroll + daily summary
-f0bc8b4 docs(phase-7-record-location): document new branch GPS capture feature
-```
-
-### What works locally (verified 2026-07-24)
-
-- ✅ Login (cookies fix in place)
-- ✅ Admin dashboard (10s polling)
-- ✅ Branches page with Record Location button
-- ✅ PDF payroll download (PDF-1.3, ~2.5KB)
-- ✅ All 3 containers healthy (db, web, worker)
-
-### What's still pending
-
-- ❌ Telegram bot (build, unverified — no real bot)
-- ❌ Tarek Jdedi branch coords (still 0,0)
-- ❌ Home Office branch coords (still 0,0)
-- ❌ UX polish (per UX_BACKLOG.md)
-- ❌ Single-branch pilot (per PILOT_PLAN.md)
-- ❌ Production deploy (Coolify / VPS)
+## Telegram
+
+### POST /api/telegram/webhook (public, secret-guarded)
+Guarded by the `x-telegram-bot-api-secret-token` header vs `TELEGRAM_WEBHOOK_SECRET`.
+On `/start`, binds the sender's chat id to the admin user. → `200 { bound }` / `{ skipped }`.
