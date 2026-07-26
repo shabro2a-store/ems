@@ -53,11 +53,13 @@ export class TelegramNotifier implements Notifier {
 // without coupling this package to it. We accept ISO strings in context.
 interface Ctx {
   user?: { id: string; username: string };
+  driver?: { id: string; username: string };
   branch?: { id: string; name: string } | null;
   flag_id?: string;
   scheduled_start?: string;
   scheduled_end?: string;
   since_min?: number;
+  since_hours?: number;
   minutes?: number;
   threshold_min?: number;
   present?: number;

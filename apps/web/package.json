@@ -11,14 +11,18 @@
   },
   "dependencies": {
     "@prisma/client": "^5.17.0",
+    "@react-pdf/renderer": "^3.4.4",
     "@sentry/nextjs": "^10.66.0",
     "bcryptjs": "^2.4.3",
     "date-fns": "^2.30.0",
     "date-fns-tz": "^2.0.0",
     "jose": "^5.6.3",
     "next": "14.2.5",
+    "notify": "workspace:*",
+    "pdf": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "time": "workspace:*",
     "zod": "^3.23.8"
   },
   "devDependencies": {

@@ -43,8 +43,37 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter db prisma migrate deploy
+      # Generate the Prisma client before anything imports @prisma/client.
+      - run: pnpm --filter db exec prisma generate
+
+      - run: pnpm --filter db exec prisma migrate deploy
 
       - run: pnpm -r typecheck
 
-      - run: pnpm -r test
+      # The HTTP integration tests hit a live server at TEST_BASE_URL, so build
+      # and boot the web app before running the suite.
+      - name: Build web app
+        run: pnpm --filter web exec next build
+        env:
+          NODE_ENV: production
+
+      - name: Start server and run tests
+        env:
+          NODE_ENV: production
+          TEST_BASE_URL: http://127.0.0.1:3000
+        run: |
+          pnpm --filter web exec next start -p 3000 &
+          SERVER_PID=$!
+          echo "web server pid=$SERVER_PID; waiting for health..."
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3000/api/health >/dev/null; then
+              echo "server ready after ${i}s"; break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:3000/api/health || { echo "server never became healthy"; exit 1; }
+          set +e
+          NODE_ENV=test pnpm -r test
+          STATUS=$?
+          kill "$SERVER_PID" 2>/dev/null || true
+          exit $STATUS

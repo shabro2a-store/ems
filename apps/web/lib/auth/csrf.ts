@@ -23,15 +23,20 @@ export function csrfFromRequest(req: Request): boolean {
   const cookieHeader = req.headers.get('cookie') ?? '';
   const cookieMatch = cookieHeader.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE_NAME}=([^;]+)`));
   const rawCookie = cookieMatch?.[1];
-  // Cookies are URL-encoded by the browser. The X-CSRF-Token header is typically
-  // already decoded by the client JS (decodeURIComponent). Compare them on the
-  // decoded form so both sides work.
-  let cookieToken: string | undefined;
-  try {
-    cookieToken = rawCookie ? decodeURIComponent(rawCookie) : undefined;
-  } catch {
-    cookieToken = rawCookie;
-  }
-  const headerToken = req.headers.get('x-csrf-token') ?? undefined;
-  return validateCsrf(cookieToken, headerToken);
+  const rawHeader = req.headers.get('x-csrf-token') ?? undefined;
+  // Next.js serializes cookie values with encodeURIComponent, so the csrf cookie
+  // is URL-encoded on the wire (e.g. base64 "+/=" become "%2B%2F%3D"). Clients
+  // read it via document.cookie and send it back in the X-CSRF-Token header in
+  // whatever form they read it (usually still-encoded). Normalize BOTH sides by
+  // decoding: a base64 token contains no "%" sequences, so decoding an already
+  // decoded value is a no-op, while an encoded value collapses to the original.
+  const decode = (v: string | undefined): string | undefined => {
+    if (v === undefined) return undefined;
+    try {
+      return decodeURIComponent(v);
+    } catch {
+      return v;
+    }
+  };
+  return validateCsrf(decode(rawCookie), decode(rawHeader));
 }
