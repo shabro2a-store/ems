@@ -32,7 +32,7 @@ function dur(min: number): string {
   return h ? `${h}h ${min % 60}m` : `${min}m`;
 }
 
-export default function EmployeeHomeClient({ branch }: { branch: { name: string; gps_radius_m: number; gps_accuracy_max_m: number } }) {
+export default function EmployeeHomeClient({ username, branch }: { username: string; branch: { name: string; gps_radius_m: number; gps_accuracy_max_m: number } }) {
   const [today, setToday] = useState<TodayPayload | null>(null);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
@@ -95,7 +95,7 @@ export default function EmployeeHomeClient({ branch }: { branch: { name: string;
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Hi there 👋</h1>
+        <h1 className="text-xl font-semibold">Hi {username} 👋</h1>
         <p className="text-sm text-muted">{branch.name}</p>
       </div>
 
