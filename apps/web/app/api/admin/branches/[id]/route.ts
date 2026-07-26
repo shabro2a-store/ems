@@ -73,4 +73,48 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   return NextResponse.json({ ok: true, data: { branch } });
 }
 
+export async function DELETE(req: Request, ctx: { params: { id: string } }) {
+  const h = headers();
+  const role = h.get('x-user-role');
+  const adminId = h.get('x-user-id');
+  if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
+  if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
+
+  const branch = await prisma.branch.findUnique({ where: { id: ctx.params.id } });
+  if (!branch) return jsonError('NOT_FOUND', 'Branch not found', 404);
+
+  // A branch referenced by staff, punches or trips cannot be hard-deleted
+  // without losing history — archive it (is_active=false) instead.
+  const [userCount, punchCount, tripCount] = await Promise.all([
+    prisma.user.count({ where: { branch_id: branch.id } }),
+    prisma.punch.count({ where: { branch_id: branch.id } }),
+    prisma.trip.count({ where: { branch_id: branch.id } }),
+  ]);
+  const hasHistory = userCount + punchCount + tripCount > 0;
+
+  if (hasHistory) {
+    await prisma.branch.update({ where: { id: branch.id }, data: { is_active: false } });
+    await writeAuditLog({
+      actorId: adminId,
+      action: 'branch.archive',
+      entity: 'Branch',
+      entityId: branch.id,
+      before: { is_active: branch.is_active },
+      after: { is_active: false, reason: 'has history', users: userCount, punches: punchCount, trips: tripCount },
+    });
+    return NextResponse.json({ ok: true, data: { deleted: false, archived: true } });
+  }
+
+  await prisma.branch.delete({ where: { id: branch.id } });
+  await writeAuditLog({
+    actorId: adminId,
+    action: 'branch.delete',
+    entity: 'Branch',
+    entityId: branch.id,
+    before: { name: branch.name },
+  });
+  return NextResponse.json({ ok: true, data: { deleted: true, archived: false } });
+}
+
 export const dynamic = 'force-dynamic';

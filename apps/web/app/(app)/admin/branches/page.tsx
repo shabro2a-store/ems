@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { apiGet, apiSend, errorMessage } from '@/lib/api';
+import { PageHeader, Card, CardBody, Badge, Button, Modal, Field, Input, EmptyState, Alert, Spinner } from '@/components/ui';
 
 interface Branch {
   id: string;
@@ -14,316 +16,214 @@ interface Branch {
   is_active: boolean;
 }
 
-interface EditState {
-  id: string;
-  name: string;
-  lat: string;
-  lng: string;
-  gps_radius_m: string;
-  gps_accuracy_max_m: string;
-  absent_grace_min: string;
-  trip_threshold_min: string;
-  is_active: boolean;
-}
-
-function csrfFromCookie(): string | null {
-  if (typeof document === 'undefined') return null;
-  const m = document.cookie.match(/(?:^|;\s*)csrf=([^;]+)/);
-  return m?.[1] ?? null;
-}
-
-function idemKey(): string {
-  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function toEditable(b: Branch): EditState {
-  return {
-    id: b.id,
-    name: b.name,
-    lat: String(b.lat),
-    lng: String(b.lng),
-    gps_radius_m: String(b.gps_radius_m),
-    gps_accuracy_max_m: String(b.gps_accuracy_max_m),
-    absent_grace_min: String(b.absent_grace_min),
-    trip_threshold_min: String(b.trip_threshold_min),
-    is_active: b.is_active,
-  };
-}
-
 async function getCurrentPosition(timeoutMs = 10000): Promise<{ lat: number; lng: number; accuracy: number }> {
   return new Promise((resolve, reject) => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      reject(new Error('Geolocation not available in this browser. Use HTTPS or localhost.'));
+      reject(new Error('Geolocation not available. Use HTTPS or localhost.'));
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        }),
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
       (err) => reject(new Error(err.message || 'Location capture failed')),
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 },
     );
   });
 }
 
 export default function AdminBranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [editing, setEditing] = useState<EditState | null>(null);
-  const [username, setUsername] = useState<string>('');
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Branch | null>(null);
+  const [removing, setRemoving] = useState<Branch | null>(null);
+  const [adding, setAdding] = useState(false);
   const [locatingId, setLocatingId] = useState<string | null>(null);
-  const [locateMsg, setLocateMsg] = useState<string | null>(null);
-  const [lastFix, setLastFix] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const [msg, setMsg] = useState<{ tone: 'success' | 'warning' | 'danger'; text: string } | null>(null);
 
   async function load() {
-    const res = await fetch('/api/admin/branches', { credentials: 'include' });
-    const body = await res.json();
-    if (body.ok) setBranches(body.data.branches);
+    setLoading(true);
+    const r = await apiGet<{ branches: Branch[] }>('/api/admin/branches');
+    if (r.ok) setBranches(r.data.branches);
+    setLoading(false);
   }
-
-  useEffect(() => {
-    fetch('/api/me/ping', { credentials: 'include' }).then((r) => r.json()).then((j) => {
-      if (j.ok) setUsername(j.data.userId ?? '');
-    }).catch(() => {});
-    load();
-  }, []);
-
-  function startEdit(b: Branch) {
-    setEditing(toEditable(b));
-    setErr(null);
-    setSaved(false);
-  }
+  useEffect(() => { load(); }, []);
 
   async function recordLocation(b: Branch) {
-    setErr(null);
-    setLocateMsg(null);
+    setMsg(null);
     setLocatingId(b.id);
     try {
       const fix = await getCurrentPosition();
-      setLastFix(fix);
-      // Auto-open the edit form with the captured coords filled in
-      setEditing({
-        id: b.id,
-        name: b.name,
-        lat: fix.lat.toFixed(6),
-        lng: fix.lng.toFixed(6),
-        gps_radius_m: String(b.gps_radius_m),
-        gps_accuracy_max_m: String(b.gps_accuracy_max_m),
-        absent_grace_min: String(b.absent_grace_min),
-        trip_threshold_min: String(b.trip_threshold_min),
-        is_active: b.is_active,
-      });
-      setSaved(false);
-      setLocateMsg(`Captured at ±${Math.round(fix.accuracy)}m accuracy. Review and click Save.`);
+      const res = await apiSend(`/api/admin/branches/${b.id}`, { method: 'PATCH', body: { lat: fix.lat, lng: fix.lng } });
+      if (!res.ok) { setMsg({ tone: 'danger', text: errorMessage(res) }); return; }
+      setMsg({ tone: 'success', text: `${b.name}: location saved at ±${Math.round(fix.accuracy)}m.` });
+      await load();
     } catch (e) {
-      setLocateMsg(e instanceof Error ? e.message : 'Location capture failed');
+      setMsg({ tone: 'warning', text: e instanceof Error ? e.message : 'Location capture failed' });
     } finally {
       setLocatingId(null);
     }
   }
 
-  async function save() {
-    if (!editing) return;
-    setBusy(true);
-    setErr(null);
-    setSaved(false);
-    try {
-      const r = await fetch(`/api/admin/branches/${editing.id}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfFromCookie() ?? '',
-          'Idempotency-Key': idemKey(),
-        },
-        body: JSON.stringify({
-          lat: parseFloat(editing.lat),
-          lng: parseFloat(editing.lng),
-          gpsRadiusM: parseInt(editing.gps_radius_m),
-          gpsAccuracyMaxM: parseInt(editing.gps_accuracy_max_m),
-          absentGraceMin: parseInt(editing.absent_grace_min),
-          tripThresholdMin: parseInt(editing.trip_threshold_min),
-          isActive: editing.is_active,
-        }),
-      });
-      const j = await r.json();
-      if (!j.ok) {
-        setErr(j.error?.code ?? 'ERROR');
-        return;
-      }
-      setEditing(null);
-      setSaved(true);
-      await load();
-    } finally {
-      setBusy(false);
-    }
+  async function confirmRemove() {
+    if (!removing) return;
+    const res = await apiSend<{ deleted: boolean; archived: boolean }>(`/api/admin/branches/${removing.id}`, { method: 'DELETE' });
+    if (!res.ok) { setMsg({ tone: 'danger', text: errorMessage(res) }); setRemoving(null); return; }
+    setMsg({ tone: 'success', text: res.data.archived ? `${removing.name} archived (it has history).` : `${removing.name} removed.` });
+    setRemoving(null);
+    await load();
   }
 
   return (
     <>
-      <main className="p-4 max-w-5xl mx-auto">
-        <h1 className="text-xl font-semibold mb-4">Branches</h1>
-        {locateMsg && (
-          <div
-            data-testid="locate-message"
-            className={`mb-3 text-sm rounded px-3 py-2 ${
-              locateMsg.startsWith('Captured')
-                ? 'bg-emerald-50 text-emerald-800'
-                : 'bg-amber-50 text-amber-800'
-            }`}
-          >
-            {locateMsg}
-          </div>
-        )}
-        {err && <div className="mb-3 text-red-600 text-sm">{err}</div>}
-        {saved && <div className="mb-3 text-green-600 text-sm">Saved.</div>}
+      <PageHeader
+        title="Branches"
+        subtitle="Create branches, set the geofence, and record each location on-site"
+        actions={<Button onClick={() => setAdding(true)}>＋ Add branch</Button>}
+      />
+
+      {msg && <div className="mb-3" data-testid="locate-message"><Alert tone={msg.tone}>{msg.text}</Alert></div>}
+
+      {loading ? (
+        <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
+      ) : branches.length === 0 ? (
+        <EmptyState title="No branches yet" hint="Add your first branch, then record its location on-site." />
+      ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {branches.map((b) => {
-            const isEditing = editing?.id === b.id;
-            return (
-              <div key={b.id} className="rounded border border-gray-200 bg-white p-4">
-                <div className="flex items-center justify-between mb-2">
+          {branches.map((b) => (
+            <Card key={b.id}>
+              <CardBody>
+                <div className="mb-3 flex items-center justify-between">
                   <h2 className="font-semibold">{b.name}</h2>
-                  <span className={`text-xs rounded px-2 py-1 ${b.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
-                    {b.is_active ? 'active' : 'inactive'}
-                  </span>
+                  <Badge tone={b.is_active ? 'success' : 'neutral'}>{b.is_active ? 'active' : 'archived'}</Badge>
                 </div>
-                <dl className="text-sm space-y-1">
-                  <div className="flex gap-2">
-                    <dt className="text-gray-600">Coords:</dt>
-                    <dd>{b.lat.toFixed(5)}, {b.lng.toFixed(5)}</dd>
+
+                <div className="mb-3 rounded-lg border border-border bg-surface-muted px-3 py-2.5">
+                  <div className="text-xs font-medium uppercase tracking-wide text-muted">Location</div>
+                  <div className="tabular mt-0.5 text-sm">
+                    {b.lat === 0 && b.lng === 0 ? <span className="text-muted">Not set</span> : `${b.lat.toFixed(5)}, ${b.lng.toFixed(5)}`}
                   </div>
-                  <div className="flex gap-2">
-                    <dt className="text-gray-600">Radius:</dt>
-                    <dd>{b.gps_radius_m}m</dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt className="text-gray-600">Max accuracy:</dt>
-                    <dd>{b.gps_accuracy_max_m}m</dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt className="text-gray-600">Grace:</dt>
-                    <dd>{b.absent_grace_min} min</dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt className="text-gray-600">Trip threshold:</dt>
-                    <dd>{b.trip_threshold_min} min</dd>
-                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="mt-2"
+                    onClick={() => recordLocation(b)}
+                    loading={locatingId === b.id}
+                    data-testid={`record-location-${b.id}`}
+                  >
+                    📍 Record location
+                  </Button>
+                </div>
+
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
+                  <Row k="Radius" v={`${b.gps_radius_m} m`} />
+                  <Row k="Max accuracy" v={`${b.gps_accuracy_max_m} m`} />
+                  <Row k="Absent grace" v={`${b.absent_grace_min} min`} />
+                  <Row k="Trip threshold" v={`${b.trip_threshold_min} min`} />
                 </dl>
-                {!isEditing ? (
-                  <div className="mt-3 space-y-2">
-                    <button
-                      onClick={() => startEdit(b)}
-                      className="w-full min-h-[56px] rounded bg-blue-600 text-white text-base"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => recordLocation(b)}
-                      disabled={locatingId === b.id}
-                      data-testid={`record-location-${b.id}`}
-                      className="w-full min-h-[56px] rounded bg-emerald-600 text-white text-base disabled:opacity-50"
-                    >
-                      {locatingId === b.id ? 'Capturing GPS…' : '📍 Record Location'}
-                    </button>
-                  </div>
-                ) : (
-                  <div className="mt-3 space-y-2">
-                    <label className="block">
-                      <span className="text-xs text-gray-600">Lat</span>
-                      <input
-                        type="number"
-                        step="0.00001"
-                        value={editing.lat}
-                        onChange={(e) => setEditing({ ...editing, lat: e.target.value })}
-                        className="w-full rounded border px-2 py-1 text-sm"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-xs text-gray-600">Lng</span>
-                      <input
-                        type="number"
-                        step="0.00001"
-                        value={editing.lng}
-                        onChange={(e) => setEditing({ ...editing, lng: e.target.value })}
-                        className="w-full rounded border px-2 py-1 text-sm"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-xs text-gray-600">Radius (m)</span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={editing.gps_radius_m}
-                        onChange={(e) => setEditing({ ...editing, gps_radius_m: e.target.value })}
-                        className="w-full rounded border px-2 py-1 text-sm"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-xs text-gray-600">Max accuracy (m)</span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={editing.gps_accuracy_max_m}
-                        onChange={(e) => setEditing({ ...editing, gps_accuracy_max_m: e.target.value })}
-                        className="w-full rounded border px-2 py-1 text-sm"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-xs text-gray-600">Grace (min)</span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={editing.absent_grace_min}
-                        onChange={(e) => setEditing({ ...editing, absent_grace_min: e.target.value })}
-                        className="w-full rounded border px-2 py-1 text-sm"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-xs text-gray-600">Trip threshold (min)</span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={editing.trip_threshold_min}
-                        onChange={(e) => setEditing({ ...editing, trip_threshold_min: e.target.value })}
-                        className="w-full rounded border px-2 py-1 text-sm"
-                      />
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={editing.is_active}
-                        onChange={(e) => setEditing({ ...editing, is_active: e.target.checked })}
-                      />
-                      <span className="text-sm">Active</span>
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setEditing(null)}
-                        className="flex-1 min-h-[44px] rounded bg-gray-200 text-sm"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={save}
-                        disabled={busy}
-                        className="flex-1 min-h-[44px] rounded bg-blue-600 text-white text-sm disabled:opacity-50"
-                      >
-                        {busy ? 'Saving…' : 'Save'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+
+                <div className="mt-4 flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setEditing(b)}>Edit</Button>
+                  <Button size="sm" variant="ghost" className="text-danger" onClick={() => setRemoving(b)}>Remove</Button>
+                </div>
+              </CardBody>
+            </Card>
+          ))}
         </div>
-      </main>
+      )}
+
+      {adding && <AddBranchModal onClose={() => setAdding(false)} onCreated={() => { setAdding(false); setMsg({ tone: 'success', text: 'Branch created. Record its location on-site next.' }); load(); }} />}
+      {editing && <EditBranchModal branch={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setMsg({ tone: 'success', text: 'Branch updated.' }); load(); }} />}
+      {removing && (
+        <Modal title={`Remove ${removing.name}?`} onClose={() => setRemoving(null)}
+          footer={<><Button variant="secondary" onClick={() => setRemoving(null)}>Cancel</Button><Button variant="danger" onClick={confirmRemove}>Remove</Button></>}>
+          <p className="text-sm text-muted">
+            If this branch has staff or punch history it will be <b className="text-content">archived</b> (hidden but kept for payroll). An empty branch is deleted permanently.
+          </p>
+        </Modal>
+      )}
     </>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <>
+      <dt className="text-muted">{k}</dt>
+      <dd className="tabular text-right font-medium">{v}</dd>
+    </>
+  );
+}
+
+function AddBranchModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    const res = await apiSend('/api/admin/branches', { body: { name } });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onCreated();
+  }
+  return (
+    <Modal title="Add branch" onClose={onClose}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="add-branch" type="submit" loading={busy}>Create</Button></>}>
+      <form id="add-branch" onSubmit={submit} className="space-y-4">
+        <Field label="Branch name" htmlFor="bn" hint="You'll record the GPS location on-site after creating it.">
+          <Input id="bn" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Downtown" />
+        </Field>
+        {err && <Alert tone="danger">{err}</Alert>}
+      </form>
+    </Modal>
+  );
+}
+
+function EditBranchModal({ branch, onClose, onSaved }: { branch: Branch; onClose: () => void; onSaved: () => void }) {
+  const [f, setF] = useState({
+    name: branch.name,
+    gpsRadiusM: String(branch.gps_radius_m),
+    gpsAccuracyMaxM: String(branch.gps_accuracy_max_m),
+    absentGraceMin: String(branch.absent_grace_min),
+    tripThresholdMin: String(branch.trip_threshold_min),
+    isActive: branch.is_active,
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    const res = await apiSend(`/api/admin/branches/${branch.id}`, {
+      method: 'PATCH',
+      body: {
+        name: f.name,
+        gpsRadiusM: parseInt(f.gpsRadiusM, 10),
+        gpsAccuracyMaxM: parseInt(f.gpsAccuracyMaxM, 10),
+        absentGraceMin: parseInt(f.absentGraceMin, 10),
+        tripThresholdMin: parseInt(f.tripThresholdMin, 10),
+        isActive: f.isActive,
+      },
+    });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onSaved();
+  }
+  return (
+    <Modal title={`Edit ${branch.name}`} onClose={onClose}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="edit-branch" type="submit" loading={busy}>Save</Button></>}>
+      <form id="edit-branch" onSubmit={submit} className="space-y-4">
+        <Field label="Name" htmlFor="ebn"><Input id="ebn" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Geofence radius (m)" htmlFor="er"><Input id="er" type="number" min="1" value={f.gpsRadiusM} onChange={(e) => setF({ ...f, gpsRadiusM: e.target.value })} /></Field>
+          <Field label="Max accuracy (m)" htmlFor="ea"><Input id="ea" type="number" min="1" value={f.gpsAccuracyMaxM} onChange={(e) => setF({ ...f, gpsAccuracyMaxM: e.target.value })} /></Field>
+          <Field label="Absent grace (min)" htmlFor="eg"><Input id="eg" type="number" min="0" value={f.absentGraceMin} onChange={(e) => setF({ ...f, absentGraceMin: e.target.value })} /></Field>
+          <Field label="Trip threshold (min)" htmlFor="et"><Input id="et" type="number" min="1" value={f.tripThresholdMin} onChange={(e) => setF({ ...f, tripThresholdMin: e.target.value })} /></Field>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={f.isActive} onChange={(e) => setF({ ...f, isActive: e.target.checked })} />
+          Active
+        </label>
+        {err && <Alert tone="danger">{err}</Alert>}
+      </form>
+    </Modal>
   );
 }
