@@ -53,7 +53,7 @@ export async function GET(req: Request) {
       }),
       prisma.user.findMany({
         where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] } },
-        select: { id: true, username: true, role: true, branch_id: true, hourly_rate_cent: true },
+        select: { id: true, username: true, name: true, role: true, branch_id: true, hourly_rate_cent: true },
       }),
       prisma.punch.findMany({
         where: { at: { gte: startUtc, lt: endUtc } },
@@ -136,7 +136,7 @@ export async function GET(req: Request) {
 
       return {
         id: u.id,
-        username: u.username,
+        username: u.name || u.username,
         role: u.role,
         branch_id: u.branch_id,
         branch_name: u.branch_id ? branchName.get(u.branch_id) ?? null : null,

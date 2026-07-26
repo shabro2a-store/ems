@@ -27,7 +27,7 @@ export default async function EmployeeHomePage() {
 
   return (
     <EmployeeHomeClient
-      username={user.username}
+      username={user.name || user.username}
       branch={{
         name: user.branch.name,
         gps_radius_m: user.branch.gps_radius_m,

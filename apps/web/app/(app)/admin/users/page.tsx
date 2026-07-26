@@ -10,6 +10,7 @@ type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
 interface User {
   id: string;
   username: string;
+  name: string | null;
   role: Role;
   branch_id: string | null;
   branch: { id: string; name: string } | null;
@@ -139,9 +140,12 @@ export default function AdminEmployeesPage() {
                           <td className="px-4 py-2.5">
                             <div className="flex items-center gap-2.5">
                               <span className="grid h-8 w-8 place-items-center rounded-lg bg-surface-muted text-xs font-semibold text-muted">
-                                {u.username.slice(0, 2).toUpperCase()}
+                                {(u.name || u.username).slice(0, 2).toUpperCase()}
                               </span>
-                              <span className="font-medium">{u.username}</span>
+                              <span>
+                                <span className="font-medium">{u.name || u.username}</span>
+                                {u.name && <span className="ml-1.5 text-xs text-muted">@{u.username}</span>}
+                              </span>
                               {!u.is_active && <Badge tone="neutral">inactive</Badge>}
                             </div>
                           </td>
@@ -258,6 +262,7 @@ function SetPasswordModal({ user, onClose, onDone }: { user: User; onClose: () =
 }
 
 function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branch[]; onClose: () => void; onCreated: (u: string, pw: string) => void }) {
+  const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Role>('EMPLOYEE');
@@ -272,7 +277,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
     const res = await apiSend<{ temp_password: string }>('/api/admin/users', {
       idempotent: true, idemPrefix: 'user-create',
       body: {
-        username, password, role,
+        username, name, password, role,
         branchId: role === 'ADMIN' ? null : branch,
         hourlyRateCent: Math.round(parseFloat(rate || '0') * 100),
       },
@@ -286,7 +291,8 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
     <Modal title="Add employee" onClose={onClose}
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="create-emp" type="submit" loading={busy}>Create</Button></>}>
       <form id="create-emp" onSubmit={submit} className="space-y-4">
-        <Field label="Username" htmlFor="cu"><Input id="cu" value={username} onChange={(e) => setUsername(e.target.value)} required autoCapitalize="none" /></Field>
+        <Field label="Full name" htmlFor="cn"><Input id="cn" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ahmad Khalil" required /></Field>
+        <Field label="Username (login)" htmlFor="cu" hint="What they type to log in."><Input id="cu" value={username} onChange={(e) => setUsername(e.target.value)} required autoCapitalize="none" /></Field>
         <Field label="Temporary password" htmlFor="cp" hint="Share verbally; they change it on first login."><Input id="cp" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
         <Field label="Role" htmlFor="cr">
           <Select id="cr" value={role} onChange={(e) => setRole(e.target.value as Role)}>
@@ -311,6 +317,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
 
 function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; branches: Branch[]; onClose: () => void; onSaved: () => void }) {
   const isAdmin = user.role === 'ADMIN';
+  const [name, setName] = useState(user.name ?? '');
   const [username, setUsername] = useState(user.username);
   const [role, setRole] = useState<Role>(user.role);
   const [branch, setBranch] = useState(user.branch_id ?? branches[0]?.id ?? '');
@@ -323,8 +330,8 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
     setBusy(true); setErr(null);
     // For the admin we only ever send the username (role/branch are locked).
     const body = isAdmin
-      ? { username }
-      : { username, role, branchId: role === 'ADMIN' ? null : branch, hourlyRateCent: Math.round(parseFloat(rate || '0') * 100) };
+      ? { name, username }
+      : { name, username, role, branchId: role === 'ADMIN' ? null : branch, hourlyRateCent: Math.round(parseFloat(rate || '0') * 100) };
     const res = await apiSend(`/api/admin/users/${user.id}`, { method: 'PATCH', body });
     setBusy(false);
     if (!res.ok) { setErr(errorMessage(res)); return; }
@@ -335,7 +342,8 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
     <Modal title={`Edit ${user.username}`} onClose={onClose}
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="edit-emp" type="submit" loading={busy}>Save</Button></>}>
       <form id="edit-emp" onSubmit={submit} className="space-y-4">
-        <Field label="Username" htmlFor="eu" hint="Their login name.">
+        <Field label="Full name" htmlFor="en"><Input id="en" value={name} onChange={(e) => setName(e.target.value)} placeholder="Shown in the app" /></Field>
+        <Field label="Username (login)" htmlFor="eu" hint="What they type to log in.">
           <Input id="eu" value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" required />
         </Field>
         {!isAdmin && (

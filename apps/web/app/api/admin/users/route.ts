@@ -9,6 +9,7 @@ import { writeAuditLog } from '@/lib/services/audit';
 
 const Create = z.object({
   username: z.string().min(1).max(64),
+  name: z.string().max(120).optional(),
   password: z.string().min(1).max(256),
   role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN']),
   branchId: z.string().nullable().optional(),
@@ -32,6 +33,7 @@ export async function GET() {
     select: {
       id: true,
       username: true,
+      name: true,
       role: true,
       branch_id: true,
       hourly_rate_cent: true,
@@ -82,6 +84,7 @@ export async function POST(req: Request) {
     const u = await tx.user.create({
       data: {
         username: body.username,
+        name: body.name?.trim() || null,
         password_hash: passwordHash,
         role: body.role,
         branch_id: ROLES_FOR_BRANCH.has(body.role) ? body.branchId : null,

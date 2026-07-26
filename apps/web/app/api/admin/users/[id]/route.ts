@@ -8,6 +8,7 @@ import { writeAuditLog } from '@/lib/services/audit';
 
 const Patch = z.object({
   username: z.string().min(1).max(64).optional(),
+  name: z.string().max(120).optional(),
   role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN']).optional(),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative().optional(),
@@ -58,6 +59,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       where: { id: ctx.params.id },
       data: {
         ...(body.username ? { username: body.username } : {}),
+        ...(body.name !== undefined ? { name: body.name.trim() || null } : {}),
         ...(body.role ? { role: body.role } : {}),
         ...(body.branchId !== undefined ? { branch_id: body.branchId } : {}),
         ...(body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent

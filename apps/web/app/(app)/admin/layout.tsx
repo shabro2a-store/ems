@@ -18,13 +18,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   const { startUtc, endUtc } = todayInBeirutDateRange(todayInBeirut());
   const [user, flagCount] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { username: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { username: true, name: true } }),
     prisma.flag.count({ where: { created_at: { gte: startUtc, lt: endUtc }, notified_at: null } }),
   ]);
 
   return (
     <div className="min-h-screen bg-bg">
-      <AdminNav username={user?.username ?? 'admin'} flagCount={flagCount} />
+      <AdminNav username={user?.name || user?.username || 'admin'} flagCount={flagCount} />
       <main className="mx-auto max-w-6xl px-4 py-5 sm:px-6">{children}</main>
     </div>
   );

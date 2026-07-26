@@ -28,7 +28,7 @@ export default async function DriverHomePage() {
 
   return (
     <DriverHomeClient
-      username={user.username}
+      username={user.name || user.username}
       branch={{
         name: user.branch.name,
         gps_radius_m: user.branch.gps_radius_m,

@@ -49,6 +49,7 @@ enum FlagKind {
 model User {
   id                   String             @id @default(cuid())
   username             String             @unique
+  name                 String?
   password_hash        String
   role                 Role
   branch_id            String?

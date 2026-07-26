@@ -109,12 +109,14 @@ Change your own password. Body `{ currentPassword, newPassword }` (new ≥ 6 cha
 
 ### Employees
 - **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`).
-- **POST /api/admin/users** *(CSRF, Idempotent)* `{ username, password, role:
+- **POST /api/admin/users** *(CSRF, Idempotent)* `{ username, name?, password, role:
   "EMPLOYEE"|"DRIVER", branchId, hourlyRateCent }` → `{ user, temp_password }`.
-  Creating an **ADMIN is rejected (403)**.
-- **PATCH /api/admin/users/[id]** *(CSRF)* `{ role?, branchId?, hourlyRateCent? }`
-  (a rate change inserts a new `RateChange`). Promoting to admin, or changing the
-  admin's role, is **rejected (403)**.
+  `username` is the login; `name` is the display name. Creating an **ADMIN is
+  rejected (403)**.
+- **PATCH /api/admin/users/[id]** *(CSRF)* `{ username?, name?, role?, branchId?,
+  hourlyRateCent? }` (a rate change inserts a new `RateChange`; `username` is
+  uniqueness-checked → `409 USERNAME_TAKEN`). Promoting to admin, or changing the
+  admin's role, is **rejected (403)** (the admin's username/name are still editable).
 - **POST /api/admin/users/[id]/reset-password** *(CSRF)* optional `{ password }` —
   sets that password, or generates a random one. → `{ temp_password }`.
 - **POST /api/admin/users/[id]/deactivate** *(CSRF)* toggles active. Deactivating an
