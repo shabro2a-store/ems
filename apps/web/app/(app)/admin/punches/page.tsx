@@ -45,7 +45,7 @@ export default function AdminPunchesPage() {
 
   async function load() {
     const [pRes, bRes] = await Promise.all([
-      fetch('/api/me/today', { credentials: 'include' }),
+      fetch('/api/admin/punches', { credentials: 'include' }),
       fetch('/api/admin/branches', { credentials: 'include' }),
     ]);
     if (pRes.ok) {
