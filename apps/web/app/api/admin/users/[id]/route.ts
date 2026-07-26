@@ -7,6 +7,7 @@ import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
 
 const Patch = z.object({
+  username: z.string().min(1).max(64).optional(),
   role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN']).optional(),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative().optional(),
@@ -44,10 +45,19 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     return jsonError('FORBIDDEN', 'The admin account cannot be changed', 403);
   }
 
+  // Username must stay unique.
+  if (body.username && body.username !== before.username) {
+    const clash = await prisma.user.findUnique({ where: { username: body.username }, select: { id: true } });
+    if (clash && clash.id !== before.id) {
+      return jsonError('USERNAME_TAKEN', 'That username is already in use', 409);
+    }
+  }
+
   const user = await prisma.$transaction(async (tx) => {
     const updated = await tx.user.update({
       where: { id: ctx.params.id },
       data: {
+        ...(body.username ? { username: body.username } : {}),
         ...(body.role ? { role: body.role } : {}),
         ...(body.branchId !== undefined ? { branch_id: body.branchId } : {}),
         ...(body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent
@@ -72,8 +82,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     action: 'user.update',
     entity: 'User',
     entityId: user.id,
-    before: { role: before.role, branch_id: before.branch_id, hourly_rate_cent: before.hourly_rate_cent },
-    after: { role: user.role, branch_id: user.branch_id, hourly_rate_cent: user.hourly_rate_cent },
+    before: { username: before.username, role: before.role, branch_id: before.branch_id, hourly_rate_cent: before.hourly_rate_cent },
+    after: { username: user.username, role: user.role, branch_id: user.branch_id, hourly_rate_cent: user.hourly_rate_cent },
   });
 
   const { password_hash: _pwh, ...safeUser } = user;

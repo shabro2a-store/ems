@@ -152,11 +152,9 @@ export default function AdminEmployeesPage() {
                           </td>
                           <td className="px-4 py-2.5">
                             <div className="flex justify-end gap-1.5">
+                              <Button size="sm" variant="secondary" onClick={() => { setErr(null); setEditUser(u); }}>Edit</Button>
                               {u.role !== 'ADMIN' && (
-                                <>
-                                  <Button size="sm" variant="secondary" onClick={() => { setErr(null); setEditUser(u); }}>Edit</Button>
-                                  <Button size="sm" variant="secondary" onClick={() => setSchedUser(u)}>Schedule</Button>
-                                </>
+                                <Button size="sm" variant="secondary" onClick={() => setSchedUser(u)}>Schedule</Button>
                               )}
                               <Button size="sm" variant="ghost" onClick={() => setPwTarget(u)}>Set password</Button>
                               {u.role !== 'ADMIN' && (
@@ -312,6 +310,8 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
 }
 
 function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; branches: Branch[]; onClose: () => void; onSaved: () => void }) {
+  const isAdmin = user.role === 'ADMIN';
+  const [username, setUsername] = useState(user.username);
   const [role, setRole] = useState<Role>(user.role);
   const [branch, setBranch] = useState(user.branch_id ?? branches[0]?.id ?? '');
   const [rate, setRate] = useState((user.hourly_rate_cent / 100).toFixed(2));
@@ -321,10 +321,11 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setErr(null);
-    const res = await apiSend(`/api/admin/users/${user.id}`, {
-      method: 'PATCH',
-      body: { role, branchId: role === 'ADMIN' ? null : branch, hourlyRateCent: Math.round(parseFloat(rate || '0') * 100) },
-    });
+    // For the admin we only ever send the username (role/branch are locked).
+    const body = isAdmin
+      ? { username }
+      : { username, role, branchId: role === 'ADMIN' ? null : branch, hourlyRateCent: Math.round(parseFloat(rate || '0') * 100) };
+    const res = await apiSend(`/api/admin/users/${user.id}`, { method: 'PATCH', body });
     setBusy(false);
     if (!res.ok) { setErr(errorMessage(res)); return; }
     onSaved();
@@ -334,22 +335,25 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
     <Modal title={`Edit ${user.username}`} onClose={onClose}
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="edit-emp" type="submit" loading={busy}>Save</Button></>}>
       <form id="edit-emp" onSubmit={submit} className="space-y-4">
-        <Field label="Role" htmlFor="er">
-          <Select id="er" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option>
-          </Select>
+        <Field label="Username" htmlFor="eu" hint="Their login name.">
+          <Input id="eu" value={username} onChange={(e) => setUsername(e.target.value)} autoCapitalize="none" required />
         </Field>
-        {role !== 'ADMIN' && (
-          <Field label="Branch" htmlFor="eb">
-            <Select id="eb" value={branch} onChange={(e) => setBranch(e.target.value)}>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </Select>
-          </Field>
-        )}
-        {role !== 'ADMIN' && (
-          <Field label="Hourly rate (USD)" htmlFor="erate" hint="A rate change applies from now on; past shifts keep the old rate.">
-            <Input id="erate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} />
-          </Field>
+        {!isAdmin && (
+          <>
+            <Field label="Role" htmlFor="er">
+              <Select id="er" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option>
+              </Select>
+            </Field>
+            <Field label="Branch" htmlFor="eb">
+              <Select id="eb" value={branch} onChange={(e) => setBranch(e.target.value)}>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Hourly rate (USD)" htmlFor="erate" hint="A rate change applies from now on; past shifts keep the old rate.">
+              <Input id="erate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} />
+            </Field>
+          </>
         )}
         {err && <Alert tone="danger">{err}</Alert>}
       </form>
