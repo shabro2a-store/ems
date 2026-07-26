@@ -22,10 +22,9 @@ export const NAV_ITEMS: NavItem[] = [
 
 export interface AdminNavProps {
   username: string;
-  flagCount: number;
 }
 
-export default function AdminNav({ username, flagCount }: AdminNavProps) {
+export default function AdminNav({ username }: AdminNavProps) {
   const pathname = usePathname();
   const [pwOpen, setPwOpen] = useState(false);
 
@@ -51,15 +50,6 @@ export default function AdminNav({ username, flagCount }: AdminNavProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {flagCount > 0 && (
-            <Link
-              href="/admin/flags"
-              className="inline-flex items-center gap-1 rounded-full border border-warning/20 bg-warning-subtle px-2.5 py-1 text-xs font-medium text-warning"
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-warning" />
-              {flagCount} flag{flagCount === 1 ? '' : 's'}
-            </Link>
-          )}
           <button
             type="button"
             onClick={() => setPwOpen(true)}

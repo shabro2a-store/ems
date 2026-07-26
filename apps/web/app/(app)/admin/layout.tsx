@@ -1,7 +1,6 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/db/prisma';
-import { todayInBeirut, todayInBeirutDateRange } from 'time';
 import AdminNav from '@/components/admin/AdminNav';
 
 export const dynamic = 'force-dynamic';
@@ -16,15 +15,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     redirect(role === 'DRIVER' ? '/driver' : '/employee');
   }
 
-  const { startUtc, endUtc } = todayInBeirutDateRange(todayInBeirut());
-  const [user, flagCount] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, select: { username: true, name: true } }),
-    prisma.flag.count({ where: { created_at: { gte: startUtc, lt: endUtc }, notified_at: null } }),
-  ]);
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { username: true, name: true },
+  });
 
   return (
     <div className="min-h-screen bg-bg">
-      <AdminNav username={user?.name || user?.username || 'admin'} flagCount={flagCount} />
+      <AdminNav username={user?.name || user?.username || 'admin'} />
       <main className="mx-auto max-w-6xl px-4 py-5 sm:px-6">{children}</main>
     </div>
   );
