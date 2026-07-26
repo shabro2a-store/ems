@@ -76,7 +76,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     after: { role: user.role, branch_id: user.branch_id, hourly_rate_cent: user.hourly_rate_cent },
   });
 
-  return NextResponse.json({ ok: true, data: { user } });
+  const { password_hash: _pwh, ...safeUser } = user;
+  return NextResponse.json({ ok: true, data: { user: safeUser } });
 }
 
 export const dynamic = 'force-dynamic';

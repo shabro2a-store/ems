@@ -54,7 +54,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     after: { daily_summary: user.notify_daily_summary, routine_pings: user.notify_routine_pings },
   });
 
-  return NextResponse.json({ ok: true, data: { user } });
+  const { password_hash: _pwh, ...safeUser } = user;
+  return NextResponse.json({ ok: true, data: { user: safeUser } });
 }
 
 export const dynamic = 'force-dynamic';

@@ -26,9 +26,22 @@ export async function GET() {
   const role = h.get('x-user-role');
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
+  // Never send password_hash (or other secrets) to the client — select explicitly.
   const users = await prisma.user.findMany({
     orderBy: { username: 'asc' },
-    include: { branch: { select: { id: true, name: true } } },
+    select: {
+      id: true,
+      username: true,
+      role: true,
+      branch_id: true,
+      hourly_rate_cent: true,
+      is_active: true,
+      telegram_chat_id: true,
+      notify_daily_summary: true,
+      notify_routine_pings: true,
+      created_at: true,
+      branch: { select: { id: true, name: true } },
+    },
   });
   return NextResponse.json({ ok: true, data: { users } });
 }
@@ -97,10 +110,11 @@ export async function POST(req: Request) {
   });
 
   const tempPassword = body.password;
+  const { password_hash: _pwh, ...safeUser } = user;
   const response = {
     ok: true,
     data: {
-      user,
+      user: safeUser,
       temp_password: tempPassword,
     },
   };

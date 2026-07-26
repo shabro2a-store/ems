@@ -39,7 +39,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     after: { is_active: user.is_active },
   });
 
-  return NextResponse.json({ ok: true, data: { user } });
+  const { password_hash: _pwh, ...safeUser } = user;
+  return NextResponse.json({ ok: true, data: { user: safeUser } });
 }
 
 export const dynamic = 'force-dynamic';
