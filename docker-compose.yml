@@ -1,9 +1,10 @@
 services:
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ems
-      POSTGRES_PASSWORD: ems_dev_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ems_dev_password}
       POSTGRES_DB: ems
     ports:
       - '5433:5432'
@@ -19,15 +20,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+    restart: unless-stopped
     ports:
       - '3000:3000'
     environment:
-      DATABASE_URL: postgresql://ems:ems_dev_password@db:5432/ems
+      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:-ems_dev_password}@db:5432/ems
       NODE_ENV: production
-      JWT_SECRET: dev_only_secret_replace_in_prod_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      # Must be set in /opt/ems/.env (openssl rand -hex 32). Fails closed if missing.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - add it to /opt/ems/.env}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://app.shabro2a.com}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-dev_webhook_secret_change_in_prod}
+      # Keep dev GPS-bypass endpoints OFF in production.
       ENABLE_DEV_ENDPOINTS: ${ENABLE_DEV_ENDPOINTS:-false}
       NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS: ${ENABLE_DEV_ENDPOINTS:-false}
     depends_on:
@@ -38,10 +42,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://ems:ems_dev_password@db:5432/ems
+      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:-ems_dev_password}@db:5432/ems
       NODE_ENV: production
-      JWT_SECRET: dev_only_secret_replace_in_prod_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - add it to /opt/ems/.env}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://app.shabro2a.com}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-dev_webhook_secret_change_in_prod}
