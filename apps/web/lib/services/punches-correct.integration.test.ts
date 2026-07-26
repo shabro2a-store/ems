@@ -24,7 +24,7 @@ describe('punch.correct integration', () => {
     await getTestPrisma().$disconnect();
   });
 
-  it('creates an AuditLog row; original Punch row is unchanged', async () => {
+  it('creates an AuditLog row and persists the correction to the Punch row', async () => {
     const branch = await seedTestBranch();
     const employee = await seedTestUser({ username: 'corr-emp', branch_id: branch.id });
     const admin = await seedTestUser({ username: 'corr-admin', role: Role.ADMIN });
@@ -66,8 +66,14 @@ describe('punch.correct integration', () => {
     expect(audit).not.toBeNull();
     expect(audit?.actor_id).toBe(admin.id);
 
+    // The correction is now persisted to the Punch row (previously this was a
+    // no-op that only wrote an audit log).
     const dbPunch = await getTestPrisma().punch.findUnique({ where: { id: originalPunch.id } });
-    expect(dbPunch?.at.toISOString()).toBe('2026-07-01T08:00:00.000Z');
+    expect(dbPunch?.at.toISOString()).toBe(newAt);
+    expect(dbPunch?.corrected).toBe(true);
+    expect(dbPunch?.corrected_by).toBe(admin.id);
+    expect(dbPunch?.correction_reason).toBe('employee arrived late');
+    // GPS evidence is preserved (only time/branch can be corrected).
     expect(dbPunch?.lat).toBe(33.8962);
     expect(dbPunch?.lng).toBe(35.4827);
   });
