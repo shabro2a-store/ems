@@ -1,144 +1,268 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { apiGet, apiSend, centsToUsd, csrfFromCookie, errorMessage } from '@/lib/api';
+import { PageHeader, Card, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile } from '@/components/ui';
 
-interface PayrollRow {
+interface Row {
   user_id: string;
   username: string;
+  role: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  rate_cent: number;
   hours: number;
   gross_cent: number;
   adjustments_cent: number;
   advances_cent: number;
   net_cent: number;
 }
-
-interface PayrollTotals {
-  hours: number;
-  gross_cent: number;
-  adjustments_cent: number;
-  advances_cent: number;
-  net_cent: number;
-}
+interface Totals { hours: number; gross_cent: number; adjustments_cent: number; advances_cent: number; net_cent: number }
+interface Branch { id: string; name: string }
 
 function currentMonth(): string {
   const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-
-const usd = (c: number) => `$${(c / 100).toFixed(2)}`;
 
 export default function AdminPayrollPage() {
   const [month, setMonth] = useState(currentMonth());
-  const [rows, setRows] = useState<PayrollRow[]>([]);
-  const [totals, setTotals] = useState<PayrollTotals | null>(null);
+  const [branchId, setBranchId] = useState('all');
+  const [rows, setRows] = useState<Row[]>([]);
+  const [totals, setTotals] = useState<Totals | null>(null);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [pdfBusy, setPdfBusy] = useState(false);
+  const [adjust, setAdjust] = useState<Row | null>(null);
+  const [rateFor, setRateFor] = useState<Row | null>(null);
 
   async function load() {
+    setLoading(true);
     setErr(null);
-    const res = await fetch(`/api/admin/payroll?month=${encodeURIComponent(month)}`, { credentials: 'include' });
-    const body = await res.json();
-    if (!body.ok) {
-      setErr(body.error?.code ?? 'ERROR');
-      setRows([]);
-      setTotals(null);
-      return;
+    const r = await apiGet<{ rows: Row[]; totals: Totals; branches: Branch[] }>(`/api/admin/payroll?month=${month}&branchId=${branchId}`);
+    if (r.ok) {
+      setRows(r.data.rows);
+      setTotals(r.data.totals);
+      setBranches(r.data.branches);
+    } else {
+      setErr(errorMessage(r));
     }
-    setRows(body.data.rows);
-    setTotals(body.data.totals);
+    setLoading(false);
   }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [month, branchId]);
 
-  useEffect(() => {
-    load();
-  }, [month]);
+  const grouped = useMemo(() => {
+    const g = new Map<string, Row[]>();
+    for (const r of rows) {
+      const key = r.branch_name ?? 'Unassigned';
+      (g.get(key) ?? g.set(key, []).get(key)!).push(r);
+    }
+    return [...g.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [rows]);
 
   async function downloadPdf() {
-    setPdfBusy(true);
+    setDownloading(true);
+    setErr(null);
     try {
-      const res = await fetch(
-        `/api/admin/reports/payroll?month=${encodeURIComponent(month)}`,
-        { credentials: 'include' },
-      );
-      if (!res.ok) {
-        const body = await res.text();
-        setErr(`PDF failed: ${res.status} ${body.slice(0, 200)}`);
-        return;
-      }
+      const res = await fetch(`/api/admin/reports/payroll?month=${month}&branchId=${branchId}`, {
+        credentials: 'include',
+        headers: { 'X-CSRF-Token': csrfFromCookie() },
+      });
+      if (!res.ok) { setErr('Could not generate PDF.'); return; }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `payroll-${month}.pdf`;
-      document.body.appendChild(a);
+      a.href = URL.createObjectURL(blob);
+      a.download = `payroll-${month}${branchId !== 'all' ? '-branch' : ''}.pdf`;
       a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(a.href);
     } finally {
-      setPdfBusy(false);
+      setDownloading(false);
     }
   }
 
   return (
-    <main className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Payroll</h1>
-        <button
-          onClick={downloadPdf}
-          disabled={pdfBusy}
-          className="rounded bg-emerald-600 text-white px-3 py-2 text-sm disabled:opacity-50"
-        >
-          {pdfBusy ? 'Generating…' : '📄 Download PDF'}
-        </button>
-      </div>
+    <>
+      <PageHeader
+        title="Payroll"
+        subtitle="Hours, pay, adjustments and advances for the month"
+        actions={
+          <>
+            <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-auto" />
+            <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-auto">
+              <option value="all">All branches</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
+            <Button onClick={downloadPdf} loading={downloading}>📄 PDF</Button>
+          </>
+        }
+      />
 
-      <label className="mt-4 block">
-        <span className="text-sm">Month</span>
-        <input
-          type="month"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          className="mt-1 rounded border px-3 py-2"
-        />
-      </label>
+      {msg && <div className="mb-3"><Alert tone="success">{msg}</Alert></div>}
+      {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
 
-      {err && <div className="mt-4 text-red-600">{err}</div>}
-
-      {rows.length > 0 && (
-        <table className="mt-6 w-full text-left text-sm">
-          <thead className="border-b">
-            <tr>
-              <th className="py-2">User</th>
-              <th>Hours</th>
-              <th>Gross</th>
-              <th>Adj</th>
-              <th>Adv</th>
-              <th>Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.user_id} className="border-b">
-                <td className="py-2">{r.username}</td>
-                <td>{r.hours.toFixed(2)}</td>
-                <td>{usd(r.gross_cent)}</td>
-                <td>{usd(r.adjustments_cent)}</td>
-                <td>{usd(r.advances_cent)}</td>
-                <td>{usd(r.net_cent)}</td>
-              </tr>
-            ))}
-            {totals && (
-              <tr className="font-bold bg-gray-50">
-                <td className="py-2">TOTAL</td>
-                <td>{totals.hours.toFixed(2)}</td>
-                <td>{usd(totals.gross_cent)}</td>
-                <td>{usd(totals.adjustments_cent)}</td>
-                <td>{usd(totals.advances_cent)}</td>
-                <td>{usd(totals.net_cent)}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      {totals && (
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatTile label="Net payout" value={centsToUsd(totals.net_cent)} tone="primary" />
+          <StatTile label="Gross" value={centsToUsd(totals.gross_cent)} />
+          <StatTile label="Hours" value={totals.hours.toFixed(1)} />
+          <StatTile label="Advances" value={centsToUsd(totals.advances_cent)} tone={totals.advances_cent > 0 ? 'danger' : 'neutral'} />
+        </div>
       )}
-    </main>
+
+      {loading ? (
+        <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
+      ) : rows.length === 0 ? (
+        <EmptyState title="No payroll data" hint="No active staff for this month/branch." />
+      ) : (
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-surface-muted text-xs font-semibold uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2.5 text-left">Employee</th>
+                  <th className="px-4 py-2.5 text-right">Hours</th>
+                  <th className="px-4 py-2.5 text-right">Rate</th>
+                  <th className="px-4 py-2.5 text-right">Gross</th>
+                  <th className="px-4 py-2.5 text-right">Adjust.</th>
+                  <th className="px-4 py-2.5 text-right">Advances</th>
+                  <th className="px-4 py-2.5 text-right">Net</th>
+                  <th className="px-4 py-2.5 text-right"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {grouped.map(([group, grows]) => (
+                  <GroupBody key={group} group={group} show={branchId === 'all'}>
+                    {grows.map((r) => (
+                      <tr key={r.user_id} className="hover:bg-surface-muted">
+                        <td className="px-4 py-2.5">
+                          <div className="font-medium">{r.username}</div>
+                          <div className="text-xs text-muted">{r.role.toLowerCase()}</div>
+                        </td>
+                        <td className="tabular px-4 py-2.5 text-right">{r.hours.toFixed(1)}</td>
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            onClick={() => setRateFor(r)}
+                            className="tabular border-b border-dashed border-primary/50 font-medium hover:text-primary"
+                            title="Change hourly rate"
+                          >
+                            {centsToUsd(r.rate_cent)}
+                          </button>
+                        </td>
+                        <td className="tabular px-4 py-2.5 text-right">{centsToUsd(r.gross_cent)}</td>
+                        <td className={`tabular px-4 py-2.5 text-right font-medium ${r.adjustments_cent > 0 ? 'text-success' : r.adjustments_cent < 0 ? 'text-danger' : 'text-muted'}`}>
+                          {r.adjustments_cent === 0 ? '—' : `${r.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(r.adjustments_cent), false)}`}
+                        </td>
+                        <td className="tabular px-4 py-2.5 text-right text-danger">
+                          {r.advances_cent === 0 ? <span className="text-muted">—</span> : `−${centsToUsd(r.advances_cent, false)}`}
+                        </td>
+                        <td className="tabular px-4 py-2.5 text-right font-semibold">{centsToUsd(r.net_cent)}</td>
+                        <td className="px-4 py-2.5 text-right">
+                          <Button size="sm" variant="ghost" onClick={() => setAdjust(r)}>＋ Adjust</Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </GroupBody>
+                ))}
+              </tbody>
+              {totals && (
+                <tfoot>
+                  <tr className="border-t-2 border-border bg-surface-muted font-semibold">
+                    <td className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted">Total · {rows.length} staff</td>
+                    <td className="tabular px-4 py-3 text-right">{totals.hours.toFixed(1)}</td>
+                    <td></td>
+                    <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.gross_cent)}</td>
+                    <td className="tabular px-4 py-3 text-right">{totals.adjustments_cent >= 0 ? '+' : '−'}{centsToUsd(Math.abs(totals.adjustments_cent), false)}</td>
+                    <td className="tabular px-4 py-3 text-right">−{centsToUsd(totals.advances_cent, false)}</td>
+                    <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.net_cent)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {adjust && (
+        <AdjustModal row={adjust} onClose={() => setAdjust(null)} onSaved={() => { setAdjust(null); setMsg('Adjustment added.'); load(); }} />
+      )}
+      {rateFor && (
+        <RateModal row={rateFor} onClose={() => setRateFor(null)} onSaved={() => { setRateFor(null); setMsg('Rate updated (applies from now on).'); load(); }} />
+      )}
+    </>
+  );
+}
+
+function GroupBody({ group, show, children }: { group: string; show: boolean; children: React.ReactNode }) {
+  return (
+    <>
+      {show && <tr><td colSpan={8} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>}
+      {children}
+    </>
+  );
+}
+
+function AdjustModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void }) {
+  const [kind, setKind] = useState<'BONUS' | 'DEDUCTION'>('BONUS');
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    const res = await apiSend('/api/admin/adjustments', {
+      idempotent: true, idemPrefix: 'adj',
+      body: { userId: row.user_id, kind, amountCent: Math.round(parseFloat(amount || '0') * 100), reason },
+    });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onSaved();
+  }
+  return (
+    <Modal title={`Adjust pay · ${row.username}`} onClose={onClose}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="adj" type="submit" loading={busy}>Add</Button></>}>
+      <form id="adj" onSubmit={submit} className="space-y-4">
+        <Field label="Type" htmlFor="ak">
+          <Select id="ak" value={kind} onChange={(e) => setKind(e.target.value as 'BONUS' | 'DEDUCTION')}>
+            <option value="BONUS">Bonus (+)</option>
+            <option value="DEDUCTION">Deduction (−)</option>
+          </Select>
+        </Field>
+        <Field label="Amount (USD)" htmlFor="aa"><Input id="aa" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} required /></Field>
+        <Field label="Reason" htmlFor="ar"><Input id="ar" value={reason} onChange={(e) => setReason(e.target.value)} required maxLength={500} placeholder="e.g. Eid bonus" /></Field>
+        {err && <Alert tone="danger">{err}</Alert>}
+      </form>
+    </Modal>
+  );
+}
+
+function RateModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void }) {
+  const [rate, setRate] = useState((row.rate_cent / 100).toFixed(2));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    const res = await apiSend(`/api/admin/users/${row.user_id}`, {
+      method: 'PATCH',
+      body: { hourlyRateCent: Math.round(parseFloat(rate || '0') * 100) },
+    });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onSaved();
+  }
+  return (
+    <Modal title={`Hourly rate · ${row.username}`} onClose={onClose}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="rate" type="submit" loading={busy}>Save rate</Button></>}>
+      <form id="rate" onSubmit={submit} className="space-y-4">
+        <Field label="New hourly rate (USD)" htmlFor="rr" hint="Applies from now on; hours already worked this month keep the old rate.">
+          <Input id="rr" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} required />
+        </Field>
+        {err && <Alert tone="danger">{err}</Alert>}
+      </form>
+    </Modal>
   );
 }

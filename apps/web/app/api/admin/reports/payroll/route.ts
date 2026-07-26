@@ -33,9 +33,13 @@ export async function GET(req: Request) {
     return jsonError('INVALID_INPUT', 'month out of range', 400);
   }
 
+  // Scope to a branch when the screen's filter asks for it, so the PDF matches.
+  const branchParam = url.searchParams.get('branchId');
+  const branchId = branchParam && branchParam !== 'all' ? branchParam : null;
+
   // Aggregate user rows for this month
   const users = await prisma.user.findMany({
-    where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] } },
+    where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] }, ...(branchId ? { branch_id: branchId } : {}) },
     include: { branch: true },
     orderBy: [{ role: 'asc' }, { username: 'asc' }],
   });

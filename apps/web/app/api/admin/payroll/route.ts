@@ -11,20 +11,24 @@ function jsonError(code: string, message: string, status: number) {
 
 export async function GET(req: Request) {
   const h = headers();
-  const role = h.get('x-user-role');
-  if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
   const url = new URL(req.url);
   const month = url.searchParams.get('month');
   if (!month || !MONTH_RE.test(month)) {
     return jsonError('INVALID_INPUT', 'month query param must be YYYY-MM', 400);
   }
+  const branchParam = url.searchParams.get('branchId');
+  const branchId = branchParam && branchParam !== 'all' ? branchParam : null;
 
-  const users = await prisma.user.findMany({
-    where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] } },
-    select: { id: true, username: true, branch_id: true },
-    orderBy: { username: 'asc' },
-  });
+  const [users, branches] = await Promise.all([
+    prisma.user.findMany({
+      where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] }, ...(branchId ? { branch_id: branchId } : {}) },
+      select: { id: true, username: true, role: true, branch_id: true, hourly_rate_cent: true, branch: { select: { name: true } } },
+      orderBy: [{ branch: { name: 'asc' } }, { username: 'asc' }],
+    }),
+    prisma.branch.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+  ]);
 
   const rows = await Promise.all(
     users.map(async (u) => {
@@ -32,7 +36,10 @@ export async function GET(req: Request) {
       return {
         user_id: u.id,
         username: u.username,
+        role: u.role,
         branch_id: u.branch_id,
+        branch_name: u.branch?.name ?? null,
+        rate_cent: u.hourly_rate_cent,
         hours: r.hours,
         gross_cent: r.grossCent,
         adjustments_cent: r.adjustmentsCent,
@@ -53,7 +60,7 @@ export async function GET(req: Request) {
     { hours: 0, gross_cent: 0, adjustments_cent: 0, advances_cent: 0, net_cent: 0 },
   );
 
-  return NextResponse.json({ ok: true, data: { rows, totals, month } });
+  return NextResponse.json({ ok: true, data: { rows, totals, month, branchId: branchId ?? 'all', branches } });
 }
 
 export const dynamic = 'force-dynamic';
