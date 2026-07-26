@@ -1,3 +1,70 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --bg: 248 250 252; /* slate-50 */
+  --surface: 255 255 255;
+  --surface-muted: 248 250 252;
+  --border: 226 232 240; /* slate-200 */
+  --text: 15 23 42; /* slate-900 */
+  --text-muted: 100 116 139; /* slate-500 */
+
+  --primary: 37 99 235; /* blue-600 */
+  --primary-hover: 29 78 216; /* blue-700 */
+  --primary-subtle: 239 246 255; /* blue-50 */
+
+  --success: 5 150 105; /* emerald-600 */
+  --success-subtle: 236 253 245; /* emerald-50 */
+  --danger: 220 38 38; /* red-600 */
+  --danger-subtle: 254 242 242; /* red-50 */
+  --warning: 217 119 6; /* amber-600 */
+  --warning-subtle: 255 251 235; /* amber-50 */
+
+  --ring: 59 130 246; /* blue-500 */
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: rgb(var(--bg));
+    color: rgb(var(--text));
+    font-family: theme('fontFamily.sans');
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  *,
+  ::before,
+  ::after {
+    border-color: rgb(var(--border));
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--ring));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  /* Money/time columns line up */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
