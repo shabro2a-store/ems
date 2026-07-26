@@ -65,6 +65,8 @@ export async function GET(req: Request) {
         lng: p.lng,
         accuracy_m: p.accuracy_m,
         device_fp: p.device_fp,
+        corrected: p.corrected,
+        correction_reason: p.correction_reason,
         user: p.user,
         branch: p.branch,
       })),

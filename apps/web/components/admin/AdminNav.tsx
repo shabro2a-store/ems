@@ -12,14 +12,10 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { href: '/admin', label: 'Dashboard', match: (p: string) => p === '/admin' },
-  { href: '/admin/users', label: 'Users', match: (p: string) => p.startsWith('/admin/users') },
+  { href: '/admin/users', label: 'Employees', match: (p: string) => p.startsWith('/admin/users') },
   { href: '/admin/branches', label: 'Branches', match: (p: string) => p.startsWith('/admin/branches') },
-  { href: '/admin/adjustments', label: 'Adjustments', match: (p: string) => p.startsWith('/admin/adjustments') },
   { href: '/admin/punches', label: 'Punches', match: (p: string) => p.startsWith('/admin/punches') },
-  { href: '/admin/flags', label: 'Flags', match: (p: string) => p.startsWith('/admin/flags') },
-  { href: '/admin/pending', label: 'Pending', match: (p: string) => p.startsWith('/admin/pending') },
   { href: '/admin/payroll', label: 'Payroll', match: (p: string) => p.startsWith('/admin/payroll') },
-  { href: '/admin/schedule', label: 'Schedule', match: (p: string) => p.startsWith('/admin/schedule') },
 ];
 
 export interface AdminNavProps {

@@ -41,11 +41,18 @@ export async function POST(req: Request) {
   const original = await prisma.punch.findUnique({ where: { id: body.punchId } });
   if (!original) return jsonError('NOT_FOUND', 'Punch not found', 404);
 
-  const corrected = {
-    ...original,
-    at: body.newAt ? new Date(body.newAt) : original.at,
-    branch_id: body.newBranchId ?? original.branch_id,
-  };
+  // Persist the correction to the Punch row (previously this only wrote an audit
+  // log and left the row unchanged, so corrections silently did nothing).
+  const corrected = await prisma.punch.update({
+    where: { id: original.id },
+    data: {
+      at: body.newAt ? new Date(body.newAt) : original.at,
+      branch_id: body.newBranchId ?? original.branch_id,
+      corrected: true,
+      corrected_by: adminId,
+      correction_reason: body.reason,
+    },
+  });
 
   await writeAuditLog({
     actorId: adminId,
@@ -55,21 +62,18 @@ export async function POST(req: Request) {
     before: {
       at: original.at.toISOString(),
       branch_id: original.branch_id,
-      lat: original.lat,
-      lng: original.lng,
     },
     after: {
       at: corrected.at.toISOString(),
       branch_id: corrected.branch_id,
-      lat: corrected.lat,
-      lng: corrected.lng,
+      reason: body.reason,
     },
   });
 
   const response = {
     ok: true,
     data: {
-      punch: corrected,
+      punch: { ...corrected, at: corrected.at.toISOString() },
       reason: body.reason,
     },
   };
