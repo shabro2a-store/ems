@@ -1,150 +1,88 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { apiGet, apiSend, centsToUsd, errorMessage } from '@/lib/api';
+import { Card, CardBody, CardHeader, StatTile, Field, Input, Textarea, Button, Badge, Alert, EmptyState } from '@/components/ui';
 
-interface AdvancesSummary {
-  pending: number;
-  approved_balance_cent: number;
-}
+interface Summary { pending: number; approved_balance_cent: number }
+interface Advance { id: string; amount_cent: number; reason: string | null; status: 'PENDING' | 'APPROVED' | 'REJECTED'; created_at: string }
 
-interface Advance {
-  id: string;
-  amount_cent: number;
-  reason: string | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  created_at: string;
-  decided_at: string | null;
-}
-
-function getCookie(name: string): string {
-  const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
-  return m ? m[1]! : '';
-}
-
-function readCsrf(): string {
-  const raw = getCookie('csrf');
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
-}
+const STATUS_TONE = { PENDING: 'warning', APPROVED: 'success', REJECTED: 'danger' } as const;
 
 export default function EmployeeAdvancesPage() {
-  const [summary, setSummary] = useState<AdvancesSummary | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [list, setList] = useState<Advance[]>([]);
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
     const [s, l] = await Promise.all([
-      fetch('/api/me/advances', { credentials: 'include' }).then((r) => r.json()),
-      fetch('/api/me/advances?view=list', { credentials: 'include' }).then((r) => (r.ok ? r.json() : { data: { advances: [] } })).catch(() => ({ data: { advances: [] } })),
+      apiGet<Summary>('/api/me/advances'),
+      apiGet<{ advances: Advance[] }>('/api/me/advances?view=list'),
     ]);
     if (s.ok) setSummary(s.data);
     if (l.ok) setList(l.data.advances);
   }
-
-  useEffect(() => {
-    refresh();
-  }, []);
+  useEffect(() => { refresh(); }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setErr(null); setOk(null);
+    const cents = Math.round(Number(amount) * 100);
+    if (!Number.isFinite(cents) || cents <= 0) { setErr('Enter a positive amount.'); return; }
     setBusy(true);
-    try {
-      const cents = Math.round(Number(amount) * 100);
-      if (!Number.isFinite(cents) || cents <= 0) {
-        setError('Enter a positive amount');
-        return;
-      }
-      const res = await fetch('/api/me/advances', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': `adv-${Date.now()}-${Math.random()}`,
-          'X-CSRF-Token': readCsrf(),
-        },
-        body: JSON.stringify({ amountCent: cents, reason: reason || undefined }),
-      });
-      const body = await res.json();
-      if (!body.ok) {
-        setError(body.error?.code ?? 'ERROR');
-        return;
-      }
-      setAmount('');
-      setReason('');
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
+    const r = await apiSend<{ id: string }>('/api/me/advances', { idempotent: true, idemPrefix: 'adv', body: { amountCent: cents, reason: reason || undefined } });
+    setBusy(false);
+    if (!r.ok) { setErr(errorMessage(r)); return; }
+    setAmount(''); setReason(''); setOk('Request sent. Your manager will review it.');
+    await refresh();
   }
 
   return (
-    <main className="p-6 max-w-xl mx-auto">
-      <h1 className="text-2xl font-semibold">Advances</h1>
-      {summary && (
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <div className="rounded border p-3">
-            <div className="text-sm text-gray-600">Pending</div>
-            <div className="text-2xl font-bold">{summary.pending}</div>
-          </div>
-          <div className="rounded border p-3">
-            <div className="text-sm text-gray-600">Approved balance</div>
-            <div className="text-2xl font-bold">${(summary.approved_balance_cent / 100).toFixed(2)}</div>
-          </div>
-        </div>
-      )}
+    <div className="space-y-4">
+      <h1 className="text-xl font-semibold">Advances</h1>
 
-      <form onSubmit={submit} className="mt-6 space-y-3">
-        <label className="block">
-          <span className="text-sm">Amount (USD)</span>
-          <input
-            type="number"
-            step="0.01"
-            min="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="mt-1 w-full rounded border px-3 py-2 text-lg"
-            required
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm">Reason (optional)</span>
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={2}
-            className="mt-1 w-full rounded border px-3 py-2"
-          />
-        </label>
-        {error && <div className="text-red-600 text-sm">{error}</div>}
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded bg-blue-600 text-white py-3 text-lg disabled:opacity-50"
-        >
-          {busy ? 'Submitting…' : 'Request advance'}
-        </button>
-      </form>
+      <div className="grid grid-cols-2 gap-3">
+        <StatTile label="Pending" value={summary?.pending ?? '—'} tone={summary && summary.pending > 0 ? 'warning' : 'neutral'} />
+        <StatTile label="Approved balance" value={summary ? centsToUsd(summary.approved_balance_cent) : '—'} />
+      </div>
 
-      {list.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-lg font-semibold">Your advances</h2>
-          <ul className="mt-2 divide-y">
-            {list.map((a) => (
-              <li key={a.id} className="py-2 flex justify-between">
-                <span>${(a.amount_cent / 100).toFixed(2)}</span>
-                <span className="text-sm text-gray-600">{a.status}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </main>
+      <Card>
+        <CardHeader title="Request an advance" />
+        <CardBody>
+          <form onSubmit={submit} className="space-y-3">
+            <Field label="Amount (USD)" htmlFor="amt"><Input id="amt" type="number" step="0.01" min="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required /></Field>
+            <Field label="Reason (optional)" htmlFor="rsn"><Textarea id="rsn" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Rent" /></Field>
+            {err && <Alert tone="danger">{err}</Alert>}
+            {ok && <Alert tone="success">{ok}</Alert>}
+            <Button type="submit" fullWidth size="lg" loading={busy}>Request advance</Button>
+          </form>
+        </CardBody>
+      </Card>
+
+      <div>
+        <h2 className="mb-2 text-sm font-semibold">Your requests</h2>
+        {list.length === 0 ? (
+          <EmptyState title="No requests yet" />
+        ) : (
+          <Card>
+            <ul className="divide-y divide-border">
+              {list.map((a) => (
+                <li key={a.id} className="flex items-center justify-between px-4 py-3">
+                  <div>
+                    <div className="font-medium tabular">{centsToUsd(a.amount_cent)}</div>
+                    {a.reason && <div className="text-xs text-muted">{a.reason}</div>}
+                  </div>
+                  <Badge tone={STATUS_TONE[a.status]}>{a.status.toLowerCase()}</Badge>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+      </div>
+    </div>
   );
 }

@@ -18,10 +18,10 @@ export default async function EmployeeHomePage() {
   });
   if (!user || !user.branch) {
     return (
-      <main className="p-6">
-        <h1 className="text-xl font-semibold">Employee home</h1>
-        <p className="text-gray-700 mt-2">No branch assigned. Contact your administrator.</p>
-      </main>
+      <div className="rounded-xl border border-dashed border-border bg-surface px-6 py-12 text-center">
+        <p className="font-medium">No branch assigned</p>
+        <p className="mt-1 text-sm text-muted">Contact your administrator to be assigned to a branch.</p>
+      </div>
     );
   }
 

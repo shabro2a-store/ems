@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { apiGet, centsToUsd } from '@/lib/api';
+import { Card, CardBody, CardHeader, Field, Input, Spinner, StatTile } from '@/components/ui';
 
 interface PayoutData {
   hours: number;
@@ -12,59 +14,66 @@ interface PayoutData {
 
 function currentMonth(): string {
   const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 export default function EmployeePayrollPage() {
   const [month, setMonth] = useState(currentMonth());
   const [data, setData] = useState<PayoutData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function load() {
-    setError(null);
-    const res = await fetch(`/api/me/payroll?month=${encodeURIComponent(month)}`, { credentials: 'include' });
-    const body = await res.json();
-    if (!body.ok) {
-      setError(body.error?.code ?? 'ERROR');
-      setData(null);
-      return;
-    }
-    setData(body.data);
-  }
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    load();
+    (async () => {
+      setLoading(true);
+      const r = await apiGet<PayoutData>(`/api/me/payroll?month=${month}`);
+      if (r.ok) setData(r.data);
+      setLoading(false);
+    })();
   }, [month]);
 
-  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-
   return (
-    <main className="p-6 max-w-xl mx-auto">
-      <h1 className="text-2xl font-semibold">Payroll</h1>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold">My pay</h1>
+        <Field htmlFor="m"><Input id="m" type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-auto" /></Field>
+      </div>
 
-      <label className="mt-4 block">
-        <span className="text-sm">Month</span>
-        <input
-          type="month"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          className="mt-1 rounded border px-3 py-2"
-        />
-      </label>
-
-      {error && <div className="mt-4 text-red-600">{error}</div>}
-
-      {data && (
-        <table className="mt-6 w-full text-left">
-          <tbody>
-            <tr><th className="py-2">Hours</th><td>{data.hours.toFixed(2)}</td></tr>
-            <tr><th className="py-2">Gross</th><td>{usd(data.gross_cent)}</td></tr>
-            <tr><th className="py-2">Adjustments</th><td>{usd(data.adjustments_cent)}</td></tr>
-            <tr><th className="py-2">Approved advances</th><td>{usd(data.advances_cent)}</td></tr>
-            <tr className="border-t"><th className="py-2 font-bold">Net</th><td className="font-bold">{usd(data.net_cent)}</td></tr>
-          </tbody>
-        </table>
+      {loading ? (
+        <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
+      ) : !data ? (
+        <p className="text-sm text-muted">No data for this month.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <StatTile label="Take-home" value={centsToUsd(data.net_cent)} tone="success" />
+            <StatTile label="Hours" value={data.hours.toFixed(1)} />
+          </div>
+          <Card>
+            <CardHeader title="Breakdown" subtitle={month} />
+            <CardBody>
+              <dl className="divide-y divide-border text-sm">
+                <Line k="Gross pay" v={centsToUsd(data.gross_cent)} />
+                <Line k="Bonuses / deductions" v={`${data.adjustments_cent >= 0 ? '+' : '−'}${centsToUsd(Math.abs(data.adjustments_cent), false)}`} tone={data.adjustments_cent > 0 ? 'success' : data.adjustments_cent < 0 ? 'danger' : undefined} />
+                <Line k="Advances taken" v={data.advances_cent ? `−${centsToUsd(data.advances_cent, false)}` : '—'} tone={data.advances_cent ? 'danger' : undefined} />
+                <div className="flex items-center justify-between py-3">
+                  <dt className="font-semibold">Take-home</dt>
+                  <dd className="tabular text-lg font-bold">{centsToUsd(data.net_cent)}</dd>
+                </div>
+              </dl>
+            </CardBody>
+          </Card>
+          <p className="text-center text-xs text-muted">Gross uses your hourly rate for hours worked this month.</p>
+        </>
       )}
-    </main>
+    </div>
+  );
+}
+
+function Line({ k, v, tone }: { k: string; v: string; tone?: 'success' | 'danger' }) {
+  return (
+    <div className="flex items-center justify-between py-3">
+      <dt className="text-muted">{k}</dt>
+      <dd className={`tabular font-medium ${tone === 'success' ? 'text-success' : tone === 'danger' ? 'text-danger' : ''}`}>{v}</dd>
+    </div>
   );
 }

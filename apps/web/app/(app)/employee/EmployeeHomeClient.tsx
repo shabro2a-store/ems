@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import PunchButton from '@/components/PunchButton';
+import { apiGet, apiSend, centsToUsd, errorMessage, formatBeirutTime } from '@/lib/api';
+import { Card, CardBody, StatTile, Alert } from '@/components/ui';
 
 interface TodayPayload {
   in_at: string | null;
@@ -11,7 +12,6 @@ interface TodayPayload {
   approved_advance_balance_cent: number;
   net_cent: number;
 }
-
 type Status =
   | { kind: 'idle' }
   | { kind: 'locating' }
@@ -22,31 +22,25 @@ function deviceFp(): string {
   if (typeof window === 'undefined') return 'ssr';
   let v = window.localStorage.getItem('ems_device_fp');
   if (!v) {
-    v = (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36));
+    v = crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
     window.localStorage.setItem('ems_device_fp', v);
   }
   return v;
 }
-
-function csrfFromCookie(): string | null {
-  if (typeof document === 'undefined') return null;
-  const m = document.cookie.match(/(?:^|;\s*)csrf=([^;]+)/);
-  return m?.[1] ?? null;
+function dur(min: number): string {
+  const h = Math.floor(min / 60);
+  return h ? `${h}h ${min % 60}m` : `${min}m`;
 }
 
 export default function EmployeeHomeClient({ branch }: { branch: { name: string; gps_radius_m: number; gps_accuracy_max_m: number } }) {
   const [today, setToday] = useState<TodayPayload | null>(null);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
   const fetchToday = useCallback(async () => {
-    try {
-      const r = await fetch('/api/me/today', { credentials: 'include' });
-      const j = await r.json();
-      if (j.ok) setToday(j.data);
-    } catch {
-    }
+    const r = await apiGet<TodayPayload>('/api/me/today');
+    if (r.ok) setToday(r.data);
   }, []);
 
   useEffect(() => {
@@ -55,17 +49,9 @@ export default function EmployeeHomeClient({ branch }: { branch: { name: string;
     return () => clearInterval(id);
   }, [fetchToday]);
 
-  useEffect(() => {
-    if (today?.in_at) {
-      const start = new Date(today.in_at).getTime();
-      const tick = Math.floor((Date.now() - start) / 60_000);
-      setToday((prev) => (prev ? { ...prev, minutes_since_in: Math.max(0, tick) } : prev));
-    }
-  }, [today?.in_at]);
-
   const locate = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setStatus({ kind: 'error', message: 'Geolocation not available on this device' });
+      setStatus({ kind: 'error', message: 'Location not available on this device.' });
       return;
     }
     setStatus({ kind: 'locating' });
@@ -73,175 +59,117 @@ export default function EmployeeHomeClient({ branch }: { branch: { name: string;
       (pos) => {
         const accuracy = pos.coords.accuracy;
         if (accuracy > branch.gps_accuracy_max_m) {
-          setStatus({
-            kind: 'error',
-            message: `GPS weak (${Math.round(accuracy)}m > ${branch.gps_accuracy_max_m}m). Step outside and retry.`,
-          });
+          setStatus({ kind: 'error', message: `GPS is weak (±${Math.round(accuracy)}m). Step outside and try again.` });
           return;
         }
-        setStatus({
-          kind: 'ready',
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy,
-        });
+        setStatus({ kind: 'ready', lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy });
       },
-      (err) => setStatus({ kind: 'error', message: err.message || 'Geolocation failed' }),
+      (err) => setStatus({ kind: 'error', message: err.message || 'Could not get your location.' }),
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
     );
   }, [branch.gps_accuracy_max_m]);
 
-  const submit = useCallback(
-    async (kind: 'IN' | 'OUT') => {
-      if (status.kind !== 'ready') {
-        setBanner('Tap "Get GPS" first.');
-        return;
-      }
-      setBusy(true);
-      setBanner(null);
-      try {
-        const csrf = csrfFromCookie();
-        const r = await fetch('/api/me/punch', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            'Idempotency-Key':
-              (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`),
-            'X-CSRF-Token': csrf ?? '',
-          },
-          body: JSON.stringify({
-            kind,
-            lat: status.lat,
-            lng: status.lng,
-            accuracy: status.accuracy,
-            deviceFp: deviceFp(),
-          }),
-        });
-        const j = await r.json();
-        if (j.ok) {
-          setBanner(`Checked ${kind === 'IN' ? 'in' : 'out'}.`);
-          await fetchToday();
-        } else {
-          setBanner(`Error: ${j.error?.code ?? 'UNKNOWN'} — ${j.error?.message ?? ''}`);
-        }
-      } catch (e) {
-        setBanner(`Network error: ${e instanceof Error ? e.message : 'unknown'}`);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [status, fetchToday],
-  );
+  const submit = useCallback(async (kind: 'IN' | 'OUT') => {
+    if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
+    setBusy(true); setBanner(null);
+    const r = await apiSend('/api/me/punch', {
+      idempotent: true, idemPrefix: 'punch',
+      body: { kind, lat: status.lat, lng: status.lng, accuracy: status.accuracy, deviceFp: deviceFp() },
+    });
+    setBusy(false);
+    if (r.ok) { setBanner({ tone: 'success', text: kind === 'IN' ? 'Checked in. Have a good shift!' : 'Checked out. See you next time!' }); await fetchToday(); }
+    else setBanner({ tone: 'danger', text: errorMessage(r) });
+  }, [status, fetchToday]);
 
-  const devPunch = useCallback(
-    async (kind: 'IN' | 'OUT') => {
-      setBusy(true);
-      setBanner(null);
-      try {
-        const csrf = csrfFromCookie();
-        const r = await fetch('/api/me/punch/dev', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            'Idempotency-Key':
-              `dev-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            'X-CSRF-Token': csrf ?? '',
-          },
-          body: JSON.stringify({ kind }),
-        });
-        const j = await r.json();
-        if (j.ok) {
-          setBanner(`[DEV] ${kind === 'IN' ? 'Checked in' : 'Checked out'} (no GPS).`);
-          await fetchToday();
-        } else {
-          setBanner(`[DEV] Error: ${j.error?.code ?? 'UNKNOWN'} — ${j.error?.message ?? ''}`);
-        }
-      } catch (e) {
-        setBanner(`[DEV] Network error: ${e instanceof Error ? e.message : 'unknown'}`);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [fetchToday],
-  );
+  const devPunch = useCallback(async (kind: 'IN' | 'OUT') => {
+    setBusy(true); setBanner(null);
+    const r = await apiSend('/api/me/punch/dev', { idempotent: true, idemPrefix: 'dev', body: { kind } });
+    setBusy(false);
+    if (r.ok) { setBanner({ tone: 'success', text: `[DEV] Checked ${kind === 'IN' ? 'in' : 'out'} (no GPS).` }); await fetchToday(); }
+    else setBanner({ tone: 'danger', text: errorMessage(r) });
+  }, [fetchToday]);
 
   const isIn = Boolean(today?.in_at);
+  const ready = status.kind === 'ready';
 
   return (
-    <main className="p-4 max-w-md mx-auto">
-      <h1 className="text-2xl font-semibold mb-2">Employee — {branch.name}</h1>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-semibold">Hi there 👋</h1>
+        <p className="text-sm text-muted">{branch.name}</p>
+      </div>
 
-      {banner && (
-        <div className="mb-3 p-3 rounded bg-gray-100 text-sm" role="status">
-          {banner}
-        </div>
-      )}
+      {banner && <Alert tone={banner.tone}>{banner.text}</Alert>}
 
-      {today?.in_at && (
-        <div className="mb-3 p-3 rounded bg-green-50 border border-green-200 text-green-900 text-sm">
-          Currently IN since {new Date(today.in_at).toLocaleTimeString()} — {today.minutes_since_in ?? 0} min
-        </div>
-      )}
+      <Card>
+        <CardBody className="text-center">
+          {isIn ? (
+            <>
+              <div className="inline-flex items-center gap-2 rounded-full bg-success-subtle px-3 py-1 text-sm font-medium text-success">
+                <span className="h-2 w-2 rounded-full bg-success" /> Checked in
+              </div>
+              <p className="mt-2 text-sm text-muted">
+                since {today && today.in_at ? formatBeirutTime(today.in_at) : '—'} · {dur(today?.minutes_since_in ?? 0)}
+              </p>
+            </>
+          ) : (
+            <div className="inline-flex items-center gap-2 rounded-full bg-surface-muted px-3 py-1 text-sm font-medium text-muted">
+              <span className="h-2 w-2 rounded-full bg-muted" /> Checked out
+            </div>
+          )}
+        </CardBody>
+      </Card>
 
-      <section className="mb-4">
-        <p className="text-sm text-gray-600 mb-1">Status</p>
-        <p className="text-base">
-          {status.kind === 'idle' && 'GPS not acquired yet.'}
-          {status.kind === 'locating' && 'Acquiring GPS...'}
-          {status.kind === 'ready' && `GPS ready (±${Math.round(status.accuracy)}m).`}
-          {status.kind === 'error' && <span className="text-red-700">{status.message}</span>}
-        </p>
-        <button
-          type="button"
-          onClick={locate}
-          disabled={status.kind === 'locating'}
-          className="mt-2 min-h-[56px] px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
-        >
-          {status.kind === 'locating' ? 'Locating...' : 'Get GPS'}
-        </button>
-      </section>
+      <div className="grid grid-cols-3 gap-3">
+        <StatTile label="Today" value={today ? dur(today.in_at ? (today.minutes_since_in ?? 0) : 0) : '—'} />
+        <StatTile label="Earned today" value={today ? centsToUsd(today.earned_today_cent) : '—'} tone="success" />
+        <StatTile label="This month" value={today ? centsToUsd(today.earned_month_cent) : '—'} />
+      </div>
 
-      <PunchButton
-        isIn={isIn}
-        disabled={busy || status.kind !== 'ready'}
-        onPunch={submit}
-      />
+      <Card>
+        <CardBody className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Location</span>
+            <span className="text-xs text-muted">
+              {status.kind === 'idle' && 'Not checked yet'}
+              {status.kind === 'locating' && 'Getting GPS…'}
+              {status.kind === 'ready' && `Ready · ±${Math.round(status.accuracy)}m`}
+              {status.kind === 'error' && <span className="text-danger">Weak signal</span>}
+            </span>
+          </div>
+          {status.kind === 'error' && <Alert tone="danger">{status.message}</Alert>}
+          <button
+            onClick={locate}
+            disabled={status.kind === 'locating'}
+            className="h-12 w-full rounded-lg border border-border bg-surface font-medium text-content hover:bg-surface-muted disabled:opacity-50"
+          >
+            {status.kind === 'locating' ? 'Getting GPS…' : ready ? '✓ GPS ready — refresh' : 'Get GPS'}
+          </button>
+        </CardBody>
+      </Card>
 
-      <p className="mt-6 text-xs text-gray-500">
-        Branch radius {branch.gps_radius_m}m. GPS must be within radius and accuracy ≤ {branch.gps_accuracy_max_m}m.
+      <button
+        onClick={() => submit(isIn ? 'OUT' : 'IN')}
+        disabled={busy || !ready}
+        aria-label={isIn ? 'Check out' : 'Check in'}
+        className={`h-32 w-full rounded-2xl text-2xl font-bold text-white shadow-sm transition-colors disabled:opacity-40 ${isIn ? 'bg-danger hover:brightness-95' : 'bg-success hover:brightness-95'}`}
+      >
+        {busy ? 'Please wait…' : isIn ? 'CHECK OUT' : 'CHECK IN'}
+      </button>
+
+      <p className="text-center text-xs text-muted">
+        You must be within {branch.gps_radius_m}m of {branch.name} with a good GPS signal.
       </p>
 
-      {/* Dev-only bypass: visible only when NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS=true.
-          In dev (laptop), this is true by default. In production, set to false. */}
       {process.env.NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS === 'true' && (
-        <div className="mt-4 p-3 rounded border border-dashed border-amber-300 bg-amber-50 text-xs">
-          <div className="font-semibold text-amber-900 mb-1">Dev bypass (laptop only)</div>
-          <div className="text-amber-800 mb-2">
-            Skips GPS + geofence. Punches recorded at branch center. Use only for
-            testing on a machine without GPS (like this laptop).
-          </div>
+        <div className="rounded-xl border border-dashed border-warning/40 bg-warning-subtle p-3">
+          <div className="mb-2 text-xs font-semibold text-warning">Dev bypass (testing without GPS)</div>
           <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => devPunch('IN')}
-              className="flex-1 min-h-[44px] rounded bg-amber-600 text-white px-3 py-2 text-sm disabled:opacity-50"
-            >
-              Dev IN
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => devPunch('OUT')}
-              className="flex-1 min-h-[44px] rounded bg-amber-700 text-white px-3 py-2 text-sm disabled:opacity-50"
-            >
-              Dev OUT
-            </button>
+            <button disabled={busy} onClick={() => devPunch('IN')} className="h-11 flex-1 rounded-lg bg-warning text-sm font-medium text-white disabled:opacity-50">Dev IN</button>
+            <button disabled={busy} onClick={() => devPunch('OUT')} className="h-11 flex-1 rounded-lg bg-warning/80 text-sm font-medium text-white disabled:opacity-50">Dev OUT</button>
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }
