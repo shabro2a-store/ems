@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import AdminNav from '@/components/admin/AdminNav';
 
 interface Flag {
   id: string;
@@ -65,7 +64,6 @@ export default function AdminFlagsPage() {
 
   return (
     <>
-      <AdminNav username={username || 'admin'} flagCount={flags.length} />
       <main className="p-4 max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-semibold">Flags</h1>

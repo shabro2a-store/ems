@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import UserCreateModal, { type BranchOption, type NewUser } from '@/components/admin/UserCreateModal';
 import UserEditModal, { type EditUser } from '@/components/admin/UserEditModal';
-import AdminNav from '@/components/admin/AdminNav';
 
 interface UserRow {
   id: string;
@@ -77,7 +76,6 @@ export default function AdminUsersClient() {
 
   return (
     <>
-      <AdminNav username={username || 'admin'} flagCount={0} />
       <main className="p-4 max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-semibold">Users</h1>

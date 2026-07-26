@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import AdminNav from '@/components/admin/AdminNav';
 
 interface User {
   id: string;
@@ -78,7 +77,6 @@ export default function NotificationPrefsPage() {
   if (!user) {
     return (
       <>
-        <AdminNav username={username || 'admin'} flagCount={0} />
         <main className="p-4">Loading…</main>
       </>
     );
@@ -86,7 +84,6 @@ export default function NotificationPrefsPage() {
 
   return (
     <>
-      <AdminNav username={username || 'admin'} flagCount={0} />
       <main className="p-4 max-w-md mx-auto">
         <h1 className="text-xl font-semibold mb-1">Notification prefs</h1>
         <p className="text-sm text-gray-600 mb-4">{user.username} ({user.role})</p>

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { apiSend } from '@/lib/api';
 
 export interface NavItem {
   href: string;
@@ -30,41 +31,56 @@ export default function AdminNav({ username, flagCount }: AdminNavProps) {
   const pathname = usePathname();
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    await apiSend('/api/auth/logout');
     window.location.href = '/login';
   }
 
   return (
-    <header className="sticky top-0 z-10 bg-white border-b border-gray-200">
-      <div className="px-4 py-3 flex items-center justify-between">
-        <div>
-          <div className="text-xs text-gray-500 uppercase tracking-wide">Admin</div>
-          <div className="text-sm font-semibold">{username}</div>
+    <header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2.5 sm:px-6">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-white">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3h2l.4 2M7 13h10l3-8H5.4M7 13 5.4 5M7 13l-1.6 4h12" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="9" cy="20" r="1.5" />
+              <circle cx="17" cy="20" r="1.5" />
+            </svg>
+          </span>
+          <div className="leading-tight">
+            <div className="text-sm font-semibold">Shabro2a</div>
+            <div className="text-xs text-muted">{username}</div>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {flagCount > 0 && (
-            <span className="rounded-full bg-amber-500 text-white text-xs px-2 py-1">
+            <Link
+              href="/admin/flags"
+              className="inline-flex items-center gap-1 rounded-full border border-warning/20 bg-warning-subtle px-2.5 py-1 text-xs font-medium text-warning"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-warning" />
               {flagCount} flag{flagCount === 1 ? '' : 's'}
-            </span>
+            </Link>
           )}
           <button
             type="button"
             onClick={logout}
-            className="min-h-[44px] rounded bg-gray-200 px-3 py-2 text-sm hover:bg-gray-300"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-muted"
           >
             Logout
           </button>
         </div>
       </div>
-      <nav className="overflow-x-auto border-t border-gray-100 bg-gray-50">
-        <ul className="flex gap-1 px-2 py-1 text-sm whitespace-nowrap">
+      <nav className="mx-auto max-w-6xl overflow-x-auto px-2 sm:px-4">
+        <ul className="flex gap-1 py-1.5 text-sm">
           {NAV_ITEMS.map((item) => {
             const active = item.match(pathname);
             return (
               <li key={item.href}>
                 <Link
                   href={item.href}
-                  className={`block px-3 py-2 rounded ${active ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-200'}`}
+                  className={`block whitespace-nowrap rounded-lg px-3 py-1.5 font-medium transition-colors ${
+                    active ? 'bg-primary text-white' : 'text-muted hover:bg-surface-muted hover:text-content'
+                  }`}
                 >
                   {item.label}
                 </Link>

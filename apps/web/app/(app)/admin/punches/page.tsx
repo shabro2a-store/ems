@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import AdminNav from '@/components/admin/AdminNav';
 
 interface Punch {
   id: string;
@@ -118,7 +117,6 @@ export default function AdminPunchesPage() {
 
   return (
     <>
-      <AdminNav username={username || 'admin'} flagCount={0} />
       <main className="p-4 max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-semibold">Punches</h1>

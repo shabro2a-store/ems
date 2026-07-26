@@ -1,8 +1,5 @@
-import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
 import AdminDashboard, { type InitialData } from '@/components/admin/AdminDashboard';
-import AdminNav from '@/components/admin/AdminNav';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,14 +11,6 @@ function startOfTodayBeirut(): Date {
 }
 
 export default async function AdminHomePage() {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const userId = h.get('x-user-id');
-  if (!role) redirect('/login');
-  if (role !== 'ADMIN') redirect('/');
-
-  const user = await prisma.user.findUnique({ where: { id: userId ?? '' } });
-
   const [branchesRaw, openTrips, todayFlags] = await Promise.all([
     prisma.branch.findMany({
       where: { is_active: true },
@@ -119,10 +108,5 @@ export default async function AdminHomePage() {
     })),
   };
 
-  return (
-    <>
-      <AdminNav username={user?.username ?? 'admin'} flagCount={initialData.flags.length} />
-      <AdminDashboard initialData={initialData} />
-    </>
-  );
+  return <AdminDashboard initialData={initialData} />;
 }
