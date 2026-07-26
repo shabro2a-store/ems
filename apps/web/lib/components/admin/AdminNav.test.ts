@@ -2,17 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { NAV_ITEMS } from '../../../components/admin/AdminNav';
 
 describe('<AdminNav> exports', () => {
-  it('NAV_ITEMS includes all required admin sections', () => {
+  it('NAV_ITEMS is the streamlined 5-tab structure', () => {
     const hrefs = NAV_ITEMS.map((item) => item.href);
-    expect(hrefs).toContain('/admin');
-    expect(hrefs).toContain('/admin/users');
-    expect(hrefs).toContain('/admin/branches');
-    expect(hrefs).toContain('/admin/adjustments');
-    expect(hrefs).toContain('/admin/punches');
-    expect(hrefs).toContain('/admin/flags');
-    expect(hrefs).toContain('/admin/payroll');
-    expect(hrefs).toContain('/admin/schedule');
-    expect(hrefs).toContain('/admin/pending');
+    // Approvals/flags live in the dashboard; schedule/adjustments live in the
+    // employee & payroll screens, so the nav is intentionally just these five.
+    expect(hrefs).toEqual(['/admin', '/admin/users', '/admin/branches', '/admin/punches', '/admin/payroll']);
   });
 
   it('each NAV_ITEMS entry has a label', () => {

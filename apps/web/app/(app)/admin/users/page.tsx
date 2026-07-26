@@ -1,201 +1,386 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import UserCreateModal, { type BranchOption, type NewUser } from '@/components/admin/UserCreateModal';
-import UserEditModal, { type EditUser } from '@/components/admin/UserEditModal';
+import { useEffect, useMemo, useState } from 'react';
+import { apiGet, apiSend, centsToUsd, errorMessage } from '@/lib/api';
+import {
+  PageHeader, Card, CardHeader, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile,
+} from '@/components/ui';
 
-interface UserRow {
+type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
+interface User {
   id: string;
   username: string;
-  role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
+  role: Role;
   branch_id: string | null;
+  branch: { id: string; name: string } | null;
   hourly_rate_cent: number;
   is_active: boolean;
-  notify_daily_summary: boolean;
-  notify_routine_pings: boolean;
-  branch: { id: string; name: string } | null;
 }
+interface Branch { id: string; name: string }
+interface Status { status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT'; since_min: number; over: boolean }
 
-function csrfFromCookie(): string | null {
-  if (typeof document === 'undefined') return null;
-  const m = document.cookie.match(/(?:^|;\s*)csrf=([^;]+)/);
-  return m?.[1] ?? null;
-}
+const ROLE_TONE: Record<Role, 'primary' | 'warning' | 'neutral'> = { EMPLOYEE: 'primary', DRIVER: 'warning', ADMIN: 'neutral' };
+const DAYS = [
+  { wd: 0, name: 'Sunday' }, { wd: 1, name: 'Monday' }, { wd: 2, name: 'Tuesday' },
+  { wd: 3, name: 'Wednesday' }, { wd: 4, name: 'Thursday' }, { wd: 5, name: 'Friday' }, { wd: 6, name: 'Saturday' },
+];
 
-function idemKey(): string {
-  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+export default function AdminEmployeesPage() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [statusMap, setStatusMap] = useState<Record<string, Status>>({});
+  const [branchId, setBranchId] = useState('all');
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-export default function AdminUsersClient() {
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [branches, setBranches] = useState<BranchOption[]>([]);
-  const [showCreate, setShowCreate] = useState(false);
-  const [editTarget, setEditTarget] = useState<EditUser | null>(null);
-  const [tempPwdFor, setTempPwdFor] = useState<{ username: string; pwd: string } | null>(null);
-  const [username, setUsername] = useState<string>('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editUser, setEditUser] = useState<User | null>(null);
+  const [schedUser, setSchedUser] = useState<User | null>(null);
+  const [tempPw, setTempPw] = useState<{ username: string; pw: string } | null>(null);
 
   async function load() {
-    const [u, b] = await Promise.all([
-      fetch('/api/admin/users', { credentials: 'include' }).then((r) => r.json()),
-      fetch('/api/admin/branches', { credentials: 'include' }).then((r) => r.json()),
+    setLoading(true);
+    const [u, b, o] = await Promise.all([
+      apiGet<{ users: User[] }>('/api/admin/users'),
+      apiGet<{ branches: Branch[] }>('/api/admin/branches'),
+      apiGet<{ people: { id: string; status: Status['status']; since_min: number; over: boolean }[] }>('/api/admin/overview'),
     ]);
     if (u.ok) setUsers(u.data.users);
     if (b.ok) setBranches(b.data.branches);
+    if (o.ok) {
+      const m: Record<string, Status> = {};
+      for (const p of o.data.people) m[p.id] = { status: p.status, since_min: p.since_min, over: p.over };
+      setStatusMap(m);
+    }
+    setLoading(false);
   }
 
-  useEffect(() => {
-    fetch('/api/me/ping', { credentials: 'include' }).then((r) => r.json()).then((j) => {
-      if (j.ok) setUsername(j.data.userId ?? '');
-    }).catch(() => {});
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  async function toggleActive(u: UserRow) {
-    const csrf = csrfFromCookie() ?? '';
-    await fetch(`/api/admin/users/${u.id}/deactivate`, {
-      method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': csrf },
-    });
+  const filtered = useMemo(
+    () => (branchId === 'all' ? users : users.filter((u) => u.branch_id === branchId)),
+    [users, branchId],
+  );
+  const grouped = useMemo(() => {
+    const g = new Map<string, User[]>();
+    for (const u of filtered) {
+      const key = u.branch?.name ?? (u.role === 'ADMIN' ? 'Administrators' : 'Unassigned');
+      (g.get(key) ?? g.set(key, []).get(key)!).push(u);
+    }
+    return [...g.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filtered]);
+
+  const stats = {
+    total: filtered.length,
+    active: filtered.filter((u) => u.is_active).length,
+    employees: filtered.filter((u) => u.role === 'EMPLOYEE').length,
+    drivers: filtered.filter((u) => u.role === 'DRIVER').length,
+  };
+
+  async function toggleActive(u: User) {
+    setErr(null);
+    const res = await apiSend(`/api/admin/users/${u.id}/deactivate`);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
     await load();
   }
-
-  async function resetPwd(u: UserRow) {
-    const csrf = csrfFromCookie() ?? '';
-    const r = await fetch(`/api/admin/users/${u.id}/reset-password`, {
-      method: 'POST', credentials: 'include', headers: { 'X-CSRF-Token': csrf },
-    });
-    const j = await r.json();
-    if (j.ok) {
-      setTempPwdFor({ username: u.username, pwd: j.data.temp_password });
-    } else {
-      alert(j.error?.code ?? 'ERROR');
-    }
+  async function resetPw(u: User) {
+    setErr(null);
+    const res = await apiSend<{ temp_password: string }>(`/api/admin/users/${u.id}/reset-password`);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    setTempPw({ username: u.username, pw: res.data.temp_password });
   }
-
-  const usd = (c: number) => `$${(c / 100).toFixed(2)}`;
 
   return (
     <>
-      <main className="p-4 max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-3">
-          <h1 className="text-xl font-semibold">Users</h1>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="min-h-[56px] rounded bg-blue-600 text-white px-4 py-2 text-base"
-          >
-            New user
-          </button>
-        </div>
+      <PageHeader
+        title="Employees"
+        subtitle="Staff, roles, pay and weekly schedules"
+        actions={
+          <>
+            <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-auto">
+              <option value="all">All branches</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
+            <Button onClick={() => { setErr(null); setCreateOpen(true); }}>＋ Add employee</Button>
+          </>
+        }
+      />
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="text-left p-2">Username</th>
-                <th className="text-left p-2">Role</th>
-                <th className="text-left p-2">Branch</th>
-                <th className="text-left p-2">Rate</th>
-                <th className="text-left p-2">Status</th>
-                <th className="text-left p-2">Prefs</th>
-                <th className="text-left p-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-t">
-                  <td className="p-2">{u.username}</td>
-                  <td className="p-2">{u.role}</td>
-                  <td className="p-2">{u.branch?.name ?? '—'}</td>
-                  <td className="p-2">{usd(u.hourly_rate_cent)}/h</td>
-                  <td className="p-2">
-                    <span className={`rounded px-2 py-1 text-xs ${u.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'}`}>
-                      {u.is_active ? 'active' : 'inactive'}
-                    </span>
-                  </td>
-                  <td className="p-2 text-xs text-gray-600">
-                    {u.role === 'ADMIN' ? `daily:${u.notify_daily_summary ? 'on' : 'off'} · routine:${u.notify_routine_pings ? 'on' : 'off'}` : '—'}
-                  </td>
-                  <td className="p-2">
-                    <div className="flex gap-1 flex-wrap">
-                      <button
-                        onClick={() => setEditTarget({
-                          id: u.id, username: u.username, role: u.role,
-                          branch_id: u.branch_id, hourly_rate_cent: u.hourly_rate_cent,
-                        })}
-                        className="rounded bg-blue-500 text-white px-2 py-1 text-xs"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => toggleActive(u)}
-                        className={`rounded ${u.is_active ? 'bg-red-500' : 'bg-green-600'} text-white px-2 py-1 text-xs`}
-                      >
-                        {u.is_active ? 'Deactivate' : 'Reactivate'}
-                      </button>
-                      <button
-                        onClick={() => resetPwd(u)}
-                        className="rounded bg-gray-700 text-white px-2 py-1 text-xs"
-                      >
-                        Reset pw
-                      </button>
-                      {u.role === 'ADMIN' && (
-                        <Link
-                          href={`/admin/users/${u.id}/edit`}
-                          className="rounded bg-purple-500 text-white px-2 py-1 text-xs"
-                        >
-                          Prefs
-                        </Link>
-                      )}
-                    </div>
-                  </td>
+      {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
+      {notice && <div className="mb-3"><Alert tone="success">{notice}</Alert></div>}
+
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile label="Total staff" value={stats.total} />
+        <StatTile label="Active" value={stats.active} tone="success" />
+        <StatTile label="Employees" value={stats.employees} />
+        <StatTile label="Drivers" value={stats.drivers} tone="warning" />
+      </div>
+
+      {loading ? (
+        <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
+      ) : filtered.length === 0 ? (
+        <EmptyState title="No staff yet" hint="Add your first employee to get started." />
+      ) : (
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-surface-muted text-left text-xs font-semibold uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2.5">Name</th>
+                  <th className="px-4 py-2.5">Role</th>
+                  <th className="px-4 py-2.5">Rate/h</th>
+                  <th className="px-4 py-2.5">Status</th>
+                  <th className="px-4 py-2.5 text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {tempPwdFor && (
-          <div className="fixed inset-0 bg-black/50 z-30 flex items-center justify-center p-4">
-            <div className="bg-white rounded-lg p-4 max-w-md w-full">
-              <h3 className="text-lg font-semibold mb-2">Password reset for {tempPwdFor.username}</h3>
-              <div className="bg-yellow-50 border border-yellow-300 rounded p-3 text-sm mb-3">
-                Share this temporary password with {tempPwdFor.username} verbally. They must change it on first login.
-              </div>
-              <code className="block bg-gray-100 p-3 rounded text-lg">{tempPwdFor.pwd}</code>
-              <button
-                onClick={() => setTempPwdFor(null)}
-                className="mt-3 min-h-[44px] w-full rounded bg-blue-600 text-white py-2"
-              >
-                Got it
-              </button>
-            </div>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {grouped.map(([group, rows]) => (
+                  <FragmentGroup key={group} group={group} show={branchId === 'all'}>
+                    {rows.map((u) => {
+                      const st = statusMap[u.id];
+                      return (
+                        <tr key={u.id} className="hover:bg-surface-muted">
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-2.5">
+                              <span className="grid h-8 w-8 place-items-center rounded-lg bg-surface-muted text-xs font-semibold text-muted">
+                                {u.username.slice(0, 2).toUpperCase()}
+                              </span>
+                              <span className="font-medium">{u.username}</span>
+                              {!u.is_active && <Badge tone="neutral">inactive</Badge>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5"><Badge tone={ROLE_TONE[u.role]}>{u.role.toLowerCase()}</Badge></td>
+                          <td className="tabular px-4 py-2.5">{u.role === 'ADMIN' ? '—' : centsToUsd(u.hourly_rate_cent)}</td>
+                          <td className="px-4 py-2.5">
+                            {st ? <StatusChip st={st} /> : <span className="text-xs text-muted">—</span>}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex justify-end gap-1.5">
+                              <Button size="sm" variant="secondary" onClick={() => { setErr(null); setEditUser(u); }}>Edit</Button>
+                              {u.role !== 'ADMIN' && (
+                                <Button size="sm" variant="secondary" onClick={() => setSchedUser(u)}>Schedule</Button>
+                              )}
+                              <Button size="sm" variant="ghost" onClick={() => resetPw(u)}>Reset PW</Button>
+                              <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
+                                {u.is_active ? 'Deactivate' : 'Activate'}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </FragmentGroup>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )}
+        </Card>
+      )}
 
-        {showCreate && (
-          <UserCreateModal
-            branches={branches}
-            onClose={() => setShowCreate(false)}
-            onSuccess={(u, pwd) => {
-              setTempPwdFor({ username: u.username, pwd });
-              setShowCreate(false);
-              load();
-            }}
-          />
-        )}
-
-        {editTarget && (
-          <UserEditModal
-            user={editTarget}
-            branches={branches}
-            onClose={() => setEditTarget(null)}
-            onSaved={() => {
-              setEditTarget(null);
-              load();
-            }}
-          />
-        )}
-      </main>
+      {createOpen && (
+        <CreateEmployeeModal
+          branches={branches}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(username, pw) => { setCreateOpen(false); setTempPw({ username, pw }); load(); }}
+        />
+      )}
+      {editUser && (
+        <EditEmployeeModal
+          user={editUser}
+          branches={branches}
+          onClose={() => setEditUser(null)}
+          onSaved={() => { setEditUser(null); setNotice('Employee updated.'); load(); }}
+        />
+      )}
+      {schedUser && (
+        <ScheduleModal user={schedUser} onClose={() => setSchedUser(null)} onSaved={() => { setSchedUser(null); setNotice('Schedule saved.'); }} />
+      )}
+      {tempPw && (
+        <Modal title="Temporary password" onClose={() => setTempPw(null)} footer={<Button onClick={() => setTempPw(null)}>Done</Button>}>
+          <p className="text-sm text-muted">Share this with <b className="text-content">{tempPw.username}</b> — they'll be asked to change it on first login.</p>
+          <div className="mt-3 rounded-lg border border-border bg-surface-muted px-4 py-3 text-center font-mono text-lg">{tempPw.pw}</div>
+        </Modal>
+      )}
     </>
+  );
+}
+
+function FragmentGroup({ group, show, children }: { group: string; show: boolean; children: React.ReactNode }) {
+  return (
+    <>
+      {show && (
+        <tr><td colSpan={5} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>
+      )}
+      {children}
+    </>
+  );
+}
+
+function StatusChip({ st }: { st: Status }) {
+  if (st.status === 'IN') return <Badge tone="success">In · {fmt(st.since_min)}</Badge>;
+  if (st.status === 'ON_TRIP') return <Badge tone="warning">On trip{st.over ? ' · over' : ''}</Badge>;
+  if (st.status === 'DAY_OFF') return <Badge tone="neutral">Day off</Badge>;
+  return <Badge tone="danger">Absent</Badge>;
+}
+function fmt(min: number) { const h = Math.floor(min / 60); return h ? `${h}h ${min % 60}m` : `${min}m`; }
+
+function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branch[]; onClose: () => void; onCreated: (u: string, pw: string) => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<Role>('EMPLOYEE');
+  const [branch, setBranch] = useState(branches[0]?.id ?? '');
+  const [rate, setRate] = useState('2.00');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    const res = await apiSend<{ temp_password: string }>('/api/admin/users', {
+      idempotent: true, idemPrefix: 'user-create',
+      body: {
+        username, password, role,
+        branchId: role === 'ADMIN' ? null : branch,
+        hourlyRateCent: Math.round(parseFloat(rate || '0') * 100),
+      },
+    });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onCreated(username, res.data.temp_password);
+  }
+
+  return (
+    <Modal title="Add employee" onClose={onClose}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="create-emp" type="submit" loading={busy}>Create</Button></>}>
+      <form id="create-emp" onSubmit={submit} className="space-y-4">
+        <Field label="Username" htmlFor="cu"><Input id="cu" value={username} onChange={(e) => setUsername(e.target.value)} required autoCapitalize="none" /></Field>
+        <Field label="Temporary password" htmlFor="cp" hint="Share verbally; they change it on first login."><Input id="cp" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
+        <Field label="Role" htmlFor="cr">
+          <Select id="cr" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option><option value="ADMIN">Admin</option>
+          </Select>
+        </Field>
+        {role !== 'ADMIN' && (
+          <Field label="Branch" htmlFor="cb">
+            <Select id="cb" value={branch} onChange={(e) => setBranch(e.target.value)} required>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        {role !== 'ADMIN' && (
+          <Field label="Hourly rate (USD)" htmlFor="crate"><Input id="crate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} required /></Field>
+        )}
+        {err && <Alert tone="danger">{err}</Alert>}
+      </form>
+    </Modal>
+  );
+}
+
+function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; branches: Branch[]; onClose: () => void; onSaved: () => void }) {
+  const [role, setRole] = useState<Role>(user.role);
+  const [branch, setBranch] = useState(user.branch_id ?? branches[0]?.id ?? '');
+  const [rate, setRate] = useState((user.hourly_rate_cent / 100).toFixed(2));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    const res = await apiSend(`/api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      body: { role, branchId: role === 'ADMIN' ? null : branch, hourlyRateCent: Math.round(parseFloat(rate || '0') * 100) },
+    });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onSaved();
+  }
+
+  return (
+    <Modal title={`Edit ${user.username}`} onClose={onClose}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="edit-emp" type="submit" loading={busy}>Save</Button></>}>
+      <form id="edit-emp" onSubmit={submit} className="space-y-4">
+        <Field label="Role" htmlFor="er">
+          <Select id="er" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option><option value="ADMIN">Admin</option>
+          </Select>
+        </Field>
+        {role !== 'ADMIN' && (
+          <Field label="Branch" htmlFor="eb">
+            <Select id="eb" value={branch} onChange={(e) => setBranch(e.target.value)}>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        {role !== 'ADMIN' && (
+          <Field label="Hourly rate (USD)" htmlFor="erate" hint="A rate change applies from now on; past shifts keep the old rate.">
+            <Input id="erate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} />
+          </Field>
+        )}
+        {err && <Alert tone="danger">{err}</Alert>}
+      </form>
+    </Modal>
+  );
+}
+
+interface DayState { wd: number; name: string; working: boolean; start: string; end: string }
+function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => void; onSaved: () => void }) {
+  const [days, setDays] = useState<DayState[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const r = await apiGet<{ weeklySchedule: { weekday: number; start_time: string; end_time: string }[] }>(`/api/admin/schedules/${user.id}`);
+      const byWd = new Map((r.ok ? r.data.weeklySchedule : []).map((s) => [s.weekday, s]));
+      setDays(DAYS.map((d) => {
+        const s = byWd.get(d.wd);
+        return { wd: d.wd, name: d.name, working: !!s, start: s?.start_time ?? '09:00', end: s?.end_time ?? '18:00' };
+      }));
+    })();
+  }, [user.id]);
+
+  async function save() {
+    if (!days) return;
+    setBusy(true); setErr(null);
+    const weeklySchedule = days.filter((d) => d.working).map((d) => ({ weekday: d.wd, start_time: d.start, end_time: d.end }));
+    const res = await apiSend(`/api/admin/schedules/${user.id}`, { method: 'PUT', body: { weeklySchedule } });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onSaved();
+  }
+
+  function set(wd: number, patch: Partial<DayState>) {
+    setDays((ds) => ds!.map((d) => (d.wd === wd ? { ...d, ...patch } : d)));
+  }
+
+  return (
+    <Modal title={`Weekly schedule · ${user.username}`} onClose={onClose}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={save} loading={busy} disabled={!days}>Save schedule</Button></>}>
+      {!days ? (
+        <div className="grid place-items-center py-8"><Spinner /></div>
+      ) : (
+        <div className="space-y-2">
+          {days.map((d) => (
+            <div key={d.wd} className="flex items-center gap-3">
+              <span className="w-24 text-sm font-medium">{d.name}</span>
+              <button
+                type="button"
+                onClick={() => set(d.wd, { working: !d.working })}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold ${d.working ? 'border-success/30 bg-success-subtle text-success' : 'border-border bg-surface-muted text-muted'}`}
+              >
+                {d.working ? 'Working' : 'Off'}
+              </button>
+              <div className={`flex items-center gap-2 ${d.working ? '' : 'pointer-events-none opacity-40'}`}>
+                <Input type="time" value={d.start} onChange={(e) => set(d.wd, { start: e.target.value })} className="w-auto" />
+                <span className="text-xs text-muted">to</span>
+                <Input type="time" value={d.end} onChange={(e) => set(d.wd, { end: e.target.value })} className="w-auto" />
+              </div>
+            </div>
+          ))}
+          {err && <Alert tone="danger">{err}</Alert>}
+        </div>
+      )}
+    </Modal>
   );
 }
