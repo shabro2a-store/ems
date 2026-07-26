@@ -12,7 +12,12 @@ git pull
 docker compose up -d --build
 ```
 `--build` is required — without it Docker reuses the old image. First build ~3–5 min.
-The Postgres volume persists, so no data loss and (usually) no migration needed.
+The Postgres volume persists, so no data loss. **If the pull added a new Prisma
+migration** (`packages/db/prisma/migrations/…`), also run migrate deploy afterwards —
+the app expects the new columns:
+```bash
+docker compose run --rm -w /app/packages/db web node_modules/.bin/prisma migrate deploy
+```
 
 Verify:
 ```bash
