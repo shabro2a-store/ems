@@ -19,7 +19,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const { startUtc, endUtc } = todayInBeirutDateRange(todayInBeirut());
   const [user, flagCount] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, select: { username: true } }),
-    prisma.flag.count({ where: { created_at: { gte: startUtc, lt: endUtc } } }),
+    prisma.flag.count({ where: { created_at: { gte: startUtc, lt: endUtc }, notified_at: null } }),
   ]);
 
   return (
