@@ -89,9 +89,10 @@ Summary `{ pending, upcoming: [...] }`; request body
   → `200 { trip_id, back_at, duration_min }`. Error: `NO_OPEN_TRIP` 409.
 - **GET /api/me/trip/current** → `200 { open, since_min?, threshold_min }`.
 
-### POST /api/me/password  *(CSRF)*
-Change your own password. Body `{ currentPassword, newPassword }` (new ≥ 6 chars).
-→ `200 { changed: true }`. Error: `WRONG_PASSWORD` 400.
+### POST /api/me/password  *(CSRF, ADMIN only)*
+Change your own password. **Admin only** — employees/drivers/callers get `403 FORBIDDEN`
+(the admin resets their password instead). Body `{ currentPassword, newPassword }` (new ≥ 6
+chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 400.
 
 ---
 

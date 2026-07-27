@@ -16,11 +16,16 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-// Let any signed-in user change their own password.
+// Only the admin manages passwords. The admin may change their own here;
+// employees / drivers / callers cannot self-serve (admin resets theirs via
+// /api/admin/users/[id]/reset-password).
 export async function POST(req: Request) {
   const h = headers();
   const userId = h.get('x-user-id');
   if (!userId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
+  if (h.get('x-user-role') !== 'ADMIN') {
+    return jsonError('FORBIDDEN', 'Only the admin can change passwords', 403);
+  }
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 
   let body: z.infer<typeof Body>;

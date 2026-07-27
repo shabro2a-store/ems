@@ -18,7 +18,7 @@ The one remaining planned feature is the notification wiring (see §9).
 
 | Role | Can do |
 |---|---|
-| EMPLOYEE | Punch in/out (geofenced), view today/payroll, request advances & leave, change own password |
+| EMPLOYEE | Punch in/out (geofenced), view today/payroll, request advances & leave |
 | DRIVER | Trip out/back (geofenced) + everything an employee can (cannot punch while a trip is open) |
 | ADMIN (owner) | Everything: live dashboard, employees + schedules, branches + GPS, punches + corrections, payroll + PDF, approvals |
 
@@ -31,8 +31,10 @@ The one remaining planned feature is the notification wiring (see §9).
 - **Idempotency**: mutating POSTs require an `Idempotency-Key` (24h dedupe).
 - **Rate limits**: login (per user+IP), punch, trip-start, advance — 5/min token bucket → `429`.
 - **Identity**: `username` = login handle (unique); `name` = display name shown in the
-  app (greetings, admin bar, lists). Users change their own password
-  (`POST /api/me/password`); admins set/reset any user's password.
+  app (greetings, admin bar, lists). **Only the admin manages passwords** — the admin
+  changes their own (`POST /api/me/password`, ADMIN-only) and sets/resets every other
+  user's (`POST /api/admin/users/[id]/reset-password`). Employees/drivers/callers have no
+  self-service password change.
 - **Admin protection**: the admin account cannot be created via the app, promoted/demoted,
   or deactivated (fail-closed with 403). `password_hash` is never returned to the client.
 - Session TTL: employee 120 min; driver 30 min after scheduled end. `mustChangePassword`

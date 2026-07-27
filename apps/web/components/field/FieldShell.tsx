@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
-import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 
 interface Tab {
   href: string;
@@ -23,7 +22,6 @@ const ICON = {
 export default function FieldShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [role, setRole] = useState<string | null>(null);
-  const [pwOpen, setPwOpen] = useState(false);
 
   useEffect(() => {
     apiGet<{ role: string; userId: string }>('/api/me/ping').then((r) => {
@@ -55,16 +53,12 @@ export default function FieldShell({ children }: { children: React.ReactNode }) 
             <span className="font-semibold">Shabro2a</span>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setPwOpen(true)} className="rounded-lg border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-muted">
-              Password
-            </button>
             <button onClick={logout} className="rounded-lg border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-muted">
               Logout
             </button>
           </div>
         </div>
       </header>
-      {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
 
       <main className="mx-auto max-w-md px-4 py-4">{children}</main>
 
