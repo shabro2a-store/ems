@@ -73,7 +73,8 @@ approved_advance_balance_cent, net_cent }` — real earnings for the caller.
 Summary `{ pending, approved_balance_cent }`, or `{ advances: [...] }` (latest 50).
 
 ### POST /api/me/advances  *(CSRF, Idempotent, rate-limited)*
-Body `{ amountCent, reason? }`. Capped at accrued monthly gross minus approved balance.
+Body `{ amountCent, reason? }`. Capped at what's earned this month —
+worked wages + bonuses − deductions − advances already approved this month.
 → `200 { id, status: "PENDING" }`. Error: `EXCEEDS_ACCRUED_EARNINGS` 409.
 
 ### GET /api/me/leave  ·  POST /api/me/leave  *(POST: CSRF, Idempotent)*

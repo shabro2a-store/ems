@@ -107,7 +107,11 @@ Full request/response detail is in [API.md](API.md). Summary:
 - **Geofence (`geofence.ts`)**: nearest active branch by haversine; reject if
   `accuracy > gps_accuracy_max_m` or `distance ≥ radius + accuracy`.
 - **Trips (`trip.ts`)**: one open trip per driver (service + DB index); geofenced both ends.
-- **Advances**: capped so `approvedBalance + amount ≤ accrued gross this month`.
+- **Advances**: an employee can borrow against everything earned **this month** —
+  worked wages **plus bonuses, minus deductions**: capped so
+  `approvedBalance + amount ≤ grossThisMonth + adjustmentsThisMonth`. Approved
+  advances counted in the cap are scoped to the current month, so the limit
+  refills at the start of each month (payroll's month boundary).
 - **Leave**: approval upserts one ScheduleOverride per date in range.
 - **Time (`time`)**: Beirut day boundaries, weekday Sun=0..Sat=6, schedule wall-clock → UTC.
 

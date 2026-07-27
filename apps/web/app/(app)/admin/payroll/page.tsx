@@ -103,11 +103,16 @@ export default function AdminPayrollPage() {
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
 
       {totals && (
-        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Net payout" value={centsToUsd(totals.net_cent)} tone="primary" />
-          <StatTile label="Gross" value={centsToUsd(totals.gross_cent)} />
-          <StatTile label="Hours" value={totals.hours.toFixed(1)} />
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + bonuses − deductions − advances" />
+          <StatTile label="Gross wages" value={centsToUsd(totals.gross_cent)} />
+          <StatTile
+            label="Adjustments"
+            value={totals.adjustments_cent === 0 ? '$0.00' : `${totals.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(totals.adjustments_cent))}`}
+            tone={totals.adjustments_cent > 0 ? 'success' : totals.adjustments_cent < 0 ? 'danger' : 'neutral'}
+          />
           <StatTile label="Advances" value={centsToUsd(totals.advances_cent)} tone={totals.advances_cent > 0 ? 'danger' : 'neutral'} />
+          <StatTile label="Hours" value={totals.hours.toFixed(1)} />
         </div>
       )}
 

@@ -110,10 +110,11 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
         </View>
 
         <View style={styles.cards}>
-          <View style={styles.card}><Text style={styles.cardK}>Net payout</Text><Text style={[styles.cardV, { color: C.primary }]}>{usd(totals.net)}</Text></View>
-          <View style={styles.card}><Text style={styles.cardK}>Gross</Text><Text style={styles.cardV}>{usd(totals.gross)}</Text></View>
-          <View style={styles.card}><Text style={styles.cardK}>Hours</Text><Text style={styles.cardV}>{totals.hours.toFixed(1)}</Text></View>
+          <View style={styles.card}><Text style={styles.cardK}>Total to pay</Text><Text style={[styles.cardV, { color: C.primary }]}>{usd(totals.net)}</Text></View>
+          <View style={styles.card}><Text style={styles.cardK}>Gross wages</Text><Text style={styles.cardV}>{usd(totals.gross)}</Text></View>
+          <View style={styles.card}><Text style={styles.cardK}>Adjustments</Text><Text style={[styles.cardV, { color: totals.adj > 0 ? C.success : totals.adj < 0 ? C.danger : C.ink }]}>{signedUsd(totals.adj)}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Advances</Text><Text style={[styles.cardV, { color: totals.adv > 0 ? C.danger : C.ink }]}>{usd(totals.adv)}</Text></View>
+          <View style={styles.card}><Text style={styles.cardK}>Hours</Text><Text style={styles.cardV}>{totals.hours.toFixed(1)}</Text></View>
         </View>
 
         <View style={styles.thead}>

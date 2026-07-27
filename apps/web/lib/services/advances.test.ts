@@ -9,7 +9,9 @@ const store = {
     status: 'PENDING' | 'APPROVED' | 'REJECTED';
     decided_by: string | null;
     decided_at: Date | null;
+    created_at: Date;
   }>,
+  adjustments: [] as Array<{ user_id: string; kind: 'BONUS' | 'DEDUCTION'; amount_cent: number; period: Date }>,
   audits: [] as Array<{ id: string; action: string; entity: string; entity_id: string }>,
   auditSeq: 0,
   advanceSeq: 0,
@@ -28,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   auditLog: { create: vi.fn() },
   punch: { findMany: vi.fn() },
   rateChange: { findMany: vi.fn() },
+  adjustment: { findMany: vi.fn() },
 }));
 
 vi.mock('@/lib/db/prisma', () => ({
@@ -43,17 +46,25 @@ function resetStore() {
   store.advanceSeq = 0;
   store.punches.length = 0;
   store.rateChanges.length = 0;
+  store.adjustments.length = 0;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   resetStore();
 
-  mocks.advance.aggregate.mockImplementation(async ({ where }: { where: { user_id: string; status?: string } }) => {
+  mocks.advance.aggregate.mockImplementation(async ({ where }: { where: { user_id: string; status?: string; created_at?: { gte: Date; lt: Date } } }) => {
     const sum = store.advances
       .filter((a) => a.user_id === where.user_id && (!where.status || a.status === where.status))
+      .filter((a) => !where.created_at || (a.created_at >= where.created_at.gte && a.created_at < where.created_at.lt))
       .reduce((s, a) => s + a.amount_cent, 0);
     return { _sum: { amount_cent: sum || null } };
+  });
+
+  mocks.adjustment.findMany.mockImplementation(async ({ where }: { where: { user_id: string; period?: { gte: Date; lt: Date } } }) => {
+    return store.adjustments
+      .filter((a) => a.user_id === where.user_id && (!where.period || (a.period >= where.period.gte && a.period < where.period.lt)))
+      .map((a) => ({ kind: a.kind, amount_cent: a.amount_cent }));
   });
 
   mocks.advance.count.mockImplementation(async ({ where }: { where: { user_id: string; status?: string } }) => {
@@ -70,6 +81,7 @@ beforeEach(() => {
       status: data.status,
       decided_by: null,
       decided_at: null,
+      created_at: new Date('2026-07-15T00:00:00Z'),
     };
     store.advances.push(a);
     return a;
@@ -127,9 +139,38 @@ describe('requestAdvance', () => {
       status: 'APPROVED',
       decided_by: 'admin',
       decided_at: new Date(),
+      created_at: new Date('2026-07-05T00:00:00Z'),
     });
 
     const r = await requestAdvance({ userId: 'u1', amountCent: 999999, month: '2026-07' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe('EXCEEDS_ACCRUED_EARNINGS');
+  });
+
+  it('allows an advance covered by a bonus even when worked hours are small', async () => {
+    // Only ~$3 of worked wages this month...
+    store.punches.push(
+      { id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-01T08:00:00Z') },
+      { id: 'p2', user_id: 'u1', kind: 'OUT', at: new Date('2026-07-01T09:00:00Z') },
+    );
+    store.rateChanges.push({ user_id: 'u1', rate_cent: 300, effective_from: new Date('2026-01-01T00:00:00Z') });
+    // ...but a $50 bonus was granted.
+    store.adjustments.push({ user_id: 'u1', kind: 'BONUS', amount_cent: 5000, period: new Date('2026-07-01T00:00:00Z') });
+
+    const r = await requestAdvance({ userId: 'u1', amountCent: 2000, month: '2026-07' });
+    expect(r.ok).toBe(true);
+  });
+
+  it('a deduction lowers what can be borrowed', async () => {
+    store.punches.push(
+      { id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-01T08:00:00Z') },
+      { id: 'p2', user_id: 'u1', kind: 'OUT', at: new Date('2026-07-01T18:00:00Z') },
+    );
+    store.rateChanges.push({ user_id: 'u1', rate_cent: 600, effective_from: new Date('2026-01-01T00:00:00Z') });
+    // 10h * $6 = $60 gross, minus a $55 deduction => $5 available.
+    store.adjustments.push({ user_id: 'u1', kind: 'DEDUCTION', amount_cent: 5500, period: new Date('2026-07-01T00:00:00Z') });
+
+    const r = await requestAdvance({ userId: 'u1', amountCent: 1000, month: '2026-07' });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('EXCEEDS_ACCRUED_EARNINGS');
   });
@@ -151,6 +192,7 @@ describe('decideAdvance', () => {
       status: 'PENDING',
       decided_by: null,
       decided_at: null,
+      created_at: new Date('2026-07-10T00:00:00Z'),
     });
     const r = await decideAdvance({ adminId: 'admin', advanceId: 'adv1', decision: 'APPROVED' });
     expect(r.ok).toBe(true);
@@ -167,6 +209,7 @@ describe('decideAdvance', () => {
       status: 'APPROVED',
       decided_by: 'admin',
       decided_at: new Date(),
+      created_at: new Date('2026-07-10T00:00:00Z'),
     });
     const r = await decideAdvance({ adminId: 'admin', advanceId: 'adv2', decision: 'REJECTED' });
     expect(r.ok).toBe(false);
@@ -183,9 +226,9 @@ describe('decideAdvance', () => {
 describe('advancesSummary', () => {
   it('returns pending count and approved balance', async () => {
     store.advances.push(
-      { id: 'a', user_id: 'u1', amount_cent: 1000, reason: null, status: 'PENDING', decided_by: null, decided_at: null },
-      { id: 'b', user_id: 'u1', amount_cent: 3000, reason: null, status: 'PENDING', decided_by: null, decided_at: null },
-      { id: 'c', user_id: 'u1', amount_cent: 4000, reason: null, status: 'APPROVED', decided_by: 'admin', decided_at: new Date() },
+      { id: 'a', user_id: 'u1', amount_cent: 1000, reason: null, status: 'PENDING', decided_by: null, decided_at: null, created_at: new Date('2026-07-01T00:00:00Z') },
+      { id: 'b', user_id: 'u1', amount_cent: 3000, reason: null, status: 'PENDING', decided_by: null, decided_at: null, created_at: new Date('2026-07-01T00:00:00Z') },
+      { id: 'c', user_id: 'u1', amount_cent: 4000, reason: null, status: 'APPROVED', decided_by: 'admin', decided_at: new Date(), created_at: new Date('2026-07-01T00:00:00Z') },
     );
     const s = await advancesSummary('u1');
     expect(s.pending).toBe(2);
