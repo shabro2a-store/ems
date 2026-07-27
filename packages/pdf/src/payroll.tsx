@@ -9,6 +9,7 @@ export interface PayrollRow {
   rate_cent: number;
   gross_cent: number;
   adjustments_cent: number;
+  penalties_cent: number;
   advances_cent: number;
   net_cent: number;
 }
@@ -57,9 +58,9 @@ const styles = StyleSheet.create({
   name: { fontFamily: 'Helvetica-Bold' },
   role: { fontSize: 7.5, color: C.faint },
 
-  cName: { width: '26%' },
-  cBranch: { width: '18%' },
-  cNum: { width: '14%', textAlign: 'right' },
+  cName: { width: '20%' },
+  cBranch: { width: '14%' },
+  cNum: { width: '11%', textAlign: 'right' },
 
   totals: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 8, backgroundColor: C.band, borderBottomLeftRadius: 6, borderBottomRightRadius: 6, marginTop: 0 },
   totalLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.4 },
@@ -87,8 +88,8 @@ function genLabel(d: Date): string {
 
 export function PayrollDocument({ month, generatedAt, rows, branchName }: PayrollPdfProps): React.ReactElement {
   const totals = rows.reduce(
-    (a, r) => ({ gross: a.gross + r.gross_cent, adj: a.adj + r.adjustments_cent, adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
-    { gross: 0, adj: 0, adv: 0, net: 0, hours: 0 },
+    (a, r) => ({ gross: a.gross + r.gross_cent, adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
+    { gross: 0, adj: 0, pen: 0, adv: 0, net: 0, hours: 0 },
   );
 
   return (
@@ -113,6 +114,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           <View style={styles.card}><Text style={styles.cardK}>Total to pay</Text><Text style={[styles.cardV, { color: C.primary }]}>{usd(totals.net)}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Gross wages</Text><Text style={styles.cardV}>{usd(totals.gross)}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Adjustments</Text><Text style={[styles.cardV, { color: totals.adj > 0 ? C.success : totals.adj < 0 ? C.danger : C.ink }]}>{signedUsd(totals.adj)}</Text></View>
+          <View style={styles.card}><Text style={styles.cardK}>Penalties</Text><Text style={[styles.cardV, { color: totals.pen > 0 ? C.danger : C.ink }]}>{totals.pen > 0 ? `−${usd(totals.pen)}` : '—'}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Advances</Text><Text style={[styles.cardV, { color: totals.adv > 0 ? C.danger : C.ink }]}>{usd(totals.adv)}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Hours</Text><Text style={styles.cardV}>{totals.hours.toFixed(1)}</Text></View>
         </View>
@@ -123,6 +125,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           <Text style={[styles.th, styles.cNum]}>Hours</Text>
           <Text style={[styles.th, styles.cNum]}>Gross</Text>
           <Text style={[styles.th, styles.cNum]}>Adjust.</Text>
+          <Text style={[styles.th, styles.cNum]}>Penalty</Text>
           <Text style={[styles.th, styles.cNum]}>Advances</Text>
           <Text style={[styles.th, styles.cNum]}>Net</Text>
         </View>
@@ -140,6 +143,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
               <Text style={[styles.td, styles.cNum]}>{r.hours.toFixed(1)}</Text>
               <Text style={[styles.td, styles.cNum]}>{usd(r.gross_cent)}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.adjustments_cent > 0 ? C.success : r.adjustments_cent < 0 ? C.danger : C.faint }]}>{signedUsd(r.adjustments_cent)}</Text>
+              <Text style={[styles.td, styles.cNum, { color: r.penalties_cent > 0 ? C.danger : C.faint }]}>{r.penalties_cent > 0 ? `−${usd(r.penalties_cent)}` : '—'}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.advances_cent > 0 ? C.danger : C.faint }]}>{r.advances_cent > 0 ? `−${usd(r.advances_cent)}` : '—'}</Text>
               <Text style={[styles.td, styles.cNum, styles.name]}>{usd(r.net_cent)}</Text>
             </View>
@@ -152,6 +156,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           <Text style={[styles.totalNum, styles.cNum]}>{totals.hours.toFixed(1)}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{usd(totals.gross)}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{signedUsd(totals.adj)}</Text>
+          <Text style={[styles.totalNum, styles.cNum]}>{totals.pen > 0 ? `−${usd(totals.pen)}` : '—'}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{totals.adv > 0 ? `−${usd(totals.adv)}` : '—'}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{usd(totals.net)}</Text>
         </View>

@@ -44,6 +44,7 @@ export async function GET(req: Request) {
         gross_cent: r.grossCent,
         adjustments_cent: r.adjustmentsCent,
         advances_cent: r.advancesCent,
+        penalties_cent: r.penaltiesCent,
         net_cent: r.netCent,
       };
     }),
@@ -55,9 +56,10 @@ export async function GET(req: Request) {
       gross_cent: s.gross_cent + r.gross_cent,
       adjustments_cent: s.adjustments_cent + r.adjustments_cent,
       advances_cent: s.advances_cent + r.advances_cent,
+      penalties_cent: s.penalties_cent + r.penalties_cent,
       net_cent: s.net_cent + r.net_cent,
     }),
-    { hours: 0, gross_cent: 0, adjustments_cent: 0, advances_cent: 0, net_cent: 0 },
+    { hours: 0, gross_cent: 0, adjustments_cent: 0, advances_cent: 0, penalties_cent: 0, net_cent: 0 },
   );
 
   return NextResponse.json({ ok: true, data: { rows, totals, month, branchId: branchId ?? 'all', branches } });

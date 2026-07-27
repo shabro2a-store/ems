@@ -28,6 +28,7 @@ export async function GET(req: Request) {
       gross_cent: result.grossCent,
       adjustments_cent: result.adjustmentsCent,
       advances_cent: result.advancesCent,
+      penalties_cent: result.penaltiesCent,
       net_cent: result.netCent,
     },
   });

@@ -15,9 +15,10 @@ interface Row {
   gross_cent: number;
   adjustments_cent: number;
   advances_cent: number;
+  penalties_cent: number;
   net_cent: number;
 }
-interface Totals { hours: number; gross_cent: number; adjustments_cent: number; advances_cent: number; net_cent: number }
+interface Totals { hours: number; gross_cent: number; adjustments_cent: number; advances_cent: number; penalties_cent: number; net_cent: number }
 interface Branch { id: string; name: string }
 
 function currentMonth(): string {
@@ -37,6 +38,7 @@ export default function AdminPayrollPage() {
   const [err, setErr] = useState<string | null>(null);
   const [adjust, setAdjust] = useState<Row | null>(null);
   const [rateFor, setRateFor] = useState<Row | null>(null);
+  const [penaltiesFor, setPenaltiesFor] = useState<Row | null>(null);
 
   async function load() {
     setLoading(true);
@@ -103,14 +105,15 @@ export default function AdminPayrollPage() {
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
 
       {totals && (
-        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + bonuses − deductions − advances" />
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + bonuses − deductions − advances − penalties" />
           <StatTile label="Gross wages" value={centsToUsd(totals.gross_cent)} />
           <StatTile
             label="Adjustments"
             value={totals.adjustments_cent === 0 ? '$0.00' : `${totals.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(totals.adjustments_cent))}`}
             tone={totals.adjustments_cent > 0 ? 'success' : totals.adjustments_cent < 0 ? 'danger' : 'neutral'}
           />
+          <StatTile label="Penalties" value={totals.penalties_cent === 0 ? '$0.00' : `−${centsToUsd(totals.penalties_cent)}`} tone={totals.penalties_cent > 0 ? 'danger' : 'neutral'} />
           <StatTile label="Advances" value={centsToUsd(totals.advances_cent)} tone={totals.advances_cent > 0 ? 'danger' : 'neutral'} />
           <StatTile label="Hours" value={totals.hours.toFixed(1)} />
         </div>
@@ -131,6 +134,7 @@ export default function AdminPayrollPage() {
                   <th className="px-4 py-2.5 text-right">Rate</th>
                   <th className="px-4 py-2.5 text-right">Gross</th>
                   <th className="px-4 py-2.5 text-right">Adjust.</th>
+                  <th className="px-4 py-2.5 text-right">Penalty</th>
                   <th className="px-4 py-2.5 text-right">Advances</th>
                   <th className="px-4 py-2.5 text-right">Net</th>
                   <th className="px-4 py-2.5 text-right"></th>
@@ -159,6 +163,15 @@ export default function AdminPayrollPage() {
                         <td className={`tabular px-4 py-2.5 text-right font-medium ${r.adjustments_cent > 0 ? 'text-success' : r.adjustments_cent < 0 ? 'text-danger' : 'text-muted'}`}>
                           {r.adjustments_cent === 0 ? '—' : `${r.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(r.adjustments_cent), false)}`}
                         </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            onClick={() => setPenaltiesFor(r)}
+                            className={`tabular border-b border-dashed border-danger/40 font-medium hover:text-danger ${r.penalties_cent > 0 ? 'text-danger' : 'text-muted'}`}
+                            title="View / remove penalties"
+                          >
+                            {r.penalties_cent === 0 ? '—' : `−${centsToUsd(r.penalties_cent, false)}`}
+                          </button>
+                        </td>
                         <td className="tabular px-4 py-2.5 text-right text-danger">
                           {r.advances_cent === 0 ? <span className="text-muted">—</span> : `−${centsToUsd(r.advances_cent, false)}`}
                         </td>
@@ -179,6 +192,7 @@ export default function AdminPayrollPage() {
                     <td></td>
                     <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.gross_cent)}</td>
                     <td className="tabular px-4 py-3 text-right">{totals.adjustments_cent >= 0 ? '+' : '−'}{centsToUsd(Math.abs(totals.adjustments_cent), false)}</td>
+                    <td className="tabular px-4 py-3 text-right text-danger">{totals.penalties_cent === 0 ? '—' : `−${centsToUsd(totals.penalties_cent, false)}`}</td>
                     <td className="tabular px-4 py-3 text-right">−{centsToUsd(totals.advances_cent, false)}</td>
                     <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.net_cent)}</td>
                     <td></td>
@@ -196,6 +210,9 @@ export default function AdminPayrollPage() {
       {rateFor && (
         <RateModal row={rateFor} onClose={() => setRateFor(null)} onSaved={() => { setRateFor(null); setMsg('Rate updated (applies from now on).'); load(); }} />
       )}
+      {penaltiesFor && (
+        <PenaltiesModal row={penaltiesFor} month={month} onClose={() => setPenaltiesFor(null)} onChanged={() => { setMsg('Penalty updated.'); load(); }} />
+      )}
     </>
   );
 }
@@ -203,7 +220,7 @@ export default function AdminPayrollPage() {
 function GroupBody({ group, show, children }: { group: string; show: boolean; children: React.ReactNode }) {
   return (
     <>
-      {show && <tr><td colSpan={8} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>}
+      {show && <tr><td colSpan={9} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>}
       {children}
     </>
   );
@@ -240,6 +257,80 @@ function AdjustModal({ row, onClose, onSaved }: { row: Row; onClose: () => void;
         <Field label="Reason" htmlFor="ar"><Input id="ar" value={reason} onChange={(e) => setReason(e.target.value)} required maxLength={500} placeholder="e.g. Eid bonus" /></Field>
         {err && <Alert tone="danger">{err}</Alert>}
       </form>
+    </Modal>
+  );
+}
+
+interface PenaltyItem {
+  date: string;
+  kind: 'LATE' | 'EARLY_LEAVE';
+  minutes: number;
+  hours: number;
+  rate_cent: number;
+  amount_cent: number;
+  waived: boolean;
+}
+
+function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: string; onClose: () => void; onChanged: () => void }) {
+  const [items, setItems] = useState<PenaltyItem[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    const r = await apiGet<{ penalties: PenaltyItem[] }>(`/api/admin/penalties?userId=${row.user_id}&month=${month}`);
+    if (r.ok) setItems(r.data.penalties);
+    else setErr(errorMessage(r));
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  async function toggle(p: PenaltyItem) {
+    const id = `${p.date}|${p.kind}`;
+    setBusy(id); setErr(null);
+    const res = await apiSend('/api/admin/penalties/waive', {
+      body: { userId: row.user_id, date: p.date, kind: p.kind, waived: !p.waived },
+    });
+    setBusy(null);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    setItems((prev) => prev?.map((x) => (x.date === p.date && x.kind === p.kind ? { ...x, waived: !x.waived } : x)) ?? null);
+    onChanged();
+  }
+
+  const label = (k: PenaltyItem['kind']) => (k === 'LATE' ? 'Late arrival' : 'Left early');
+
+  return (
+    <Modal title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      <p className="mb-3 text-sm text-muted">
+        Automatic penalties for unannounced lateness / early leaving this month. Remove one when the employee
+        gave notice — this never affects manual adjustments.
+      </p>
+      {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
+      {items === null ? (
+        <div className="grid place-items-center py-8 text-muted"><Spinner /></div>
+      ) : items.length === 0 ? (
+        <EmptyState title="No penalties" hint="This employee has no late / early-leave penalties this month." />
+      ) : (
+        <ul className="divide-y divide-border">
+          {items.map((p) => {
+            const id = `${p.date}|${p.kind}`;
+            return (
+              <li key={id} className="flex items-center justify-between gap-3 py-2.5">
+                <div className={p.waived ? 'opacity-50' : ''}>
+                  <div className="text-sm font-medium">
+                    {label(p.kind)} · <span className="tabular">{p.minutes} min</span>
+                    {p.waived && <span className="ml-2 text-xs font-normal text-muted">(removed)</span>}
+                  </div>
+                  <div className="text-xs text-muted">
+                    {p.date} · {p.hours}h × {centsToUsd(p.rate_cent)} = <span className="text-danger">−{centsToUsd(p.amount_cent)}</span>
+                  </div>
+                </div>
+                <Button size="sm" variant={p.waived ? 'secondary' : 'ghost'} loading={busy === id} onClick={() => toggle(p)}>
+                  {p.waived ? 'Restore' : 'Remove'}
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </Modal>
   );
 }

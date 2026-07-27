@@ -102,6 +102,20 @@ describe('computePayoutFromRows', () => {
     expect(result.netCent).toBe(1600);
   });
 
+  it('subtracts penalties from net', () => {
+    const result = computePayoutFromRows({
+      userId: 'u',
+      punches: [p('IN', '2026-07-01T08:00:00Z'), p('OUT', '2026-07-01T16:00:00Z')],
+      rateChanges: [rc(200, '2026-01-01T00:00:00Z')],
+      adjustments: [{ user_id: 'u', kind: 'BONUS', amount_cent: 1000 }],
+      approvedAdvances: [],
+      penaltiesCent: 400,
+    });
+    expect(result.grossCent).toBe(1600);
+    expect(result.penaltiesCent).toBe(400);
+    expect(result.netCent).toBe(1600 + 1000 - 400);
+  });
+
   it('returns 0 hours when there are no punches', () => {
     const result = computePayoutFromRows({
       userId: 'u',

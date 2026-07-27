@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { writeAuditLog } from './audit';
 import { accruedEarningsThisMonth, monthRangeUtc } from './payout';
+import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 
 export interface RequestAdvanceInput {
   userId: string;
@@ -34,7 +35,7 @@ export async function requestAdvance(
   // worked wages (gross) PLUS bonuses, MINUS deductions. Approved advances are
   // scoped to the same month so the limit refills at the start of each month.
   const { start, end } = monthRangeUtc(input.month);
-  const [approvedSum, adjustments, accrued] = await Promise.all([
+  const [approvedSum, adjustments, accrued, penalties] = await Promise.all([
     db.advance.aggregate({
       where: { user_id: input.userId, status: 'APPROVED', created_at: { gte: start, lt: end } },
       _sum: { amount_cent: true },
@@ -44,6 +45,7 @@ export async function requestAdvance(
       select: { kind: true, amount_cent: true },
     }),
     accruedEarningsThisMonth(input.userId, input.month, db),
+    penaltiesForUser(input.userId, input.month, db),
   ]);
 
   const approvedBalance = approvedSum._sum.amount_cent ?? 0;
@@ -51,7 +53,8 @@ export async function requestAdvance(
     (s, a) => s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent),
     0,
   );
-  const entitlementCent = accrued.grossCent + adjustmentsCent;
+  const penaltiesCent = sumActivePenaltiesCent(penalties);
+  const entitlementCent = accrued.grossCent + adjustmentsCent - penaltiesCent;
   if (approvedBalance + input.amountCent > entitlementCent) {
     return { ok: false, code: 'EXCEEDS_ACCRUED_EARNINGS' };
   }

@@ -58,6 +58,9 @@ cuid PKs, money = Int cents.
   **Partial unique index: one open trip per driver.**
 - **Advance** — amount_cent, reason?, status. Approved advances reduce net pay (by created_at month).
 - **Adjustment** — period(1st of month), kind(BONUS/DEDUCTION), amount_cent(≥0, sign from kind), reason.
+- **PenaltyWaiver** — (user, date, kind LATE/EARLY_LEAVE) unique. Penalties themselves are
+  **computed on the fly** (schedule vs punches, see §4), not stored; a waiver is the admin
+  "remove penalty" for one (user, day, kind) and can never touch an Adjustment.
 - **Flag** — kind(WATCHED / MISSED_CHECKOUT / TRIP_OVER_THRESHOLD), user?, branch?, context_json,
   notified_at?(= resolved/acknowledged marker).
 - **AuditLog** — append-only (DB revokes UPDATE/DELETE). actor/action/entity/before/after.
@@ -90,6 +93,8 @@ Full request/response detail is in [API.md](API.md). Summary:
 - Pay & approvals: `GET payroll?month&branchId` · `GET reports/payroll?month&branchId` (**PDF**, branch-aware) ·
   `POST adjustments` · `GET advances` · `POST advances/[id]/decision` · `GET leave` ·
   `POST leave/[id]/decision`.
+- Penalties: `GET penalties?userId&month` (computed list + waived flag) · `POST penalties/waive`
+  (remove/restore one auto-penalty; never touches adjustments).
 - Flags: `POST flags/[id]/resolve`.
 
 **Telegram**: `POST /api/telegram/webhook` (secret-guarded; `/start` binds admin chat_id).
@@ -100,7 +105,14 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 - **Payroll (`payout.ts`)**: pairs each IN with next OUT; `minutes = floor((out-in)/60000)`;
   interval gross = `floor(minutes * rate_at_shift / 60)` (respects RateChange history). Open
-  session pays nothing. `net = gross + Σadjustments − ΣapprovedAdvances(month)`. Can go negative.
+  session pays nothing. `net = gross + Σadjustments − ΣapprovedAdvances(month) − Σpenalties(month)`.
+  Can go negative.
+- **Penalties (`penalty.ts`)**: unannounced lateness / early-leave, docked from pay.
+  `penaltyHours = min(4, floor(minutesLate / 15))` — under 15 min is free (grace), then 1 hour
+  per 15-min block, capped at 4h; same rule for leaving before the scheduled end. Measured from
+  each day's first IN / last OUT vs the employee's Schedule (respecting overrides; DAY_OFF and
+  unscheduled days are skipped; the current day is skipped for early-leave). Computed on the fly
+  (not stored); an admin **waiver** removes one. Penalty amount = hours × rate-at-shift.
 - **Punch (`punch.ts`)** gate order: user active+branch → day-off block → driver open-trip block →
   geofence (accuracy then radius) → session state. Writes full evidence + audit; resolves the
   oldest open WATCHED flag atomically.
@@ -108,8 +120,8 @@ Full request/response detail is in [API.md](API.md). Summary:
   `accuracy > gps_accuracy_max_m` or `distance ≥ radius + accuracy`.
 - **Trips (`trip.ts`)**: one open trip per driver (service + DB index); geofenced both ends.
 - **Advances**: an employee can borrow against everything earned **this month** —
-  worked wages **plus bonuses, minus deductions**: capped so
-  `approvedBalance + amount ≤ grossThisMonth + adjustmentsThisMonth`. Approved
+  worked wages **plus bonuses, minus deductions and penalties**: capped so
+  `approvedBalance + amount ≤ grossThisMonth + adjustmentsThisMonth − penaltiesThisMonth`. Approved
   advances counted in the cap are scoped to the current month, so the limit
   refills at the start of each month (payroll's month boundary).
 - **Leave**: approval upserts one ScheduleOverride per date in range.
@@ -159,7 +171,8 @@ an "Open in app" deep link) — all actions happen in the web app.
   activity feed) · `/admin/users` (Employees: branch filter, add/edit incl. name+username, rate,
   reset/set password, deactivate, per-employee weekly schedule) · `/admin/branches` (create/edit/
   remove, record GPS) · `/admin/punches` (log + persistent correction) · `/admin/payroll` (month +
-  branch filter, editable rate, inline adjustments, branch-aware PDF).
+  branch filter, totals incl. **Total to pay / Adjustments / Penalties**, editable rate, inline
+  adjustments, per-employee penalties with **Remove/Restore**, branch-aware PDF).
 - **Employee** (phone): `/employee` (punch + today/earnings, greets by name) ·
   `/employee/advances` · `/employee/leave` · `/employee/payroll`.
 - **Driver** (phone): `/driver` (trip out/back, greets by name) + the same advances/leave/pay tabs.

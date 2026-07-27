@@ -9,6 +9,7 @@ interface PayoutData {
   gross_cent: number;
   adjustments_cent: number;
   advances_cent: number;
+  penalties_cent: number;
   net_cent: number;
 }
 
@@ -54,6 +55,7 @@ export default function EmployeePayrollPage() {
               <dl className="divide-y divide-border text-sm">
                 <Line k="Gross pay" v={centsToUsd(data.gross_cent)} />
                 <Line k="Bonuses / deductions" v={`${data.adjustments_cent >= 0 ? '+' : '−'}${centsToUsd(Math.abs(data.adjustments_cent), false)}`} tone={data.adjustments_cent > 0 ? 'success' : data.adjustments_cent < 0 ? 'danger' : undefined} />
+                <Line k="Late / early penalties" v={data.penalties_cent ? `−${centsToUsd(data.penalties_cent, false)}` : '—'} tone={data.penalties_cent ? 'danger' : undefined} />
                 <Line k="Advances taken" v={data.advances_cent ? `−${centsToUsd(data.advances_cent, false)}` : '—'} tone={data.advances_cent ? 'danger' : undefined} />
                 <div className="flex items-center justify-between py-3">
                   <dt className="font-semibold">Take-home</dt>

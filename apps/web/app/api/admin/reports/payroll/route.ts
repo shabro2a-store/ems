@@ -61,6 +61,7 @@ export async function GET(req: Request) {
         rate_cent: latestRate?.rate_cent ?? 0,
         gross_cent: payout.grossCent,
         adjustments_cent: payout.adjustmentsCent,
+        penalties_cent: payout.penaltiesCent,
         advances_cent: payout.advancesCent,
         net_cent: payout.netCent,
       };

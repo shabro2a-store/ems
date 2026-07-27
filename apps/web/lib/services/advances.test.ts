@@ -31,6 +31,9 @@ const mocks = vi.hoisted(() => ({
   punch: { findMany: vi.fn() },
   rateChange: { findMany: vi.fn() },
   adjustment: { findMany: vi.fn() },
+  schedule: { findMany: vi.fn() },
+  scheduleOverride: { findMany: vi.fn() },
+  penaltyWaiver: { findMany: vi.fn() },
 }));
 
 vi.mock('@/lib/db/prisma', () => ({
@@ -107,6 +110,9 @@ beforeEach(() => {
 
   mocks.punch.findMany.mockImplementation(async () => store.punches);
   mocks.rateChange.findMany.mockImplementation(async () => store.rateChanges);
+  mocks.schedule.findMany.mockImplementation(async () => []);
+  mocks.scheduleOverride.findMany.mockImplementation(async () => []);
+  mocks.penaltyWaiver.findMany.mockImplementation(async () => []);
 });
 
 describe('requestAdvance', () => {

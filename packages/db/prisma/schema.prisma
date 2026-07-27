@@ -46,6 +46,11 @@ enum FlagKind {
   TRIP_OVER_THRESHOLD
 }
 
+enum PenaltyKind {
+  LATE
+  EARLY_LEAVE
+}
+
 model User {
   id                   String             @id @default(cuid())
   username             String             @unique
@@ -69,6 +74,7 @@ model User {
   advances             Advance[]
   adjustments          Adjustment[]
   flags                Flag[]
+  penalty_waivers      PenaltyWaiver[]
 
   @@index([branch_id])
 }
@@ -221,6 +227,24 @@ model Adjustment {
   //   ALTER TABLE "Adjustment" ADD CONSTRAINT adjustment_period_chk CHECK (EXTRACT(DAY FROM period) = 1);
 
   @@index([user_id, period])
+}
+
+// Late/early-leave penalties are COMPUTED on the fly from each day's schedule vs
+// actual punches (see lib/services/penalty.ts) — not stored. A PenaltyWaiver is
+// the admin "remove penalty" action: it cancels the auto-penalty for one
+// (user, day, kind). It can never touch a manual Adjustment.
+model PenaltyWaiver {
+  id         String      @id @default(cuid())
+  user_id    String
+  user       User        @relation(fields: [user_id], references: [id])
+  date       DateTime    @db.Date
+  kind       PenaltyKind
+  reason     String?
+  waived_by  String
+  created_at DateTime    @default(now())
+
+  @@unique([user_id, date, kind])
+  @@index([user_id, date])
 }
 
 model Flag {

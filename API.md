@@ -67,7 +67,7 @@ GPS/geofence (uses the branch centre) for testing on devices without GPS.
 approved_advance_balance_cent, net_cent }` — real earnings for the caller.
 
 ### GET /api/me/payroll?month=YYYY-MM
-→ `200 { hours, gross_cent, adjustments_cent, advances_cent, net_cent }`.
+→ `200 { hours, gross_cent, adjustments_cent, advances_cent, penalties_cent, net_cent }`.
 
 ### GET /api/me/advances  ·  GET /api/me/advances?view=list
 Summary `{ pending, approved_balance_cent }`, or `{ advances: [...] }` (latest 50).
@@ -144,7 +144,8 @@ Change your own password. Body `{ currentPassword, newPassword }` (new ≥ 6 cha
 
 ### Pay & approvals
 - **GET /api/admin/payroll?month=YYYY-MM&branchId=** → `{ rows[], totals, month,
-  branchId, branches }`.
+  branchId, branches }`. Each row + `totals` include `gross_cent`, `adjustments_cent`,
+  `penalties_cent`, `advances_cent`, `net_cent`.
 - **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
   scoped to the branch filter.
 - **POST /api/admin/adjustments** *(CSRF, Idempotent)* `{ userId, kind:
@@ -155,6 +156,17 @@ Change your own password. Body `{ currentPassword, newPassword }` (new ≥ 6 cha
 - **GET /api/admin/leave?status=** → `{ requests: [...] }`.
 - **POST /api/admin/leave/[id]/decision** *(CSRF, Idempotent)* `{ decision }` →
   `{ id, status, overrides_created }` (approval materializes ScheduleOverrides).
+
+### Penalties
+Late / early-leave penalties are **computed** from schedule vs punches
+(`min(4, floor(minutesLate / 15))` hours × rate), not stored. Both surface in
+payroll as `penalties_cent` and reduce `net_cent`.
+- **GET /api/admin/penalties?userId=&month=YYYY-MM** → `{ penalties: [{ date, kind:
+  "LATE"|"EARLY_LEAVE", minutes, hours, rate_cent, amount_cent, waived }] }`.
+- **POST /api/admin/penalties/waive** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:
+  "LATE"|"EARLY_LEAVE", waived: bool, reason? }` — removes (`waived:true`) or
+  re-applies (`waived:false`) one auto-penalty. Only ever writes `PenaltyWaiver`
+  rows; never a manual adjustment. → `{ waived }`.
 
 ### Flags
 - **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag
