@@ -186,9 +186,10 @@ an "Open in app" deep link) — all actions happen in the web app.
   adjustments, per-employee penalties with **Remove/Restore**, branch-aware PDF).
 - **Employee** (phone): `/employee` (punch + today/earnings, greets by name) ·
   `/employee/advances` · `/employee/leave` · `/employee/payroll`.
-- **Driver** (phone): `/driver` (trip out/back, greets by name) + the same advances/leave/pay tabs.
-  Shows a full-screen flashing **alarm** (sound + vibration) when the caller rings; polls
-  `GET /api/me/calls`, dismiss acks it.
+- **Driver** (phone): `/driver` — **clock in/out** (attendance punch) **and** trip out/back
+  off one GPS check (must clock in before going out on an order), shift/earnings tiles, greets
+  by name, + the same advances/leave/pay tabs. Shows a full-screen flashing **alarm** (sound +
+  vibration) when the caller rings; polls `GET /api/me/calls`, dismiss acks it.
 - **Caller** (`/caller`, POS/tablet): each branch driver is a big button — available ones
   bright and sorted to the top, out/off ones dimmed and sunk to the bottom (the "lights off"
   metaphor); shows live Out timer + trips today; tap = ring. Polls every 3s.

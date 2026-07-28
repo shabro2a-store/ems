@@ -1,40 +1,61 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { apiGet, apiSend, errorMessage } from '@/lib/api';
-import { Card, CardBody, Alert } from '@/components/ui';
+import { apiGet, apiSend, centsToUsd, errorMessage, formatBeirutTime } from '@/lib/api';
+import { Card, CardBody, StatTile, Alert } from '@/components/ui';
 import DriverAlarm from '@/components/field/DriverAlarm';
 import EnableAlerts from '@/components/field/EnableAlerts';
 
+interface TodayPayload {
+  in_at: string | null;
+  minutes_since_in: number | null;
+  earned_today_cent: number;
+  earned_month_cent: number;
+  approved_advance_balance_cent: number;
+  net_cent: number;
+}
+interface TripInfo { open: boolean; since_min?: number; threshold_min: number }
 type Status =
   | { kind: 'idle' }
   | { kind: 'locating' }
   | { kind: 'ready'; lat: number; lng: number; accuracy: number }
   | { kind: 'error'; message: string };
 
-interface TripInfo { open: boolean; since_min?: number; threshold_min: number }
-
+function deviceFp(): string {
+  if (typeof window === 'undefined') return 'ssr';
+  let v = window.localStorage.getItem('ems_device_fp');
+  if (!v) {
+    v = crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
+    window.localStorage.setItem('ems_device_fp', v);
+  }
+  return v;
+}
 function dur(min: number): string {
   const h = Math.floor(min / 60);
   return h ? `${h}h ${min % 60}m` : `${min}m`;
 }
 
 export default function DriverHomeClient({ username, branch }: { username: string; branch: { name: string; gps_radius_m: number; gps_accuracy_max_m: number; trip_threshold_min: number } }) {
+  const [today, setToday] = useState<TodayPayload | null>(null);
   const [trip, setTrip] = useState<TripInfo | null>(null);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
-  const fetchTrip = useCallback(async () => {
-    const r = await apiGet<TripInfo>('/api/me/trip/current');
-    if (r.ok) setTrip(r.data);
+  const refresh = useCallback(async () => {
+    const [t, tr] = await Promise.all([
+      apiGet<TodayPayload>('/api/me/today'),
+      apiGet<TripInfo>('/api/me/trip/current'),
+    ]);
+    if (t.ok) setToday(t.data);
+    if (tr.ok) setTrip(tr.data);
   }, []);
 
   useEffect(() => {
-    fetchTrip();
-    const id = setInterval(fetchTrip, 30_000);
+    refresh();
+    const id = setInterval(refresh, 30_000);
     return () => clearInterval(id);
-  }, [fetchTrip]);
+  }, [refresh]);
 
   const locate = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -56,7 +77,19 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     );
   }, [branch.gps_accuracy_max_m]);
 
-  const submit = useCallback(async (endpoint: '/api/me/trip/start' | '/api/me/trip/end') => {
+  const punch = useCallback(async (kind: 'IN' | 'OUT') => {
+    if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
+    setBusy(true); setBanner(null);
+    const r = await apiSend('/api/me/punch', {
+      idempotent: true, idemPrefix: 'punch',
+      body: { kind, lat: status.lat, lng: status.lng, accuracy: status.accuracy, deviceFp: deviceFp() },
+    });
+    setBusy(false);
+    if (r.ok) { setBanner({ tone: 'success', text: kind === 'IN' ? 'Clocked in. Have a good shift!' : 'Clocked out. See you next time!' }); await refresh(); }
+    else setBanner({ tone: 'danger', text: errorMessage(r) });
+  }, [status, refresh]);
+
+  const tripSubmit = useCallback(async (endpoint: '/api/me/trip/start' | '/api/me/trip/end') => {
     if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
     setBusy(true); setBanner(null);
     const r = await apiSend<{ duration_min?: number }>(endpoint, {
@@ -65,11 +98,20 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     });
     setBusy(false);
     if (r.ok) {
-      setBanner({ tone: 'success', text: endpoint.endsWith('start') ? 'Trip started. Drive safe!' : `Back! Trip lasted ${dur(r.data.duration_min ?? 0)}.` });
-      await fetchTrip();
+      setBanner({ tone: 'success', text: endpoint.endsWith('start') ? 'Out on an order. Drive safe!' : `Back! Trip lasted ${dur(r.data.duration_min ?? 0)}.` });
+      await refresh();
     } else setBanner({ tone: 'danger', text: errorMessage(r) });
-  }, [status, fetchTrip]);
+  }, [status, refresh]);
 
+  const devPunch = useCallback(async (kind: 'IN' | 'OUT') => {
+    setBusy(true); setBanner(null);
+    const r = await apiSend('/api/me/punch/dev', { idempotent: true, idemPrefix: 'dev', body: { kind } });
+    setBusy(false);
+    if (r.ok) { setBanner({ tone: 'success', text: `[DEV] Clocked ${kind === 'IN' ? 'in' : 'out'} (no GPS).` }); await refresh(); }
+    else setBanner({ tone: 'danger', text: errorMessage(r) });
+  }, [refresh]);
+
+  const isIn = Boolean(today?.in_at);
   const open = trip?.open ?? false;
   const since = trip?.since_min ?? 0;
   const over = open && since > branch.trip_threshold_min;
@@ -86,27 +128,52 @@ export default function DriverHomeClient({ username, branch }: { username: strin
 
       {banner && <Alert tone={banner.tone}>{banner.text}</Alert>}
 
+      {/* Shift (attendance clock) */}
+      <Card>
+        <CardBody className="text-center">
+          {isIn ? (
+            <>
+              <div className="inline-flex items-center gap-2 rounded-full bg-success-subtle px-3 py-1 text-sm font-medium text-success">
+                <span className="h-2 w-2 rounded-full bg-success" /> On shift
+              </div>
+              <p className="mt-2 text-sm text-muted">
+                since {today?.in_at ? formatBeirutTime(today.in_at) : '—'} · {dur(today?.minutes_since_in ?? 0)}
+              </p>
+            </>
+          ) : (
+            <div className="inline-flex items-center gap-2 rounded-full bg-surface-muted px-3 py-1 text-sm font-medium text-muted">
+              <span className="h-2 w-2 rounded-full bg-muted" /> Off shift
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      <div className="grid grid-cols-3 gap-3">
+        <StatTile label="On shift" value={today ? dur(today.in_at ? (today.minutes_since_in ?? 0) : 0) : '—'} />
+        <StatTile label="Earned today" value={today ? centsToUsd(today.earned_today_cent) : '—'} tone="success" />
+        <StatTile label="This month" value={today ? centsToUsd(today.earned_month_cent) : '—'} />
+      </div>
+
+      {/* Trip status */}
       <Card className={over ? 'border-warning/40' : ''}>
         <CardBody className="text-center">
           {open ? (
             <>
               <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${over ? 'bg-warning-subtle text-warning' : 'bg-primary-subtle text-primary'}`}>
-                <span className={`h-2 w-2 rounded-full ${over ? 'bg-warning' : 'bg-primary'}`} /> On a trip
+                <span className={`h-2 w-2 rounded-full ${over ? 'bg-warning' : 'bg-primary'}`} /> Out on an order
               </div>
               <p className="mt-2 text-3xl font-semibold tabular">{dur(since)}</p>
               <p className="text-xs text-muted">out · threshold {branch.trip_threshold_min}m{over ? ' · over' : ''}</p>
             </>
           ) : (
-            <>
-              <div className="inline-flex items-center gap-2 rounded-full bg-surface-muted px-3 py-1 text-sm font-medium text-muted">
-                <span className="h-2 w-2 rounded-full bg-muted" /> Not on a trip
-              </div>
-              <p className="mt-2 text-sm text-muted">Tap OUT when you leave on a delivery.</p>
-            </>
+            <div className="inline-flex items-center gap-2 rounded-full bg-surface-muted px-3 py-1 text-sm font-medium text-muted">
+              <span className="h-2 w-2 rounded-full bg-muted" /> Not on an order
+            </div>
           )}
         </CardBody>
       </Card>
 
+      {/* Shared GPS */}
       <Card>
         <CardBody className="space-y-3">
           <div className="flex items-center justify-between">
@@ -129,17 +196,44 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         </CardBody>
       </Card>
 
-      <button
-        onClick={() => submit(open ? '/api/me/trip/end' : '/api/me/trip/start')}
-        disabled={busy || !ready}
-        className={`h-32 w-full rounded-2xl text-2xl font-bold text-white shadow-sm transition-colors disabled:opacity-40 ${open ? 'bg-primary hover:bg-primary-hover' : 'bg-warning hover:brightness-95'}`}
-      >
-        {busy ? 'Please wait…' : open ? 'BACK' : 'OUT'}
-      </button>
+      {/* Attendance clock button */}
+      <div>
+        <button
+          onClick={() => punch(isIn ? 'OUT' : 'IN')}
+          disabled={busy || !ready || (isIn && open)}
+          aria-label={isIn ? 'Clock out' : 'Clock in'}
+          className={`h-20 w-full rounded-2xl text-xl font-bold text-white shadow-sm transition-colors disabled:opacity-40 ${isIn ? 'bg-danger hover:brightness-95' : 'bg-success hover:brightness-95'}`}
+        >
+          {busy ? 'Please wait…' : isIn ? 'CLOCK OUT' : 'CLOCK IN'}
+        </button>
+        {isIn && open && (
+          <p className="mt-1.5 text-center text-xs text-muted">End your order before clocking out.</p>
+        )}
+      </div>
 
-      <p className="text-center text-xs text-muted">
-        Start and end trips at {branch.name} (within {branch.gps_radius_m}m).
-      </p>
+      {/* Trip button */}
+      <div>
+        <button
+          onClick={() => tripSubmit(open ? '/api/me/trip/end' : '/api/me/trip/start')}
+          disabled={busy || !ready || (!isIn && !open)}
+          className={`h-28 w-full rounded-2xl text-2xl font-bold text-white shadow-sm transition-colors disabled:opacity-40 ${open ? 'bg-primary hover:bg-primary-hover' : 'bg-warning hover:brightness-95'}`}
+        >
+          {busy ? 'Please wait…' : open ? 'BACK' : 'OUT ON ORDER'}
+        </button>
+        <p className="mt-1.5 text-center text-xs text-muted">
+          {!isIn && !open ? 'Clock in first to go out on orders.' : `Start and end orders at ${branch.name} (within ${branch.gps_radius_m}m).`}
+        </p>
+      </div>
+
+      {process.env.NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS === 'true' && (
+        <div className="rounded-xl border border-dashed border-warning/40 bg-warning-subtle p-3">
+          <div className="mb-2 text-xs font-semibold text-warning">Dev bypass (clock without GPS)</div>
+          <div className="flex gap-2">
+            <button disabled={busy} onClick={() => devPunch('IN')} className="h-11 flex-1 rounded-lg bg-warning text-sm font-medium text-white disabled:opacity-50">Dev IN</button>
+            <button disabled={busy} onClick={() => devPunch('OUT')} className="h-11 flex-1 rounded-lg bg-warning/80 text-sm font-medium text-white disabled:opacity-50">Dev OUT</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

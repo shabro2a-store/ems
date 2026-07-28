@@ -412,20 +412,24 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
       ) : (
         <div className="space-y-2">
           {days.map((d) => (
-            <div key={d.wd} className="flex items-center gap-3">
-              <span className="w-24 text-sm font-medium">{d.name}</span>
-              <button
-                type="button"
-                onClick={() => set(d.wd, { working: !d.working })}
-                className={`rounded-full border px-3 py-1 text-xs font-semibold ${d.working ? 'border-success/30 bg-success-subtle text-success' : 'border-border bg-surface-muted text-muted'}`}
-              >
-                {d.working ? 'Working' : 'Off'}
-              </button>
-              <div className={`flex items-center gap-2 ${d.working ? '' : 'pointer-events-none opacity-40'}`}>
-                <Input type="time" value={d.start} onChange={(e) => set(d.wd, { start: e.target.value })} className="w-auto" />
-                <span className="text-xs text-muted">to</span>
-                <Input type="time" value={d.end} onChange={(e) => set(d.wd, { end: e.target.value })} className="w-auto" />
+            <div key={d.wd} className="rounded-lg border border-border p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">{d.name}</span>
+                <button
+                  type="button"
+                  onClick={() => set(d.wd, { working: !d.working })}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${d.working ? 'border-success/30 bg-success-subtle text-success' : 'border-border bg-surface-muted text-muted'}`}
+                >
+                  {d.working ? 'Working' : 'Off'}
+                </button>
               </div>
+              {d.working && (
+                <div className="mt-2 flex items-center gap-2">
+                  <Input type="time" value={d.start} onChange={(e) => set(d.wd, { start: e.target.value })} className="flex-1" />
+                  <span className="flex-none text-xs text-muted">to</span>
+                  <Input type="time" value={d.end} onChange={(e) => set(d.wd, { end: e.target.value })} className="flex-1" />
+                </div>
+              )}
             </div>
           ))}
           {err && <Alert tone="danger">{err}</Alert>}
