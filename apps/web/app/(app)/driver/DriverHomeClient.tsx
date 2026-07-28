@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { apiGet, apiSend, errorMessage } from '@/lib/api';
 import { Card, CardBody, Alert } from '@/components/ui';
 import DriverAlarm from '@/components/field/DriverAlarm';
+import EnableAlerts from '@/components/field/EnableAlerts';
 
 type Status =
   | { kind: 'idle' }
@@ -81,6 +82,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         <h1 className="text-xl font-semibold">Hi {username} 🚚</h1>
         <p className="text-sm text-muted">{branch.name}</p>
       </div>
+      <EnableAlerts />
 
       {banner && <Alert tone={banner.tone}>{banner.text}</Alert>}
 

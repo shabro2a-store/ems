@@ -93,6 +93,11 @@ Summary `{ pending, upcoming: [...] }`; request body
 Driver ring inbox. `GET` → `{ ringing: bool, since }` (an unacknowledged ring in the last
 2 min). `POST /ack` marks all pending rings acknowledged (dismiss the alarm).
 
+### GET /api/me/push/key  ·  POST /api/me/push/subscribe  *(subscribe: CSRF)*
+Web Push setup for the driver's device. `GET key` → `{ publicKey }` (null when push is
+unconfigured server-side). `POST subscribe` `{ endpoint, keys: { p256dh, auth } }` stores the
+device subscription (upsert by endpoint). → `{ subscribed: true }`.
+
 ### POST /api/me/password  *(CSRF, ADMIN only)*
 Change your own password. **Admin only** — employees/drivers/callers get `403 FORBIDDEN`
 (the admin resets their password instead). Body `{ currentPassword, newPassword }` (new ≥ 6

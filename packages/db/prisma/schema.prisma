@@ -78,6 +78,7 @@ model User {
   penalty_waivers      PenaltyWaiver[]
   calls_received       DriverCall[]       @relation("CallsReceived")
   calls_made           DriverCall[]       @relation("CallsMade")
+  push_subscriptions   PushSubscription[]
 
   @@index([branch_id])
 }
@@ -248,6 +249,20 @@ model PenaltyWaiver {
 
   @@unique([user_id, date, kind])
   @@index([user_id, date])
+}
+
+// A device's Web Push subscription (one per browser/device), used to ring a
+// driver's phone even when the app is closed or the phone is locked.
+model PushSubscription {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id])
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  created_at DateTime @default(now())
+
+  @@index([user_id])
 }
 
 // A caller (POS cashier) ringing a driver's phone. Read by the driver's app to

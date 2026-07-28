@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { todayInBeirut, todayInBeirutDateRange } from 'time';
+import { sendPushToUser } from './push';
 
 export interface DriverStatus {
   id: string;
@@ -94,7 +95,13 @@ export async function ringDriver(
     data: { driver_id: args.driverId, caller_id: args.callerId, branch_id: args.branchId },
     select: { id: true },
   });
-  // Phase B: also fire a web-push here so a locked/closed phone rings.
+  // Also fire a web-push so a locked/closed phone rings (best-effort; the in-app
+  // alarm covers the app-open case regardless).
+  await sendPushToUser(
+    args.driverId,
+    { title: '📞 Order ready!', body: 'The counter is calling you to collect an order.', url: '/driver' },
+    db,
+  ).catch(() => {});
   return { ok: true, id: call.id };
 }
 

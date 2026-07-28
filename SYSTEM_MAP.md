@@ -63,6 +63,8 @@ cuid PKs, money = Int cents.
 - **Adjustment** — period(1st of month), kind(BONUS/DEDUCTION), amount_cent(≥0, sign from kind), reason.
 - **DriverCall** — a caller ringing a driver (driver, caller, branch?, created_at, acknowledged_at?).
   The driver's app polls for an unacknowledged ring in the last 2 min and raises the alarm.
+- **PushSubscription** — a device's Web Push subscription (user, endpoint unique, p256dh, auth);
+  lets a ring reach a locked/closed phone. Dead endpoints (404/410) are auto-pruned.
 - **PenaltyWaiver** — (user, date, kind LATE/EARLY_LEAVE) unique. Penalties themselves are
   **computed on the fly** (schedule vs punches, see §4), not stored; a waiver is the admin
   "remove penalty" for one (user, day, kind) and can never touch an Adjustment.
@@ -83,7 +85,8 @@ Full request/response detail is in [API.md](API.md). Summary:
 **Employee/self `/api/me/*`** (any role): `GET ping` · `POST punch` (geofenced) ·
 `POST punch/dev` (dev-only) · `GET today` (real earnings) · `GET payroll?month` ·
 `GET/POST advances` · `GET/POST leave` · `POST trip/start|end`, `GET trip/current` (DRIVER) ·
-`GET calls` / `POST calls/ack` (driver ring poll + dismiss) · `POST password` (ADMIN-only).
+`GET calls` / `POST calls/ack` (driver ring poll + dismiss) · `GET push/key` /
+`POST push/subscribe` (Web Push setup) · `POST password` (ADMIN-only).
 
 **Caller `/api/caller/*`** (CALLER): `GET drivers` (branch driver board — live status + trips today) ·
 `POST ring` (ring a driver in the caller's branch).
@@ -207,11 +210,10 @@ The bugs found in the initial audit are fixed:
 
 ## 9. Outstanding
 
-**Caller ring — Phase B (locked-phone push).** Phase A (shipped) rings the driver with a
-loud in-app alarm **while the app is open**. Phase B adds **web push** (service worker +
-VAPID + subscription storage) so the ring also reaches a **locked/closed** phone — solid on
-Android; iPhones must "Add to Home Screen" (install the PWA) on iOS 16.4+. `ringDriver()` in
-`caller.ts` has the hook where the push send goes.
+**Caller ring** is fully shipped: a loud in-app alarm while the app is open **plus** Web Push
+(`push.ts` + service worker + VAPID) so it also reaches a **locked/closed** phone — solid on
+Android; iPhones must "Add to Home Screen" (install the PWA) on iOS 16.4+. Push is optional:
+with no VAPID keys set it degrades to the in-app alarm only. Setup: see DEPLOY.md.
 
 **Notifications wiring** (Telegram) — fix and finish the Telegram flow:
 - `punch.ts` sends `watched.resolved` but the template key is `watched_resolved` → renders raw.

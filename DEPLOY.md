@@ -49,6 +49,24 @@ docker compose run --rm -w /app/packages/db web node_modules/.bin/tsx prisma/see
 Seed creates `owner` (admin) + two branches + `emp1`/`emp2`, all password `change-me`.
 Change the owner password immediately (top bar → **Password**).
 
+## Web Push (caller ring on locked phones)
+Optional but recommended. Without these keys the caller still rings drivers with the
+in-app alarm (while the app is open); with them, the ring also reaches a **locked/closed**
+phone. Generate one keypair (once) and add it to `/opt/ems/.env`:
+```bash
+docker compose run --rm web node_modules/.bin/web-push generate-vapid-keys
+```
+Copy the two values into `.env`, then `docker compose up -d` (recreates `web`):
+```bash
+VAPID_PUBLIC_KEY=<public key>
+VAPID_PRIVATE_KEY=<private key>
+VAPID_SUBJECT=mailto:you@shabro2a.com
+```
+Rolling the keys invalidates existing device subscriptions (drivers re-enable alerts).
+On each driver's phone: open the driver screen and tap **Enable** on the alerts banner.
+**iPhone drivers** must first **Add to Home Screen** (Share → Add to Home Screen) and open
+the app from the home-screen icon — iOS only allows web push for installed PWAs (iOS 16.4+).
+
 ## Cloudflare
 - **Tunnel**: keep it — it provides HTTPS and hides the origin IP. Required for
   browser geolocation (GPS only works over HTTPS).
