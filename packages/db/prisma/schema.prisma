@@ -11,6 +11,7 @@ enum Role {
   EMPLOYEE
   DRIVER
   ADMIN
+  CALLER
 }
 
 enum PunchKind {
@@ -75,6 +76,8 @@ model User {
   adjustments          Adjustment[]
   flags                Flag[]
   penalty_waivers      PenaltyWaiver[]
+  calls_received       DriverCall[]       @relation("CallsReceived")
+  calls_made           DriverCall[]       @relation("CallsMade")
 
   @@index([branch_id])
 }
@@ -245,6 +248,21 @@ model PenaltyWaiver {
 
   @@unique([user_id, date, kind])
   @@index([user_id, date])
+}
+
+// A caller (POS cashier) ringing a driver's phone. Read by the driver's app to
+// raise an alarm; kept for history. The caller never starts/ends trips.
+model DriverCall {
+  id              String    @id @default(cuid())
+  driver_id       String
+  driver          User      @relation("CallsReceived", fields: [driver_id], references: [id])
+  caller_id       String
+  caller          User      @relation("CallsMade", fields: [caller_id], references: [id])
+  branch_id       String?
+  created_at      DateTime  @default(now())
+  acknowledged_at DateTime?
+
+  @@index([driver_id, created_at])
 }
 
 model Flag {

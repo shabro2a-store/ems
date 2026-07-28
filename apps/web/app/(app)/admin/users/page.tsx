@@ -6,7 +6,7 @@ import {
   PageHeader, Card, CardHeader, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile,
 } from '@/components/ui';
 
-type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
+type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER';
 interface User {
   id: string;
   username: string;
@@ -20,7 +20,9 @@ interface User {
 interface Branch { id: string; name: string }
 interface Status { status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT'; since_min: number; over: boolean }
 
-const ROLE_TONE: Record<Role, 'primary' | 'warning' | 'neutral'> = { EMPLOYEE: 'primary', DRIVER: 'warning', ADMIN: 'neutral' };
+const ROLE_TONE: Record<Role, 'primary' | 'warning' | 'neutral' | 'success'> = { EMPLOYEE: 'primary', DRIVER: 'warning', ADMIN: 'neutral', CALLER: 'success' };
+// Roles paid hourly (show/edit a rate). Callers and admin are not.
+const PAID_ROLES = new Set<Role>(['EMPLOYEE', 'DRIVER']);
 const DAYS = [
   { wd: 0, name: 'Sunday' }, { wd: 1, name: 'Monday' }, { wd: 2, name: 'Tuesday' },
   { wd: 3, name: 'Wednesday' }, { wd: 4, name: 'Thursday' }, { wd: 5, name: 'Friday' }, { wd: 6, name: 'Saturday' },
@@ -150,14 +152,14 @@ export default function AdminEmployeesPage() {
                             </div>
                           </td>
                           <td className="px-4 py-2.5"><Badge tone={ROLE_TONE[u.role]}>{u.role.toLowerCase()}</Badge></td>
-                          <td className="tabular px-4 py-2.5">{u.role === 'ADMIN' ? '—' : centsToUsd(u.hourly_rate_cent)}</td>
+                          <td className="tabular px-4 py-2.5">{PAID_ROLES.has(u.role) ? centsToUsd(u.hourly_rate_cent) : '—'}</td>
                           <td className="px-4 py-2.5">
                             {st ? <StatusChip st={st} /> : <span className="text-xs text-muted">—</span>}
                           </td>
                           <td className="px-4 py-2.5">
                             <div className="flex justify-end gap-1.5">
                               <Button size="sm" variant="secondary" onClick={() => { setErr(null); setEditUser(u); }}>Edit</Button>
-                              {u.role !== 'ADMIN' && (
+                              {PAID_ROLES.has(u.role) && (
                                 <Button size="sm" variant="secondary" onClick={() => setSchedUser(u)}>Schedule</Button>
                               )}
                               <Button size="sm" variant="ghost" onClick={() => setPwTarget(u)}>Set password</Button>
@@ -293,20 +295,20 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
       <form id="create-emp" onSubmit={submit} className="space-y-4">
         <Field label="Full name" htmlFor="cn"><Input id="cn" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ahmad Khalil" required /></Field>
         <Field label="Username (login)" htmlFor="cu" hint="What they type to log in."><Input id="cu" value={username} onChange={(e) => setUsername(e.target.value)} required autoCapitalize="none" /></Field>
-        <Field label="Temporary password" htmlFor="cp" hint="Share verbally; they change it on first login."><Input id="cp" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
+        <Field label="Temporary password" htmlFor="cp" hint="Share verbally; only you can change it later."><Input id="cp" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
         <Field label="Role" htmlFor="cr">
           <Select id="cr" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option>
+            <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option><option value="CALLER">Caller (POS)</option>
           </Select>
         </Field>
         {role !== 'ADMIN' && (
-          <Field label="Branch" htmlFor="cb">
+          <Field label="Branch" htmlFor="cb" hint={role === 'CALLER' ? 'One caller per branch.' : undefined}>
             <Select id="cb" value={branch} onChange={(e) => setBranch(e.target.value)} required>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </Select>
           </Field>
         )}
-        {role !== 'ADMIN' && (
+        {PAID_ROLES.has(role) && (
           <Field label="Hourly rate (USD)" htmlFor="crate"><Input id="crate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} required /></Field>
         )}
         {err && <Alert tone="danger">{err}</Alert>}
@@ -350,7 +352,7 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
           <>
             <Field label="Role" htmlFor="er">
               <Select id="er" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-                <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option>
+                <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option><option value="CALLER">Caller (POS)</option>
               </Select>
             </Field>
             <Field label="Branch" htmlFor="eb">
@@ -358,9 +360,11 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
                 {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </Select>
             </Field>
-            <Field label="Hourly rate (USD)" htmlFor="erate" hint="A rate change applies from now on; past shifts keep the old rate.">
-              <Input id="erate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} />
-            </Field>
+            {PAID_ROLES.has(role) && (
+              <Field label="Hourly rate (USD)" htmlFor="erate" hint="A rate change applies from now on; past shifts keep the old rate.">
+                <Input id="erate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} />
+              </Field>
+            )}
           </>
         )}
         {err && <Alert tone="danger">{err}</Alert>}

@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { randomBytes } from 'crypto';
 
-export type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
+export type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER';
 
 export interface JwtPayload extends JWTPayload {
   sub: string;
@@ -42,7 +42,7 @@ export async function verifyToken(token: string): Promise<JwtPayload | null> {
     if (typeof payload.sub !== 'string') return null;
     const role = (payload as Record<string, unknown>).role;
     const branchId = (payload as Record<string, unknown>).branchId;
-    if (role !== 'EMPLOYEE' && role !== 'DRIVER' && role !== 'ADMIN') return null;
+    if (role !== 'EMPLOYEE' && role !== 'DRIVER' && role !== 'ADMIN' && role !== 'CALLER') return null;
     return {
       ...payload,
       sub: payload.sub,

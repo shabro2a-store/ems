@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiGet, apiSend, errorMessage } from '@/lib/api';
 import { Card, CardBody, Alert } from '@/components/ui';
+import DriverAlarm from '@/components/field/DriverAlarm';
 
 type Status =
   | { kind: 'idle' }
@@ -75,6 +76,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
 
   return (
     <div className="space-y-4">
+      <DriverAlarm />
       <div>
         <h1 className="text-xl font-semibold">Hi {username} 🚚</h1>
         <p className="text-sm text-muted">{branch.name}</p>

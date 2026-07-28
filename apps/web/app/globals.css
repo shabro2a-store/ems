@@ -57,6 +57,16 @@
   }
 }
 
+/* Driver "you're being called" full-screen alarm — flashing red. */
+@keyframes pulse-alarm {
+  0%, 100% { background-color: #dc2626; }
+  50% { background-color: #7f1d1d; }
+}
+.animate-pulse-alarm {
+  background-color: #dc2626;
+  animation: pulse-alarm 0.7s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -66,5 +76,9 @@
   ::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+  /* Alarm stays solid red (no flashing) but still visible. */
+  .animate-pulse-alarm {
+    background-color: #dc2626;
   }
 }

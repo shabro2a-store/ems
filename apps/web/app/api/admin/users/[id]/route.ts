@@ -9,7 +9,7 @@ import { writeAuditLog } from '@/lib/services/audit';
 const Patch = z.object({
   username: z.string().min(1).max(64).optional(),
   name: z.string().max(120).optional(),
-  role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN']).optional(),
+  role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN', 'CALLER']).optional(),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative().optional(),
 });
@@ -44,6 +44,17 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   }
   if (before.role === 'ADMIN' && body.role !== undefined) {
     return jsonError('FORBIDDEN', 'The admin account cannot be changed', 403);
+  }
+
+  // One active caller per branch: block edits that would make a second one.
+  const willBeCaller = (body.role ?? before.role) === 'CALLER';
+  const targetBranch = body.branchId !== undefined ? body.branchId : before.branch_id;
+  if (willBeCaller && targetBranch) {
+    const otherCaller = await prisma.user.findFirst({
+      where: { role: 'CALLER', branch_id: targetBranch, is_active: true, id: { not: before.id } },
+      select: { id: true },
+    });
+    if (otherCaller) return jsonError('CALLER_EXISTS', 'This branch already has a caller', 409);
   }
 
   // Username must stay unique.

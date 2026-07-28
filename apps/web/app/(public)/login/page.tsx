@@ -27,6 +27,7 @@ export default function LoginPage() {
     const role = res.data.user?.role;
     if (role === 'ADMIN') router.push('/admin');
     else if (role === 'DRIVER') router.push('/driver');
+    else if (role === 'CALLER') router.push('/caller');
     else router.push('/employee');
   }
 

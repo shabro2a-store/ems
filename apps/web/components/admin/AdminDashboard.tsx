@@ -13,11 +13,12 @@ interface Person {
   since_min: number;
   over: boolean;
   hours_today: number;
+  trips_today: number | null;
 }
 interface Overview {
   branches: { id: string; name: string }[];
   branchId: string;
-  kpis: { present: number; absent: number; driversOut: number; driversOver: number; hoursToday: number; laborTodayCent: number };
+  kpis: { present: number; absent: number; driversOut: number; driversOver: number; tripsToday: number; hoursToday: number; laborTodayCent: number };
   people: Person[];
   attention: {
     lateDrivers: { trip_id: string; driver_username: string; branch_name: string; since_min: number; threshold_min: number }[];
@@ -127,7 +128,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatTile label="Present now" value={k.present} tone="success" />
         <StatTile label="Absent" value={k.absent} tone={k.absent > 0 ? 'danger' : 'neutral'} />
         <StatTile
@@ -136,6 +137,7 @@ export default function AdminDashboard() {
           tone={k.driversOver > 0 ? 'warning' : 'neutral'}
           hint={k.driversOver > 0 ? `${k.driversOver} over threshold` : undefined}
         />
+        <StatTile label="Trips today" value={k.tripsToday} hint="orders delivered" />
         <StatTile label="Hours today" value={k.hoursToday} hint={`≈ ${centsToUsd(k.laborTodayCent)} labor`} />
       </div>
 
@@ -162,6 +164,9 @@ export default function AdminDashboard() {
                         <div className="text-xs text-muted">{p.branch_name ?? '—'}</div>
                       </div>
                       <Badge tone={p.status === 'ON_TRIP' && p.over ? 'warning' : s.tone}>{s.label(p)}</Badge>
+                      {p.trips_today !== null && (
+                        <span className="tabular w-12 text-right text-xs text-muted" title="trips today">🚚 {p.trips_today}</span>
+                      )}
                       <span className="tabular w-14 text-right text-xs text-muted">
                         {p.hours_today > 0 ? `${p.hours_today}h` : '—'}
                       </span>

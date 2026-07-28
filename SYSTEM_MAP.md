@@ -19,7 +19,8 @@ The one remaining planned feature is the notification wiring (see §9).
 | Role | Can do |
 |---|---|
 | EMPLOYEE | Punch in/out (geofenced), view today/payroll, request advances & leave |
-| DRIVER | Trip out/back (geofenced) + everything an employee can (cannot punch while a trip is open) |
+| DRIVER | Trip out/back (geofenced) + everything an employee can (cannot punch while a trip is open); receives caller "ring" alarm |
+| CALLER (POS cashier) | Read-only board of the branch's drivers (live status + trips today) and a **Ring** button per driver. One active caller per branch. Rings only — never starts/ends trips. Not paid hourly, not in payroll. |
 | ADMIN (owner) | Everything: live dashboard, employees + schedules, branches + GPS, punches + corrections, payroll + PDF, approvals |
 
 - **Login** issues 3 cookies: `ems_access` (JWT, httpOnly), `ems_refresh` (JWT, httpOnly, 7d), `csrf` (readable).
@@ -60,6 +61,8 @@ cuid PKs, money = Int cents.
   **Partial unique index: one open trip per driver.**
 - **Advance** — amount_cent, reason?, status. Approved advances reduce net pay (by created_at month).
 - **Adjustment** — period(1st of month), kind(BONUS/DEDUCTION), amount_cent(≥0, sign from kind), reason.
+- **DriverCall** — a caller ringing a driver (driver, caller, branch?, created_at, acknowledged_at?).
+  The driver's app polls for an unacknowledged ring in the last 2 min and raises the alarm.
 - **PenaltyWaiver** — (user, date, kind LATE/EARLY_LEAVE) unique. Penalties themselves are
   **computed on the fly** (schedule vs punches, see §4), not stored; a waiver is the admin
   "remove penalty" for one (user, day, kind) and can never touch an Adjustment.
@@ -80,7 +83,10 @@ Full request/response detail is in [API.md](API.md). Summary:
 **Employee/self `/api/me/*`** (any role): `GET ping` · `POST punch` (geofenced) ·
 `POST punch/dev` (dev-only) · `GET today` (real earnings) · `GET payroll?month` ·
 `GET/POST advances` · `GET/POST leave` · `POST trip/start|end`, `GET trip/current` (DRIVER) ·
-`POST password` (change own).
+`GET calls` / `POST calls/ack` (driver ring poll + dismiss) · `POST password` (ADMIN-only).
+
+**Caller `/api/caller/*`** (CALLER): `GET drivers` (branch driver board — live status + trips today) ·
+`POST ring` (ring a driver in the caller's branch).
 
 **Admin `/api/admin/*`** (ADMIN):
 - Dashboard: `GET overview?branchId` (KPIs + people + attention queue) · `GET activity` ·
@@ -178,6 +184,12 @@ an "Open in app" deep link) — all actions happen in the web app.
 - **Employee** (phone): `/employee` (punch + today/earnings, greets by name) ·
   `/employee/advances` · `/employee/leave` · `/employee/payroll`.
 - **Driver** (phone): `/driver` (trip out/back, greets by name) + the same advances/leave/pay tabs.
+  Shows a full-screen flashing **alarm** (sound + vibration) when the caller rings; polls
+  `GET /api/me/calls`, dismiss acks it.
+- **Caller** (`/caller`, POS/tablet): each branch driver is a big button — available ones
+  bright and sorted to the top, out/off ones dimmed and sunk to the bottom (the "lights off"
+  metaphor); shows live Out timer + trips today; tap = ring. Polls every 3s.
+- The **admin dashboard** also shows a **Trips today** KPI and per-driver trip counts.
 
 ---
 
@@ -195,7 +207,13 @@ The bugs found in the initial audit are fixed:
 
 ## 9. Outstanding
 
-**Notifications wiring** (the one planned feature left) — fix and finish the Telegram flow:
+**Caller ring — Phase B (locked-phone push).** Phase A (shipped) rings the driver with a
+loud in-app alarm **while the app is open**. Phase B adds **web push** (service worker +
+VAPID + subscription storage) so the ring also reaches a **locked/closed** phone — solid on
+Android; iPhones must "Add to Home Screen" (install the PWA) on iOS 16.4+. `ringDriver()` in
+`caller.ts` has the hook where the push send goes.
+
+**Notifications wiring** (Telegram) — fix and finish the Telegram flow:
 - `punch.ts` sends `watched.resolved` but the template key is `watched_resolved` → renders raw.
 - `advance_requested` template exists but `requestAdvance` never sends it (admin isn't notified).
 - `driverStale` has no dedupe → re-notifies every 30 min for the same trip.

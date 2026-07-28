@@ -39,7 +39,11 @@ export async function middleware(request: NextRequest) {
     requestHeaders.delete('x-user-branch-id');
   }
 
-  if (pathname.startsWith('/api/me/') || pathname.startsWith('/api/admin/')) {
+  if (
+    pathname.startsWith('/api/me/') ||
+    pathname.startsWith('/api/admin/') ||
+    pathname.startsWith('/api/caller/')
+  ) {
     if (isPublic(pathname)) {
       return NextResponse.next({ request: { headers: requestHeaders } });
     }

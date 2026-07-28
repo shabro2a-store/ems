@@ -12,7 +12,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (!userId) redirect('/login');
   if (role !== 'ADMIN') {
-    redirect(role === 'DRIVER' ? '/driver' : '/employee');
+    redirect(role === 'DRIVER' ? '/driver' : role === 'CALLER' ? '/caller' : '/employee');
   }
 
   const user = await prisma.user.findUnique({

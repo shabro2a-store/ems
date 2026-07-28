@@ -44,7 +44,7 @@ export async function GET(req: Request) {
   const dateOnly = new Date(`${todayStr}T00:00:00.000Z`);
   const now = Date.now();
 
-  const [branches, users, todayPunches, openTrips, dayOffs, todayFlags, pendingAdv, pendingLeave] =
+  const [branches, users, todayPunches, openTrips, dayOffs, todayFlags, pendingAdv, pendingLeave, tripsTodayAgg] =
     await Promise.all([
       prisma.branch.findMany({
         where: { is_active: true },
@@ -91,7 +91,14 @@ export async function GET(req: Request) {
         orderBy: { created_at: 'asc' },
         include: { user: { select: { username: true, branch_id: true } } },
       }),
+      prisma.trip.groupBy({
+        by: ['driver_id'],
+        where: { out_at: { gte: startUtc, lt: endUtc } },
+        _count: { _all: true },
+      }),
     ]);
+
+  const tripsTodayByDriver = new Map(tripsTodayAgg.map((t) => [t.driver_id, t._count._all]));
 
   const branchName = new Map(branches.map((b) => [b.id, b.name]));
   const punchesByUser = new Map<string, { kind: string; at: Date }[]>();
@@ -144,6 +151,7 @@ export async function GET(req: Request) {
         since_min: sinceMin,
         over,
         hours_today: Math.round((minutes / 60) * 10) / 10,
+        trips_today: u.role === 'DRIVER' ? tripsTodayByDriver.get(u.id) ?? 0 : null,
       };
     });
 
@@ -196,6 +204,7 @@ export async function GET(req: Request) {
         absent,
         driversOut: driversOutList.length,
         driversOver: driversOver.length,
+        tripsToday: people.reduce((s, p) => s + (p.trips_today ?? 0), 0),
         hoursToday: Math.round((hoursMinutes / 60) * 10) / 10,
         laborTodayCent: laborCent,
       },

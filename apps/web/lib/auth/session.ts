@@ -5,7 +5,7 @@ import {
   SHOP_TZ,
 } from './constants';
 
-export type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
+export type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER';
 
 export interface ScheduleEntry {
   weekday: number;

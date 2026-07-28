@@ -89,6 +89,10 @@ Summary `{ pending, upcoming: [...] }`; request body
   → `200 { trip_id, back_at, duration_min }`. Error: `NO_OPEN_TRIP` 409.
 - **GET /api/me/trip/current** → `200 { open, since_min?, threshold_min }`.
 
+### GET /api/me/calls  ·  POST /api/me/calls/ack  *(ack: CSRF)*
+Driver ring inbox. `GET` → `{ ringing: bool, since }` (an unacknowledged ring in the last
+2 min). `POST /ack` marks all pending rings acknowledged (dismiss the alarm).
+
 ### POST /api/me/password  *(CSRF, ADMIN only)*
 Change your own password. **Admin only** — employees/drivers/callers get `403 FORBIDDEN`
 (the admin resets their password instead). Body `{ currentPassword, newPassword }` (new ≥ 6
@@ -112,9 +116,10 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 ### Employees
 - **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`).
 - **POST /api/admin/users** *(CSRF, Idempotent)* `{ username, name?, password, role:
-  "EMPLOYEE"|"DRIVER", branchId, hourlyRateCent }` → `{ user, temp_password }`.
+  "EMPLOYEE"|"DRIVER"|"CALLER", branchId, hourlyRateCent }` → `{ user, temp_password }`.
   `username` is the login; `name` is the display name. Creating an **ADMIN is
-  rejected (403)**.
+  rejected (403)**. **CALLER** needs a branch, gets no pay rate/RateChange, and is capped at
+  **one active caller per branch** → `409 CALLER_EXISTS`.
 - **PATCH /api/admin/users/[id]** *(CSRF)* `{ username?, name?, role?, branchId?,
   hourlyRateCent? }` (a rate change inserts a new `RateChange`; `username` is
   uniqueness-checked → `409 USERNAME_TAKEN`). Promoting to admin, or changing the
@@ -174,6 +179,19 @@ payroll as `penalties_cent` and reduce `net_cent`.
   (sets `notified_at`); audited. → `{ id, resolved_at }`.
 
 ---
+
+## Caller (`/api/caller/*`, role CALLER)
+
+The POS caller's board. A caller belongs to one branch and can only see/ring drivers there.
+
+### GET /api/caller/drivers
+→ `{ branch, drivers: [{ id, username, name, clocked_in, available, open_trip_since,
+trips_today, ringing }] }`. `available` = clocked in and not on a trip; `trips_today` counts
+trips since this shift's clock-in.
+
+### POST /api/caller/ring  *(CSRF)*
+Body `{ driverId }`. Records a ring the driver's app picks up. → `{ rang: true }`.
+Errors: `WRONG_BRANCH` 403 (driver not in caller's branch), `NOT_FOUND` 404.
 
 ## Telegram
 

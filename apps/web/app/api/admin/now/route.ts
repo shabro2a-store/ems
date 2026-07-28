@@ -118,7 +118,7 @@ export async function GET() {
 
   const branches = branchesRaw.map((b) => {
     const present: PresentUser[] = [];
-    const absent: { id: string; username: string; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' }[] = [];
+    const absent: { id: string; username: string; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER' }[] = [];
     for (const u of b.users) {
       const last = u.punches[0];
       if (last && last.kind === 'IN') {

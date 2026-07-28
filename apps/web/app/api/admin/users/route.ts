@@ -11,12 +11,15 @@ const Create = z.object({
   username: z.string().min(1).max(64),
   name: z.string().max(120).optional(),
   password: z.string().min(1).max(256),
-  role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN']),
+  role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN', 'CALLER']),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative(),
 });
 
-const ROLES_FOR_BRANCH = new Set(['EMPLOYEE', 'DRIVER']);
+// Roles that belong to a branch. Callers (POS cashiers) are branch-scoped too but
+// are not paid hourly through this system, so they get no RateChange row.
+const ROLES_FOR_BRANCH = new Set(['EMPLOYEE', 'DRIVER', 'CALLER']);
+const ROLES_WITH_RATE = new Set(['EMPLOYEE', 'DRIVER']);
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -74,6 +77,14 @@ export async function POST(req: Request) {
   if (ROLES_FOR_BRANCH.has(body.role) && !body.branchId) {
     return jsonError('INVALID_INPUT', 'Branch required for non-admin role', 400);
   }
+  // One active caller per branch (for now).
+  if (body.role === 'CALLER' && body.branchId) {
+    const existing = await prisma.user.findFirst({
+      where: { role: 'CALLER', branch_id: body.branchId, is_active: true },
+      select: { id: true },
+    });
+    if (existing) return jsonError('CALLER_EXISTS', 'This branch already has a caller', 409);
+  }
 
   const cached = await readIdempotentResponse({ userId: adminId, key: idemKey });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
@@ -92,7 +103,7 @@ export async function POST(req: Request) {
         is_active: true,
       },
     });
-    if (ROLES_FOR_BRANCH.has(body.role)) {
+    if (ROLES_WITH_RATE.has(body.role)) {
       await tx.rateChange.create({
         data: {
           user_id: u.id,
