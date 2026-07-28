@@ -110,13 +110,13 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 ### Dashboard
 - **GET /api/admin/overview?branchId=all|<id>** → live KPIs + per-employee status +
   attention queue: `{ branches, branchId, kpis{ present, absent, driversOut,
-  driversOver, hoursToday, laborTodayCent }, people[], attention{ lateDrivers, flags,
-  pendingAdvances, pendingLeaves } }`.
+  driversOver, tripsToday, hoursToday, laborTodayCent }, people[] (drivers include
+  trips_today), attention{ lateDrivers, flags, pendingAdvances, pendingLeaves } }`.
 - **GET /api/admin/activity?branchId=&limit=** → `{ events: [{ id, type, username, at }] }`
   (punches + trips, newest first).
 - **GET /api/admin/trends?branchId=&days=** → `{ points: [{ date, label, present, hours }] }`.
-- **GET /api/admin/now** → legacy presence snapshot `{ branches, flags }`.
-- **GET /api/admin/ping** → identity.
+- **GET /api/admin/now** → legacy presence snapshot `{ branches, flags }` (superseded by
+  `overview`; kept only because integration tests still exercise it).
 
 ### Employees
 - **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`).
@@ -164,7 +164,6 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **GET /api/admin/advances** → pending `{ advances: [...] }`.
 - **POST /api/admin/advances/[id]/decision** *(CSRF, Idempotent)* `{ decision:
   "APPROVED"|"REJECTED" }`. Error: `ALREADY_DECIDED` 409.
-- **GET /api/admin/leave?status=** → `{ requests: [...] }`.
 - **POST /api/admin/leave/[id]/decision** *(CSRF, Idempotent)* `{ decision }` →
   `{ id, status, overrides_created }` (approval materializes ScheduleOverrides).
 

@@ -2,8 +2,6 @@ import { ConsoleNotifier } from './console';
 import { TelegramNotifier } from './telegram';
 import { Notifier } from './types';
 
-export type NotifierFactory = () => Notifier;
-
 let cached: Notifier | null = null;
 
 export function makeNotifier(env: NodeJS.ProcessEnv = process.env): Notifier {

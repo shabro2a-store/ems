@@ -14,7 +14,7 @@ endpoint contract.
 - All money is `Int` cents (USD) — never floats.
 - No new dependencies without justification in the commit message.
 - File naming: services camelCase (`payout.ts`), components PascalCase
-  (`PunchButton.tsx`), API routes `app/api/{path}/route.ts`.
+  (`AdminDashboard.tsx`), API routes `app/api/{path}/route.ts`.
 - Commit messages: Conventional Commits — `feat(scope):`, `fix(scope):`,
   `chore:`, `docs:`, `test:`.
 

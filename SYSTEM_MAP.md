@@ -93,7 +93,7 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 **Admin `/api/admin/*`** (ADMIN):
 - Dashboard: `GET overview?branchId` (KPIs + people + attention queue) · `GET activity` ·
-  `GET trends` · `GET now` (legacy) · `GET ping`.
+  `GET trends` · `GET now` (legacy, test-only).
 - Employees: `GET users` (no password_hash) · `POST users` (name/username/role/branch/rate;
   ADMIN role rejected) · `PATCH users/[id]` (username/name/role/branch/rate; admin protected) ·
   `POST users/[id]/reset-password` (chosen or random) · `POST users/[id]/deactivate` (admin protected) ·
@@ -102,7 +102,7 @@ Full request/response detail is in [API.md](API.md). Summary:
   `DELETE branches/[id]` (delete if empty, else archive).
 - Punches: `GET punches?branchId&userId&from&to` · `POST punches/correct` (persists the correction).
 - Pay & approvals: `GET payroll?month&branchId` · `GET reports/payroll?month&branchId` (**PDF**, branch-aware) ·
-  `POST adjustments` · `GET advances` · `POST advances/[id]/decision` · `GET leave` ·
+  `POST adjustments` · `GET advances` · `POST advances/[id]/decision` ·
   `POST leave/[id]/decision`.
 - Penalties: `GET penalties?userId&month` (computed list + waived flag) · `POST penalties/waive`
   (remove/restore one auto-penalty; never touches adjustments).
@@ -216,13 +216,37 @@ The bugs found in the initial audit are fixed:
 Android; iPhones must "Add to Home Screen" (install the PWA) on iOS 16.4+. Push is optional:
 with no VAPID keys set it degrades to the in-app alarm only. Setup: see DEPLOY.md.
 
-**Notifications wiring** (Telegram) — fix and finish the Telegram flow:
-- `punch.ts` sends `watched.resolved` but the template key is `watched_resolved` → renders raw.
-- `advance_requested` template exists but `requestAdvance` never sends it (admin isn't notified).
-- `driverStale` has no dedupe → re-notifies every 30 min for the same trip.
-- `tripThreshold` sets flags on the Trip but writes no `TRIP_OVER_THRESHOLD` Flag row.
-- Planned: an in-app notification bell fed by the same events (informational; actions stay in-app).
-- Needs the client's `TELEGRAM_BOT_TOKEN` (+ `/start` to bind the admin chat).
+### "Needs Attention → Telegram" — the last planned feature (spec)
 
-Minor: trips are recorded as Trip rows but don't write a separate AuditLog entry; the PWA
-manifest/icons are still minimal.
+The Telegram **transport** (`packages/notify/src/telegram.ts`) and the `/start` chat-id binding
+(`/api/telegram/webhook`) are correct and wired. Everything **upstream** needs work. Fixes, in
+priority order (each verified against the code by an audit):
+
+1. **Web app never sends to Telegram (blocker).** The web `notifier` export is a hardcoded
+   `ConsoleNotifier` ([packages/notify/src/index.ts:43](packages/notify/src/index.ts)); the punch
+   route calls `punchEmployee` without passing a notifier, so it uses that console one. Only the
+   **worker** uses `getNotifier()`. → Route web callers (punch, and #3) through `getNotifier()` so
+   web-originated alerts can reach Telegram when a token is set.
+2. **Template key typo (blocker).** `punch.ts` sends `template: 'watched.resolved'` but the only
+   template is `'watched_resolved'` → falls to the default branch and renders raw JSON. → Make the
+   keys match (rename one).
+3. **Advance request sends no alert (bug).** `requestAdvance` (and `/api/me/advances`) never notify;
+   the `advance_requested` template is defined but never fired. → Send it on request.
+4. **`driverStale` re-alerts every 30 min (bug).** No per-trip guard (unlike `tripThreshold`'s
+   `threshold_alerted_at`). → Add a `stale_alerted_at` field on `Trip` and gate on it.
+5. **`tripThreshold` writes no Flag (design gap).** It sets `over_threshold`/`threshold_alerted_at`
+   on the Trip but never creates a `TRIP_OVER_THRESHOLD` Flag, so over-threshold trips reach the
+   dashboard only via the separate live `lateDrivers` computation, not the flags list. → Either
+   create the flag (so it's resolvable) or accept the live path and drop the unused enum value.
+6. **"Late driver" attention row is not actionable (UX).** It has no button/endpoint, unlike flags/
+   advances/leaves. → Give it an action or relabel it as informational.
+7. **`Flag.notified_at` is overloaded (consistency bug).** It means both "alert sent" and "admin
+   resolved": `endOfDayWatcher` sets it when *sending* the 23:30 alert, silently dropping WATCHED
+   flags off the attention list with no admin action; `missedCheckout` never sets it. → Add a
+   distinct `resolved_at` so alerting and resolution don't collide.
+
+Also planned: an in-app notification **bell** fed by the same events (informational; actions stay
+in the web app). Needs the client's `TELEGRAM_BOT_TOKEN` (+ `/start`) for the real end-to-end test.
+
+Minor: trips write no separate AuditLog entry; three notify templates are currently unreachable
+(`advance_requested`, `end_of_day_watched`, and — until #2 — `watched_resolved`).

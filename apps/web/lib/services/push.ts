@@ -19,10 +19,6 @@ function ensureConfigured(): boolean {
   return true;
 }
 
-export function pushConfigured(): boolean {
-  return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
-}
-
 export function vapidPublicKey(): string | null {
   return process.env.VAPID_PUBLIC_KEY ?? null;
 }
