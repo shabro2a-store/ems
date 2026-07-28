@@ -52,16 +52,16 @@ Change the owner password immediately (top bar → **Password**).
 ## Web Push (caller ring on locked phones)
 Optional but recommended. Without these keys the caller still rings drivers with the
 in-app alarm (while the app is open); with them, the ring also reaches a **locked/closed**
-phone. Generate one keypair (once) and add it to `/opt/ems/.env`:
+phone. Generate one keypair (once) — this prints the two lines ready to paste:
 ```bash
-docker compose run --rm web node_modules/.bin/web-push generate-vapid-keys
+docker compose run --rm web node -e "const k=require('web-push').generateVAPIDKeys();console.log('VAPID_PUBLIC_KEY='+k.publicKey);console.log('VAPID_PRIVATE_KEY='+k.privateKey)"
 ```
-Copy the two values into `.env`, then `docker compose up -d` (recreates `web`):
+Then open `nano /opt/ems/.env`, paste those two lines (with the real values), add
+`VAPID_SUBJECT=mailto:you@shabro2a.com`, save, and recreate `web`:
 ```bash
-VAPID_PUBLIC_KEY=<public key>
-VAPID_PRIVATE_KEY=<private key>
-VAPID_SUBJECT=mailto:you@shabro2a.com
+docker compose up -d
 ```
+Do NOT paste the `VAPID_*` lines straight into the shell — they belong in the `.env` file.
 Rolling the keys invalidates existing device subscriptions (drivers re-enable alerts).
 On each driver's phone: open the driver screen and tap **Enable** on the alerts banner.
 **iPhone drivers** must first **Add to Home Screen** (Share → Add to Home Screen) and open
