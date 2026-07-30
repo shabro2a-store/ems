@@ -21,10 +21,13 @@ export async function runMissedCheckout(
   const now = opts.now ?? new Date();
   const today = todayInBeirut(now);
   const todayDate = new Date(`${today}T00:00:00.000Z`);
-  const wd = beirutWeekday(now);
+  const wdToday = beirutWeekday(now);
+  const wdYesterday = beirutWeekday(new Date(now.getTime() - 24 * 60 * 60 * 1000));
 
+  // A shift's END falls "today" if it's a today shift that ends the same day, OR
+  // a yesterday shift that runs overnight (end_time <= start_time) into today.
   const schedules = await db.schedule.findMany({
-    where: { weekday: wd },
+    where: { weekday: { in: [wdToday, wdYesterday] } },
     include: { user: { include: { branch: true } } },
   });
 
@@ -32,6 +35,10 @@ export async function runMissedCheckout(
   let notified = 0;
 
   for (const s of schedules) {
+    const overnight = s.end_time <= s.start_time;
+    const endsToday =
+      (s.weekday === wdToday && !overnight) || (s.weekday === wdYesterday && overnight);
+    if (!endsToday) continue;
     const endUtc = scheduledToUtc(today, s.end_time);
     const triggerAt = new Date(endUtc.getTime() + 35 * 60_000);
     if (now.getTime() < triggerAt.getTime()) continue;

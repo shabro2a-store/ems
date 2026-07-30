@@ -51,10 +51,11 @@ Error: `UNAUTHORIZED`.
 → `200 { userId, role, branchId }`.
 
 ### POST /api/me/punch  *(CSRF, Idempotent, rate-limited)*
-Body `{ kind: "IN"|"OUT", lat, lng, accuracy, deviceFp }`. Enforces day-off block,
+Body `{ kind: "IN"|"OUT", lat, lng, accuracy, deviceFp }`. Enforces the
 driver-open-trip block, geofence (accuracy + radius) and open-session rules; records
-a punch with full GPS evidence and audit; may resolve a WATCHED flag.
-→ `200 { at, kind, minutes_since_in }`. Errors: `DAY_OFF_PUNCH_BLOCKED` 409,
+a punch with full GPS evidence and audit; may resolve a WATCHED flag. An approved
+day-off does **not** block punching (staff may come in to help).
+→ `200 { at, kind, minutes_since_in }`. Errors:
 `OPEN_TRIP_EXISTS` 409, `ALREADY_PUNCHED_IN` 409, `NOT_PUNCHED_IN` 409,
 `LOW_GPS_ACCURACY` 422, `OUT_OF_GEOFENCE` 422, plus the common ones.
 

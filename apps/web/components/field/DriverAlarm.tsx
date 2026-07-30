@@ -4,13 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
 
 // Polls for a caller "ring" and raises a loud, flashing alarm while the app is
-// open. (Phase B adds web-push so it also reaches a locked/closed phone.)
+// open. (Web push covers the locked/closed-phone case.)
 export default function DriverAlarm() {
   const [ringing, setRinging] = useState(false);
   const audioCtx = useRef<AudioContext | null>(null);
-  const beepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const vibrateTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hi = useRef(true);
 
   // Unlock audio on the first user gesture (browsers block audio otherwise).
   useEffect(() => {
@@ -41,34 +39,48 @@ export default function DriverAlarm() {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
-  // Drive the siren + vibration while ringing.
+  // Loud wailing siren + vibration while ringing.
   useEffect(() => {
     if (!ringing) return;
     const ctx = audioCtx.current;
+    let osc: OscillatorNode | null = null;
+    let gain: GainNode | null = null;
+    let sweep: ReturnType<typeof setInterval> | null = null;
+
     if (ctx) {
       ctx.resume().catch(() => {});
-      beepTimer.current = setInterval(() => {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.connect(g);
-        g.connect(ctx.destination);
-        o.type = 'square';
-        o.frequency.value = hi.current ? 880 : 620;
-        hi.current = !hi.current;
-        const t0 = ctx.currentTime;
-        g.gain.setValueAtTime(0.0001, t0);
-        g.gain.exponentialRampToValueAtTime(0.6, t0 + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
-        o.start(t0);
-        o.stop(t0 + 0.37);
-      }, 450);
+      osc = ctx.createOscillator();
+      gain = ctx.createGain();
+      osc.type = 'sawtooth'; // harsh, carries like an emergency siren
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.85, ctx.currentTime + 0.05); // loud
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.start();
+      // Wail: sweep the pitch up and down continuously.
+      let up = true;
+      const doSweep = () => {
+        const o = osc!;
+        const t = ctx.currentTime;
+        o.frequency.cancelScheduledValues(t);
+        o.frequency.setValueAtTime(o.frequency.value, t);
+        o.frequency.linearRampToValueAtTime(up ? 1400 : 600, t + 0.5);
+        up = !up;
+      };
+      doSweep();
+      sweep = setInterval(doSweep, 500);
     }
+
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate([400, 150, 400]);
-      vibrateTimer.current = setInterval(() => navigator.vibrate([400, 150, 400]), 1200);
+      navigator.vibrate([600, 200, 600]);
+      vibrateTimer.current = setInterval(() => navigator.vibrate([600, 200, 600]), 1400);
     }
+
     return () => {
-      if (beepTimer.current) clearInterval(beepTimer.current);
+      if (sweep) clearInterval(sweep);
+      if (osc) { try { osc.stop(); } catch { /* already stopped */ } osc.disconnect(); }
+      if (gain) gain.disconnect();
       if (vibrateTimer.current) clearInterval(vibrateTimer.current);
       if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(0);
     };

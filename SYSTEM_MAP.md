@@ -124,7 +124,13 @@ Full request/response detail is in [API.md](API.md). Summary:
   each day's first IN / last OUT vs the employee's Schedule (respecting overrides; DAY_OFF and
   unscheduled days are skipped; the current day is skipped for early-leave). Computed on the fly
   (not stored); an admin **waiver** removes one. Penalty amount = hours × rate-at-shift.
-- **Punch (`punch.ts`)** gate order: user active+branch → day-off block → driver open-trip block →
+- **Day-offs never block punching** — an approved DAY_OFF suppresses "absent" alerts and shows
+  the person as off, but staff may still clock in to help during a rush.
+- **Overnight shifts**: a schedule whose `end_time <= start_time` is treated as ending the **next
+  day** (e.g. 20:00 → 05:00). `missedCheckout` looks at yesterday's overnight shifts + today's
+  same-day shifts. (Known gap: an overnight shift's *early-leave* penalty isn't computed because
+  the OUT lands on the next calendar day — late-arrival and same-day early-leave work.)
+- **Punch (`punch.ts`)** gate order: user active+branch → driver open-trip block →
   geofence (accuracy then radius) → session state. Writes full evidence + audit; resolves the
   oldest open WATCHED flag atomically.
 - **Geofence (`geofence.ts`)**: nearest active branch by haversine; reject if

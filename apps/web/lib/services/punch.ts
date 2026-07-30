@@ -1,7 +1,6 @@
 import type { PrismaClient, Punch } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
-import { userHasApprovedDayOffToday } from './dayOff';
 import { writeAuditLog } from './audit';
 import { notifier, type Notifier } from 'notify';
 
@@ -20,7 +19,6 @@ export interface PunchInput {
 }
 
 export type PunchErrorCode =
-  | 'DAY_OFF_PUNCH_BLOCKED'
   | 'OPEN_TRIP_EXISTS'
   | 'OUT_OF_GEOFENCE'
   | 'LOW_GPS_ACCURACY'
@@ -55,9 +53,9 @@ export async function punchEmployee(
   if (!user.branch) return { code: 'BRANCH_NOT_FOUND' };
   if (!user.is_active) return { code: 'USER_NOT_FOUND' };
 
-  if (await userHasApprovedDayOffToday(user.id, now)) {
-    return { code: 'DAY_OFF_PUNCH_BLOCKED' };
-  }
+  // Note: an approved day-off does NOT block punching — staff sometimes come in
+  // on a day off to help during a rush. Day-offs still affect attendance status
+  // and suppress "absent" alerts, just not the ability to clock in.
 
   if (user.role === 'DRIVER') {
     const openTrip = await db.trip.findFirst({

@@ -22,7 +22,6 @@ const PunchBody = z.object({
 const ERROR_MAP: Record<string, { code: string; status: number }> = {
   USER_NOT_FOUND: { code: 'UNAUTHORIZED', status: 401 },
   BRANCH_NOT_FOUND: { code: 'FORBIDDEN', status: 403 },
-  DAY_OFF_PUNCH_BLOCKED: { code: 'DAY_OFF_PUNCH_BLOCKED', status: 409 },
   OPEN_TRIP_EXISTS: { code: 'OPEN_TRIP_EXISTS', status: 409 },
   LOW_GPS_ACCURACY: { code: 'LOW_GPS_ACCURACY', status: 422 },
   OUT_OF_GEOFENCE: { code: 'OUT_OF_GEOFENCE', status: 422 },

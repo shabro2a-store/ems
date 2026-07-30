@@ -204,7 +204,7 @@ beforeEach(() => {
 });
 
 describe('punchEmployee', () => {
-  it('rejects with DAY_OFF_PUNCH_BLOCKED when ScheduleOverride{DAY_OFF} exists for today', async () => {
+  it('ALLOWS punching on an approved day-off (staff may come in to help)', async () => {
     const branch = makeBranch();
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
@@ -225,9 +225,8 @@ describe('punchEmployee', () => {
       ip: '1.2.3.4',
       now: new Date('2026-07-10T08:00:00Z'),
     });
-    expect('code' in r).toBe(true);
-    if ('code' in r) expect(r.code).toBe('DAY_OFF_PUNCH_BLOCKED');
-    expect(store.punches.length).toBe(0);
+    expect('punch' in r).toBe(true);
+    expect(store.punches.length).toBe(1);
   });
 
   it('rejects driver with open trip before reaching geofence', async () => {
@@ -392,7 +391,7 @@ describe('punchEmployee', () => {
     }
   });
 
-  it('guard order: day-off blocks before open-trip and before geofence', async () => {
+  it('day-off is ignored for punching; the open-trip guard still applies', async () => {
     const branch = makeBranch();
     const user = makeUser('u1', branch, 'DRIVER');
     store.users.set(user.id, user);
@@ -414,8 +413,9 @@ describe('punchEmployee', () => {
       ip: '1.2.3.4',
       now: new Date('2026-07-10T08:00:00Z'),
     });
+    // Day-off no longer blocks; a driver with an open trip is still blocked.
     expect('code' in r).toBe(true);
-    if ('code' in r) expect(r.code).toBe('DAY_OFF_PUNCH_BLOCKED');
+    if ('code' in r) expect(r.code).toBe('OPEN_TRIP_EXISTS');
   });
 });
 

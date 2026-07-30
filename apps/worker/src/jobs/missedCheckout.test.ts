@@ -50,9 +50,10 @@ function resetStore() {
 function makeDb() {
   return {
     schedule: {
-      findMany: async ({ where }: { where: { weekday: number } }) => {
+      findMany: async ({ where }: { where: { weekday: number | { in: number[] } } }) => {
+        const wds = typeof where.weekday === 'number' ? [where.weekday] : where.weekday.in;
         return store.schedules
-          .filter((s) => s.weekday === where.weekday)
+          .filter((s) => wds.includes(s.weekday))
           .map((s) => ({ ...s, user: store.users.get(s.user_id)! }));
       },
     },
@@ -113,6 +114,21 @@ describe('runMissedCheckout', () => {
     expect(r.notified).toBe(1);
     expect(store.notifications[0]!.template).toBe('missed_checkout');
     expect(store.notifications[0]!.context).toHaveProperty('message');
+  });
+
+  it('handles an overnight shift ending this morning (yesterday 20:00 → today 05:00)', async () => {
+    store.users.set('u1', {
+      id: 'u1', username: 'drv1', is_active: true, role: 'DRIVER', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    // Saturday (weekday 6) overnight shift into Sunday.
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 6, start_time: '20:00', end_time: '05:00' });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-11T20:00:00+03:00') });
+
+    const db = makeDb();
+    // Sunday 05:40 — 40 min past the 05:00 end, still clocked in.
+    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T05:40:00+03:00'), notifier });
+    expect(r.flags_created).toBe(1);
+    expect(r.notified).toBe(1);
   });
 
   it('does not fire if user punched OUT', async () => {

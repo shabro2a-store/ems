@@ -1,13 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
-import { userHasApprovedDayOffToday } from './dayOff';
 
 export type TripErrorCode =
   | 'USER_NOT_FOUND'
   | 'BRANCH_NOT_FOUND'
   | 'NOT_DRIVER'
-  | 'DAY_OFF_PUNCH_BLOCKED'
   | 'OPEN_TRIP_EXISTS'
   | 'NO_OPEN_TRIP'
   | 'OUT_OF_GEOFENCE'
@@ -39,9 +37,7 @@ export async function startTrip(
   if (!user.branch) return { ok: false, code: 'BRANCH_NOT_FOUND' };
   if (!user.is_active) return { ok: false, code: 'USER_NOT_FOUND' };
 
-  if (await userHasApprovedDayOffToday(user.id, now)) {
-    return { ok: false, code: 'DAY_OFF_PUNCH_BLOCKED' };
-  }
+  // An approved day-off does not block trips — a driver may come in to help.
 
   const open = await db.trip.findFirst({
     where: { driver_id: user.id, back_at: null },

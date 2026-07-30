@@ -267,7 +267,7 @@ describe('punch integration (HTTP)', () => {
     expect(body.data.net_cent).toBe(0);
   });
 
-  it('Check 13: day-off override blocks punch', async () => {
+  it('Check 13: day-off override does NOT block punching (staff may help on a day off)', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-c13', branch_id: branch.id });
     const today = new Date(`${todayInBeirut(new Date())}T00:00:00.000Z`);
@@ -284,9 +284,9 @@ describe('punch integration (HTTP)', () => {
       },
       body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c13' }),
     });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(JSON.stringify(body)).toContain('DAY_OFF_PUNCH_BLOCKED');
+    expect(body.ok).toBe(true);
   });
 
   it('Check 14: server-side geofence bypass test (high accuracy rejected)', async () => {

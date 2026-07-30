@@ -374,19 +374,28 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
 }
 
 interface DayState { wd: number; name: string; working: boolean; start: string; end: string }
+interface OverrideRow { id: string; date: string; kind: 'DAY_OFF' | 'TIME_CHANGE'; start_time: string | null; end_time: string | null; note: string | null }
 function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => void; onSaved: () => void }) {
   const [days, setDays] = useState<DayState[] | null>(null);
+  const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      const r = await apiGet<{ weeklySchedule: { weekday: number; start_time: string; end_time: string }[] }>(`/api/admin/schedules/${user.id}`);
+      const r = await apiGet<{ weeklySchedule: { weekday: number; start_time: string; end_time: string }[]; overrides: { id: string; date: string; kind: 'DAY_OFF' | 'TIME_CHANGE'; start_time: string | null; end_time: string | null; note: string | null }[] }>(`/api/admin/schedules/${user.id}`);
       const byWd = new Map((r.ok ? r.data.weeklySchedule : []).map((s) => [s.weekday, s]));
       setDays(DAYS.map((d) => {
         const s = byWd.get(d.wd);
         return { wd: d.wd, name: d.name, working: !!s, start: s?.start_time ?? '09:00', end: s?.end_time ?? '18:00' };
       }));
+      const todayStr = new Date().toISOString().slice(0, 10);
+      setOverrides(
+        (r.ok ? r.data.overrides : [])
+          .map((o) => ({ ...o, date: o.date.slice(0, 10) }))
+          .filter((o) => o.date >= todayStr)
+          .slice(0, 8),
+      );
     })();
   }, [user.id]);
 
@@ -414,7 +423,12 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
           {days.map((d) => (
             <div key={d.wd} className="rounded-lg border border-border p-2.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">{d.name}</span>
+                <span className="text-sm font-medium">
+                  {d.name}
+                  {d.working && d.end <= d.start && (
+                    <span className="ml-2 text-xs font-normal text-primary">· ends next day</span>
+                  )}
+                </span>
                 <button
                   type="button"
                   onClick={() => set(d.wd, { working: !d.working })}
@@ -432,6 +446,28 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
               )}
             </div>
           ))}
+
+          <p className="pt-1 text-xs text-muted">
+            Tip: for an overnight shift (e.g. 20:00 → 05:00), just set the end time earlier than the
+            start — it&apos;s treated as ending the next morning.
+          </p>
+
+          {overrides.length > 0 && (
+            <div className="mt-2 rounded-lg border border-border bg-surface-muted p-2.5">
+              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Approved days off / changes</div>
+              <ul className="space-y-1">
+                {overrides.map((o) => (
+                  <li key={o.id} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="tabular">{o.date}</span>
+                    <span className={o.kind === 'DAY_OFF' ? 'font-medium text-warning' : 'text-content'}>
+                      {o.kind === 'DAY_OFF' ? 'Day off' : `Shift change ${o.start_time ?? '—'}–${o.end_time ?? '—'}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-xs text-muted">These come from approved requests. A day off doesn&apos;t block punching — it only stops the &quot;absent&quot; alert.</p>
+            </div>
+          )}
           {err && <Alert tone="danger">{err}</Alert>}
         </div>
       )}
