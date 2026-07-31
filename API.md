@@ -85,14 +85,18 @@ Summary `{ pending, upcoming: [...] }`; request body
 
 ### Driver trips (role DRIVER)
 - **POST /api/me/trip/start** *(CSRF, Idempotent, rate-limited)* `{ lat, lng, accuracy }`
-  → `200 { trip_id, out_at }`. Errors: `OPEN_TRIP_EXISTS` 409, geofence 422, `NOT_DRIVER` 403.
+  Requires the driver to have been **rung by the caller** in the last 30 min (an unconsumed
+  `DriverCall`); starting the trip consumes that ring. → `200 { trip_id, out_at }`. Errors:
+  `NOT_DISPATCHED` 409 (no ring), `OPEN_TRIP_EXISTS` 409, geofence 422, `NOT_DRIVER` 403.
 - **POST /api/me/trip/end** *(CSRF, Idempotent)* `{ lat, lng, accuracy }`
   → `200 { trip_id, back_at, duration_min }`. Error: `NO_OPEN_TRIP` 409.
 - **GET /api/me/trip/current** → `200 { open, since_min?, threshold_min }`.
 
 ### GET /api/me/calls  ·  POST /api/me/calls/ack  *(ack: CSRF)*
-Driver ring inbox. `GET` → `{ ringing: bool, since }` (an unacknowledged ring in the last
-2 min). `POST /ack` marks all pending rings acknowledged (dismiss the alarm).
+Driver ring inbox. `GET` → `{ ringing: bool, since, canGoOut: bool }` — `ringing` is an
+unacknowledged ring in the last 2 min (drives the alarm); `canGoOut` means a valid unconsumed
+dispatch exists in the last 30 min (enables "out on order"). `POST /ack` marks all pending rings
+acknowledged (dismiss the alarm).
 
 ### GET /api/me/push/key  ·  POST /api/me/push/subscribe  *(subscribe: CSRF)*
 Web Push setup for the driver's device. `GET key` → `{ publicKey }` (null when push is

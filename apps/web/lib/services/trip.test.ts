@@ -41,12 +41,14 @@ const store: {
   }>;
   trips: TripRow[];
   overrides: Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }>;
+  calls: Array<{ id: string; driver_id: string; trip_id: string | null; created_at: Date }>;
   tripSeq: number;
 } = {
   users: new Map(),
   branches: new Map(),
   trips: [],
   overrides: [],
+  calls: [],
   tripSeq: 0,
 };
 
@@ -54,6 +56,8 @@ const mocks = vi.hoisted(() => ({
   user: { findUnique: vi.fn() },
   scheduleOverride: { findUnique: vi.fn() },
   trip: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+  driverCall: { findFirst: vi.fn(), updateMany: vi.fn() },
+  $transaction: vi.fn(),
 }));
 
 vi.mock('@/lib/db/prisma', () => ({
@@ -67,6 +71,7 @@ function resetStore() {
   store.branches.clear();
   store.trips.length = 0;
   store.overrides.length = 0;
+  store.calls.length = 0;
   store.tripSeq = 0;
 }
 
@@ -100,6 +105,10 @@ function makeDriver(id: string, branch: ReturnType<typeof makeBranch>) {
     created_at: new Date(),
   };
   store.users.set(id, u);
+  // Every driver is dispatched by default (the caller rang them) so existing
+  // start-trip tests reflect the normal flow. Tests can clear store.calls to
+  // simulate an undispatched driver.
+  store.calls.push({ id: `call-${id}`, driver_id: id, trip_id: null, created_at: new Date() });
   return u;
 }
 
@@ -153,6 +162,26 @@ beforeEach(() => {
     Object.assign(t, data);
     return t;
   });
+
+  mocks.driverCall.findFirst.mockImplementation(async ({ where }: { where: { driver_id: string; trip_id: null; created_at?: { gte: Date } } }) => {
+    const cutoff = where.created_at?.gte;
+    return (
+      store.calls
+        .filter((c) => c.driver_id === where.driver_id && c.trip_id === null && (!cutoff || c.created_at >= cutoff))
+        .sort((a, b) => b.created_at.getTime() - a.created_at.getTime())[0] ?? null
+    );
+  });
+
+  mocks.driverCall.updateMany.mockImplementation(async ({ where, data }: { where: { id: string; trip_id: null }; data: { trip_id: string } }) => {
+    let count = 0;
+    for (const c of store.calls) {
+      if (c.id === where.id && c.trip_id === null) { c.trip_id = data.trip_id; count += 1; }
+    }
+    return { count };
+  });
+
+  // Run transaction callbacks against the same mock client.
+  mocks.$transaction.mockImplementation(async (fn: (tx: typeof mocks) => unknown) => fn(mocks));
 });
 
 describe('startTrip', () => {
@@ -166,6 +195,25 @@ describe('startTrip', () => {
       expect(r.trip_id).toBe('t1');
       expect(store.trips.length).toBe(1);
     }
+  });
+
+  it('rejects an undispatched driver with NOT_DISPATCHED (caller must ring first)', async () => {
+    const b = makeBranch({ gps_radius_m: 200 });
+    store.branches.set(b.id, b);
+    const driver = makeDriver('d1', b);
+    store.calls.length = 0; // no ring from the caller
+    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    expect('code' in r && r.code).toBe('NOT_DISPATCHED');
+    expect(store.trips.length).toBe(0);
+  });
+
+  it('consumes the dispatch call so it cannot start a second trip', async () => {
+    const b = makeBranch({ gps_radius_m: 200 });
+    store.branches.set(b.id, b);
+    const driver = makeDriver('d1', b);
+    const r1 = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    expect('trip_id' in r1).toBe(true);
+    expect(store.calls[0]!.trip_id).toBe('t1'); // call linked to the trip
   });
 
   it('rejects non-driver with NOT_DRIVER', async () => {

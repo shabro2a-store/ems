@@ -21,6 +21,8 @@ export async function runMissedCheckout(
   const now = opts.now ?? new Date();
   const today = todayInBeirut(now);
   const todayDate = new Date(`${today}T00:00:00.000Z`);
+  const yesterday = todayInBeirut(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  const yesterdayDate = new Date(`${yesterday}T00:00:00.000Z`);
   const wdToday = beirutWeekday(now);
   const wdYesterday = beirutWeekday(new Date(now.getTime() - 24 * 60 * 60 * 1000));
 
@@ -31,6 +33,16 @@ export async function runMissedCheckout(
     include: { user: { include: { branch: true } } },
   });
 
+  // Approved exceptions for the shift's start day (today or yesterday): DAY_OFF
+  // skips the check; TIME_CHANGE shifts the effective end.
+  const overrides = await db.scheduleOverride.findMany({
+    where: { date: { in: [todayDate, yesterdayDate] } },
+    select: { user_id: true, date: true, kind: true, end_time: true },
+  });
+  const overrideByKey = new Map(
+    overrides.map((o) => [`${o.user_id}|${o.date.toISOString().slice(0, 10)}`, o]),
+  );
+
   let flags_created = 0;
   let notified = 0;
 
@@ -39,7 +51,12 @@ export async function runMissedCheckout(
     const endsToday =
       (s.weekday === wdToday && !overnight) || (s.weekday === wdYesterday && overnight);
     if (!endsToday) continue;
-    const endUtc = scheduledToUtc(today, s.end_time);
+    // The shift started today (same-day) or yesterday (overnight).
+    const shiftStartDay = s.weekday === wdToday ? today : yesterday;
+    const override = overrideByKey.get(`${s.user_id}|${shiftStartDay}`);
+    if (override?.kind === 'DAY_OFF') continue;
+    const effEnd = override?.kind === 'TIME_CHANGE' && override.end_time ? override.end_time : s.end_time;
+    const endUtc = scheduledToUtc(today, effEnd);
     const triggerAt = new Date(endUtc.getTime() + 35 * 60_000);
     if (now.getTime() < triggerAt.getTime()) continue;
 
@@ -63,7 +80,7 @@ export async function runMissedCheckout(
         kind: 'MISSED_CHECKOUT',
         user_id: s.user_id,
         branch_id: s.user.branch_id,
-        context_json: { scheduled_end: s.end_time, since_min: Math.floor((now.getTime() - endUtc.getTime()) / 60_000) },
+        context_json: { scheduled_end: effEnd, since_min: Math.floor((now.getTime() - endUtc.getTime()) / 60_000) },
       },
     });
     flags_created += 1;

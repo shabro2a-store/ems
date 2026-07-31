@@ -6,10 +6,15 @@ export type TripErrorCode =
   | 'USER_NOT_FOUND'
   | 'BRANCH_NOT_FOUND'
   | 'NOT_DRIVER'
+  | 'NOT_DISPATCHED'
   | 'OPEN_TRIP_EXISTS'
   | 'NO_OPEN_TRIP'
   | 'OUT_OF_GEOFENCE'
   | 'LOW_GPS_ACCURACY';
+
+// A driver may only go out on an order after the caller has rung them. The ring
+// (DriverCall) is valid for this long and can dispatch exactly one trip.
+export const DISPATCH_WINDOW_MS = 30 * 60 * 1000;
 
 export interface TripInput {
   userId: string;
@@ -45,6 +50,19 @@ export async function startTrip(
   });
   if (open) return { ok: false, code: 'OPEN_TRIP_EXISTS' };
 
+  // Must have been dispatched (rung) by the caller, and that ring must not have
+  // already been used for another trip.
+  const call = await db.driverCall.findFirst({
+    where: {
+      driver_id: user.id,
+      trip_id: null,
+      created_at: { gte: new Date(now.getTime() - DISPATCH_WINDOW_MS) },
+    },
+    orderBy: { created_at: 'desc' },
+    select: { id: true },
+  });
+  if (!call) return { ok: false, code: 'NOT_DISPATCHED' };
+
   const geo = verifyWithinGeofence(
     input.lat,
     input.lng,
@@ -65,14 +83,23 @@ export async function startTrip(
     return { ok: false, code: 'OUT_OF_GEOFENCE' };
   }
 
-  const trip = await db.trip.create({
-    data: {
-      driver_id: user.id,
-      branch_id: user.branch.id,
-      out_at: now,
-      out_lat: input.lat,
-      out_lng: input.lng,
-    },
+  const trip = await db.$transaction(async (tx) => {
+    const t = await tx.trip.create({
+      data: {
+        driver_id: user.id,
+        branch_id: user.branch!.id,
+        out_at: now,
+        out_lat: input.lat,
+        out_lng: input.lng,
+      },
+    });
+    // Consume the dispatch call — guard on trip_id null so a concurrent start
+    // can't reuse the same ring.
+    await tx.driverCall.updateMany({
+      where: { id: call.id, trip_id: null },
+      data: { trip_id: t.id },
+    });
+    return t;
   });
 
   return { ok: true, trip_id: trip.id, out_at: trip.out_at };

@@ -98,17 +98,47 @@ describe('computePenalties', () => {
     expect(items).toHaveLength(0);
   });
 
-  it('does not compute early-leave for the current (unfinished) day', () => {
+  it('does not compute early-leave while the shift is still ongoing', () => {
     const items = computePenalties(
       base({
-        now: new Date('2026-07-15T14:00:00Z'), // same day, 17:00 Beirut
+        now: new Date('2026-07-15T11:30:00Z'), // 14:30 Beirut — before the 16:00 end
         punches: [
-          { kind: 'IN', at: new Date('2026-07-15T05:00:00Z') },
-          { kind: 'OUT', at: new Date('2026-07-15T11:00:00Z') }, // 14:00 Beirut, 2h early
+          { kind: 'IN', at: new Date('2026-07-15T05:00:00Z') }, // on time
+          { kind: 'OUT', at: new Date('2026-07-15T11:00:00Z') }, // stepped out, shift not over yet
         ],
       }),
     );
     expect(items).toHaveLength(0);
+  });
+
+  it('no penalty when punches exactly match the schedule (e.g. after an admin correction)', () => {
+    const items = computePenalties(
+      base({
+        punches: [
+          { kind: 'IN', at: new Date('2026-07-15T05:00:00Z') }, // 08:00 Beirut sharp
+          { kind: 'OUT', at: new Date('2026-07-15T13:00:00Z') }, // 16:00 Beirut sharp
+        ],
+      }),
+    );
+    expect(items).toHaveLength(0);
+  });
+
+  it('docks an overnight early-leave (20:00 → 05:00, left at 03:00 next day)', () => {
+    // Tuesday 2026-07-14 overnight shift into Wednesday.
+    const SCHED_ON = new Map([[2, { start_time: '20:00', end_time: '05:00' }]]); // Tue=2
+    const items = computePenalties({
+      schedulesByWeekday: SCHED_ON,
+      overridesByDate: new Map(),
+      rateChanges: RATE,
+      waivedKeys: new Set<string>(),
+      now: new Date('2026-07-15T12:00:00Z'), // well after the shift ended
+      punches: [
+        { kind: 'IN', at: new Date('2026-07-14T17:00:00Z') }, // 20:00 Beirut Tue, on time
+        { kind: 'OUT', at: new Date('2026-07-15T00:00:00Z') }, // 03:00 Beirut Wed = 2h early
+      ],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'EARLY_LEAVE', date: '2026-07-14', hours: 4 });
   });
 
   it('skips a day with no schedule', () => {

@@ -38,17 +38,20 @@ function dur(min: number): string {
 export default function DriverHomeClient({ username, branch }: { username: string; branch: { name: string; gps_radius_m: number; gps_accuracy_max_m: number; trip_threshold_min: number } }) {
   const [today, setToday] = useState<TodayPayload | null>(null);
   const [trip, setTrip] = useState<TripInfo | null>(null);
+  const [canGoOut, setCanGoOut] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
-    const [t, tr] = await Promise.all([
+    const [t, tr, calls] = await Promise.all([
       apiGet<TodayPayload>('/api/me/today'),
       apiGet<TripInfo>('/api/me/trip/current'),
+      apiGet<{ ringing: boolean; canGoOut: boolean }>('/api/me/calls'),
     ]);
     if (t.ok) setToday(t.data);
     if (tr.ok) setTrip(tr.data);
+    if (calls.ok) setCanGoOut(calls.data.canGoOut);
   }, []);
 
   useEffect(() => {
@@ -56,6 +59,17 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     const id = setInterval(refresh, 30_000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // Fast poll for dispatch state so "out on order" enables right after the ring.
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      const r = await apiGet<{ canGoOut: boolean }>('/api/me/calls');
+      if (alive && r.ok) setCanGoOut(r.data.canGoOut);
+    };
+    const id = setInterval(tick, 4000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   const locate = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -211,17 +225,23 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         )}
       </div>
 
-      {/* Trip button */}
+      {/* Trip button — going out requires the counter to have rung you first */}
       <div>
         <button
           onClick={() => tripSubmit(open ? '/api/me/trip/end' : '/api/me/trip/start')}
-          disabled={busy || !ready || (!isIn && !open)}
+          disabled={busy || !ready || (!open && (!isIn || !canGoOut))}
           className={`h-28 w-full rounded-2xl text-2xl font-bold text-white shadow-sm transition-colors disabled:opacity-40 ${open ? 'bg-primary hover:bg-primary-hover' : 'bg-warning hover:brightness-95'}`}
         >
           {busy ? 'Please wait…' : open ? 'BACK' : 'OUT ON ORDER'}
         </button>
         <p className="mt-1.5 text-center text-xs text-muted">
-          {!isIn && !open ? 'Clock in first to go out on orders.' : `Start and end orders at ${branch.name} (within ${branch.gps_radius_m}m).`}
+          {open
+            ? `Tap BACK at ${branch.name} when you return (within ${branch.gps_radius_m}m).`
+            : !isIn
+              ? 'Clock in first to go out on orders.'
+              : !canGoOut
+                ? '⏳ Waiting for the counter to call you — you can go out once they ring.'
+                : `📞 You've been called. Head out, then tap BACK when you return.`}
         </p>
       </div>
 

@@ -65,9 +65,12 @@ export function computePenalties(args: {
   now?: Date;
 }): PenaltyItem[] {
   const now = args.now ?? new Date();
-  const todayStr = inBeirut(now).date;
 
-  // Group punches by Beirut calendar day.
+  // All punches, chronological — used to find a shift's closing OUT even when it
+  // lands on the next calendar day (overnight shifts).
+  const allSorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  // Group punches by Beirut calendar day (a shift belongs to its arrival day).
   const byDay = new Map<string, PunchLite[]>();
   for (const p of args.punches) {
     const day = inBeirut(p.at).date;
@@ -114,30 +117,38 @@ export function computePenalties(args: {
       }
     }
 
-    // EARLY_LEAVE — final departure vs scheduled end. Skip the current day
-    // (the shift may not be over) and only when the day ended on an OUT.
-    if (effEnd && date !== todayStr) {
-      const lastPunch = sorted[sorted.length - 1]!;
-      const lastOut = [...sorted].reverse().find((p) => p.kind === 'OUT');
-      if (lastOut && lastPunch.kind === 'OUT') {
-        let schedEndUtc = scheduledToUtc(date, effEnd);
-        // Overnight shift (end <= start): the scheduled end is the next day.
-        if (schedStartUtc && schedEndUtc.getTime() <= schedStartUtc.getTime()) {
-          schedEndUtc = scheduledToUtc(nextDateStr(date), effEnd);
-        }
-        const earlyMin = Math.floor((schedEndUtc.getTime() - lastOut.at.getTime()) / 60_000);
-        const hours = penaltyHours(earlyMin);
-        if (hours > 0) {
-          const rate = rateAt(args.rateChanges, lastOut.at);
-          items.push({
-            date,
-            kind: 'EARLY_LEAVE',
-            minutes: earlyMin,
-            hours,
-            rate_cent: rate,
-            amount_cent: hours * rate,
-            waived: args.waivedKeys.has(`${date}|EARLY_LEAVE`),
-          });
+    // EARLY_LEAVE — the shift's closing OUT vs scheduled end. Works for overnight
+    // shifts (the OUT can be on the next calendar day). Only evaluated once the
+    // shift is actually over (scheduled end is in the past).
+    if (effEnd) {
+      let schedEndUtc = scheduledToUtc(date, effEnd);
+      // Overnight shift (end <= start): the scheduled end is the next day.
+      if (schedStartUtc && schedEndUtc.getTime() <= schedStartUtc.getTime()) {
+        schedEndUtc = scheduledToUtc(nextDateStr(date), effEnd);
+      }
+      if (schedEndUtc.getTime() <= now.getTime()) {
+        // The closing OUT is the last OUT between arrival and a grace window past
+        // scheduled end (allows overtime); the grace lets it cross midnight.
+        const graceEndMs = schedEndUtc.getTime() + 6 * 60 * 60 * 1000;
+        const shiftPunches = allSorted.filter(
+          (p) => p.at.getTime() >= firstIn.at.getTime() && p.at.getTime() <= graceEndMs,
+        );
+        const last = shiftPunches[shiftPunches.length - 1];
+        if (last && last.kind === 'OUT') {
+          const earlyMin = Math.floor((schedEndUtc.getTime() - last.at.getTime()) / 60_000);
+          const hours = penaltyHours(earlyMin);
+          if (hours > 0) {
+            const rate = rateAt(args.rateChanges, last.at);
+            items.push({
+              date,
+              kind: 'EARLY_LEAVE',
+              minutes: earlyMin,
+              hours,
+              rate_cent: rate,
+              amount_cent: hours * rate,
+              waived: args.waivedKeys.has(`${date}|EARLY_LEAVE`),
+            });
+          }
         }
       }
     }

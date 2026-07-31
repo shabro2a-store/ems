@@ -238,7 +238,20 @@ export async function seedTestRateChange(overrides: RateChangeOverrides) {
 }
 
 export async function seedTestDriver(overrides: UserOverrides = {}) {
-  return seedTestUser({ ...overrides, role: Role.DRIVER });
+  const driver = await seedTestUser({ ...overrides, role: Role.DRIVER });
+  // A driver may only go "out on order" after the caller rings them. Seed a
+  // recent dispatch call so trip-start tests reflect the normal (dispatched)
+  // flow; NOT_DISPATCHED is covered separately in the unit tests.
+  await seedDispatchCall(driver.id);
+  return driver;
+}
+
+// A caller ring that lets the driver start one trip.
+export async function seedDispatchCall(driverId: string) {
+  const prisma = getTestPrisma();
+  return prisma.driverCall.create({
+    data: { driver_id: driverId, caller_id: driverId, created_at: new Date() },
+  });
 }
 
 export interface ScheduleOverrides {

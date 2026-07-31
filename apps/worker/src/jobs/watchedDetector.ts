@@ -29,11 +29,13 @@ export async function runWatchedDetector(
     include: { user: { include: { branch: true } } },
   });
 
-  const dayOffs = await db.scheduleOverride.findMany({
-    where: { date: todayDate, kind: 'DAY_OFF' },
-    select: { user_id: true },
+  // Approved exceptions for today: DAY_OFF is skipped; TIME_CHANGE shifts the
+  // effective start we measure lateness against.
+  const overrides = await db.scheduleOverride.findMany({
+    where: { date: todayDate },
+    select: { user_id: true, kind: true, start_time: true },
   });
-  const dayOffSet = new Set(dayOffs.map((d) => d.user_id));
+  const overrideByUser = new Map(overrides.map((o) => [o.user_id, o]));
 
   let flags_created = 0;
   let skipped_day_off = 0;
@@ -41,11 +43,13 @@ export async function runWatchedDetector(
 
   for (const s of schedules) {
     if (!s.user.is_active) continue;
-    if (dayOffSet.has(s.user_id)) {
+    const override = overrideByUser.get(s.user_id);
+    if (override?.kind === 'DAY_OFF') {
       skipped_day_off += 1;
       continue;
     }
-    const startUtc = scheduledToUtc(today, s.start_time);
+    const effStart = override?.kind === 'TIME_CHANGE' && override.start_time ? override.start_time : s.start_time;
+    const startUtc = scheduledToUtc(today, effStart);
     const triggerAt = new Date(startUtc.getTime() + 30 * 60_000);
     if (now.getTime() < triggerAt.getTime()) continue;
 

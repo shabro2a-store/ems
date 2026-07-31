@@ -57,8 +57,10 @@ function makeDb() {
       },
     },
     scheduleOverride: {
-      findMany: async ({ where }: { where: { date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' } }) => {
-        return store.overrides.filter((o) => o.date.getTime() === where.date.getTime() && o.kind === where.kind);
+      findMany: async ({ where }: { where: { date: Date; kind?: 'DAY_OFF' | 'TIME_CHANGE' } }) => {
+        return store.overrides.filter(
+          (o) => o.date.getTime() === where.date.getTime() && (!where.kind || o.kind === where.kind),
+        );
       },
     },
     punch: {

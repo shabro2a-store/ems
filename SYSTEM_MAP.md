@@ -61,8 +61,10 @@ cuid PKs, money = Int cents.
   **Partial unique index: one open trip per driver.**
 - **Advance** — amount_cent, reason?, status. Approved advances reduce net pay (by created_at month).
 - **Adjustment** — period(1st of month), kind(BONUS/DEDUCTION), amount_cent(≥0, sign from kind), reason.
-- **DriverCall** — a caller ringing a driver (driver, caller, branch?, created_at, acknowledged_at?).
-  The driver's app polls for an unacknowledged ring in the last 2 min and raises the alarm.
+- **DriverCall** — a caller ringing a driver (driver, caller, branch?, created_at, acknowledged_at?,
+  trip_id?). The driver's app polls for an unacknowledged ring in the last 2 min and raises the
+  alarm. `trip_id` links the ring to the trip it dispatched; a driver can only start a trip against
+  a recent ring with no `trip_id` yet.
 - **PushSubscription** — a device's Web Push subscription (user, endpoint unique, p256dh, auth);
   lets a ring reach a locked/closed phone. Dead endpoints (404/410) are auto-pruned.
 - **PenaltyWaiver** — (user, date, kind LATE/EARLY_LEAVE) unique. Penalties themselves are
@@ -126,10 +128,20 @@ Full request/response detail is in [API.md](API.md). Summary:
   (not stored); an admin **waiver** removes one. Penalty amount = hours × rate-at-shift.
 - **Day-offs never block punching** — an approved DAY_OFF suppresses "absent" alerts and shows
   the person as off, but staff may still clock in to help during a rush.
-- **Overnight shifts**: a schedule whose `end_time <= start_time` is treated as ending the **next
-  day** (e.g. 20:00 → 05:00). `missedCheckout` looks at yesterday's overnight shifts + today's
-  same-day shifts. (Known gap: an overnight shift's *early-leave* penalty isn't computed because
-  the OUT lands on the next calendar day — late-arrival and same-day early-leave work.)
+- **Overnight shifts**: a schedule whose `end_time <= start_time` ends the **next day** (e.g.
+  20:00 → 05:00). Handled everywhere — `missedCheckout` looks at yesterday's overnight + today's
+  same-day shifts; penalties pair the closing OUT across midnight (late **and** early-leave both
+  apply). Early-leave is only scored once the shift's scheduled end has passed.
+- **Approved schedule changes sync everywhere**: an approved TIME_CHANGE (not just DAY_OFF) shifts
+  the effective start/end used by penalties, `watchedDetector`, and `missedCheckout`, and shows in
+  the admin schedule editor. Employees request DAY_OFF / TIME_CHANGE from the field app.
+- **Correcting a punch clears its penalty**: penalties are computed from `punch.at` vs schedule,
+  so an admin correcting a 09:45 IN to 09:00 makes the lateness zero → the penalty disappears
+  automatically (no stored penalty to reverse).
+- **Caller dispatch gate**: a driver can only go "out on order" (start a trip) after the caller
+  rings them — the trip requires a `DriverCall` from the last 30 min with no trip yet; starting
+  the trip consumes that call (`trip_id`). Prevents undispatched trips and ties each trip to its
+  ring. Error `NOT_DISPATCHED` 409 if not rung.
 - **Punch (`punch.ts`)** gate order: user active+branch → driver open-trip block →
   geofence (accuracy then radius) → session state. Writes full evidence + audit; resolves the
   oldest open WATCHED flag atomically.

@@ -57,6 +57,9 @@ function makeDb() {
           .map((s) => ({ ...s, user: store.users.get(s.user_id)! }));
       },
     },
+    scheduleOverride: {
+      findMany: async () => [] as unknown[],
+    },
     punch: {
       findFirst: async ({ where }: { where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt?: Date } } }) => {
         const candidates = store.punches.filter((p) => p.user_id === where.user_id && p.kind === where.kind);

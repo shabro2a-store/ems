@@ -22,6 +22,7 @@ const ERROR_MAP: Record<string, { code: string; status: number }> = {
   USER_NOT_FOUND: { code: 'UNAUTHORIZED', status: 401 },
   BRANCH_NOT_FOUND: { code: 'FORBIDDEN', status: 403 },
   NOT_DRIVER: { code: 'FORBIDDEN', status: 403 },
+  NOT_DISPATCHED: { code: 'NOT_DISPATCHED', status: 409 },
   OPEN_TRIP_EXISTS: { code: 'OPEN_TRIP_EXISTS', status: 409 },
   OUT_OF_GEOFENCE: { code: 'OUT_OF_GEOFENCE', status: 422 },
   LOW_GPS_ACCURACY: { code: 'LOW_GPS_ACCURACY', status: 422 },
@@ -62,7 +63,10 @@ export async function POST(req: Request) {
 
   if (!result.ok) {
     const mapped = ERROR_MAP[result.code] ?? { code: result.code, status: 500 };
-    const response = { ok: false, error: { code: mapped.code, message: `Trip rejected: ${result.code}` } };
+    const friendly: Record<string, string> = {
+      NOT_DISPATCHED: 'Wait for the counter to call you before going out on an order.',
+    };
+    const response = { ok: false, error: { code: mapped.code, message: friendly[result.code] ?? `Trip rejected: ${result.code}` } };
     if (mapped.status >= 400 && mapped.status < 500) {
       await storeIdempotentResponse({ userId, key: idemKey, status_code: mapped.status, response_json: response });
     }

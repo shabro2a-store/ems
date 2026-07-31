@@ -276,6 +276,10 @@ model DriverCall {
   branch_id       String?
   created_at      DateTime  @default(now())
   acknowledged_at DateTime?
+  // Set to the Trip this call dispatched when the driver goes out on the order.
+  // A driver can only start a trip against a recent, unconsumed call — this
+  // prevents undispatched "out on order" trips and ties each trip to its call.
+  trip_id         String?
 
   @@index([driver_id, created_at])
 }
