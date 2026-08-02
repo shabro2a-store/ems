@@ -55,7 +55,7 @@ type Store = {
   overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }>;
   trips: Array<{ id: string; driver_id: string; back_at: Date | null }>;
   audits: Array<{ id: string }>;
-  flags: Array<{ id: string; user_id: string; kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; notified_at: Date | null; context_json: unknown; created_at: Date }>;
+  flags: Array<{ id: string; user_id: string; kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; resolved_at: Date | null; context_json: unknown; created_at: Date }>;
   punchSeq: number;
   auditSeq: number;
 };
@@ -188,17 +188,17 @@ beforeEach(() => {
     return a;
   });
 
-  mocks.flag.findFirst.mockImplementation(async ({ where }: { where: { kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; user_id: string; notified_at: Date | null; orderBy?: { created_at: 'asc' | 'desc' } } }) => {
+  mocks.flag.findFirst.mockImplementation(async ({ where }: { where: { kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; user_id: string; resolved_at: Date | null; orderBy?: { created_at: 'asc' | 'desc' } } }) => {
     const found = store.flags
-      .filter((f) => f.kind === where.kind && f.user_id === where.user_id && f.notified_at === where.notified_at)
+      .filter((f) => f.kind === where.kind && f.user_id === where.user_id && f.resolved_at === where.resolved_at)
       .sort((a, b) => (where.orderBy?.created_at === 'desc' ? b.created_at.getTime() - a.created_at.getTime() : a.created_at.getTime() - b.created_at.getTime()));
     return found[0] ?? null;
   });
 
-  mocks.flag.updateMany.mockImplementation(async ({ where, data }: { where: { id: string; notified_at: Date | null }; data: { notified_at: Date } }) => {
+  mocks.flag.updateMany.mockImplementation(async ({ where, data }: { where: { id: string; resolved_at: Date | null }; data: { resolved_at: Date } }) => {
     const f = store.flags.find((x) => x.id === where.id);
-    if (!f || f.notified_at !== where.notified_at) return { count: 0 };
-    f.notified_at = data.notified_at;
+    if (!f || f.resolved_at !== where.resolved_at) return { count: 0 };
+    f.resolved_at = data.resolved_at;
     return { count: 1 };
   });
 });
@@ -428,7 +428,7 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
       id: 'f1',
       user_id: user.id,
       kind: 'WATCHED',
-      notified_at: null,
+      resolved_at: null,
       context_json: { scheduled_start: '09:00' },
       created_at: new Date('2026-07-10T09:00:00Z'),
     });
@@ -447,7 +447,7 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
 
     expect(sent.length).toBe(1);
     expect((sent[0] as { template: string }).template).toBe('watched_resolved');
-    expect(store.flags[0]!.notified_at).not.toBeNull();
+    expect(store.flags[0]!.resolved_at).not.toBeNull();
   });
 
   it('does not fire notifier when no WATCHED flag exists', async () => {
@@ -477,7 +477,7 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
       id: 'f1',
       user_id: user.id,
       kind: 'WATCHED',
-      notified_at: null,
+      resolved_at: null,
       context_json: {},
       created_at: new Date(),
     });
@@ -502,8 +502,8 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
     store.flags.push(
-      { id: 'f-newer', user_id: user.id, kind: 'WATCHED', notified_at: null, context_json: {}, created_at: new Date('2026-07-10T10:00:00Z') },
-      { id: 'f-older', user_id: user.id, kind: 'WATCHED', notified_at: null, context_json: {}, created_at: new Date('2026-07-10T09:00:00Z') },
+      { id: 'f-newer', user_id: user.id, kind: 'WATCHED', resolved_at: null, context_json: {}, created_at: new Date('2026-07-10T10:00:00Z') },
+      { id: 'f-older', user_id: user.id, kind: 'WATCHED', resolved_at: null, context_json: {}, created_at: new Date('2026-07-10T09:00:00Z') },
     );
 
     const sent: Array<{ context: { watched: { id: string } } }> = [];

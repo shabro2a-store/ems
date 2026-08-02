@@ -23,7 +23,7 @@ interface Overview {
   people: Person[];
   attention: {
     lateDrivers: { trip_id: string; driver_username: string; branch_name: string; since_min: number; threshold_min: number }[];
-    flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null }[];
+    flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null; reason: string }[];
     penalties: { user_id: string; username: string; date: string; kind: 'LATE' | 'EARLY_LEAVE'; minutes: number; hours: number; amount_cent: number }[];
     pendingAdvances: { id: string; username: string; amount_cent: number; reason: string | null }[];
     pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; start_time: string | null; end_time: string | null; note: string | null }[];
@@ -270,7 +270,10 @@ export default function AdminDashboard() {
                     <Badge tone="danger">Flag</Badge>
                     <div className="min-w-0 flex-1 text-sm">
                       <div className="font-medium">{f.username ?? 'Employee'} · {f.kind.replace(/_/g, ' ').toLowerCase()}</div>
-                      <div className="text-xs text-muted">{f.branch_name ?? '—'} · {formatBeirutTime(f.created_at)}</div>
+                      <div className="mt-0.5 text-sm">{f.reason}</div>
+                      <div className="mt-1 text-xs text-muted">
+                        {f.branch_name ?? '—'} · flagged {formatBeirutTime(f.created_at)}
+                      </div>
                       <div className="mt-1 text-xs text-muted">
                         {f.kind === 'MISSED_CHECKOUT'
                           ? 'Dismissing only clears this notice. If the punch itself is wrong, correct it in Punches.'

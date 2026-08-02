@@ -163,13 +163,13 @@ export async function resolveWatchedFlag(
   notifierInstance?: Notifier,
 ): Promise<void> {
   const candidate = await db.flag.findFirst({
-    where: { kind: 'WATCHED', user_id: user.id, notified_at: null },
+    where: { kind: 'WATCHED', user_id: user.id, resolved_at: null },
     orderBy: { created_at: 'asc' },
   });
   if (!candidate) return;
   const claim = await db.flag.updateMany({
-    where: { id: candidate.id, notified_at: null },
-    data: { notified_at: new Date() },
+    where: { id: candidate.id, resolved_at: null },
+    data: { resolved_at: new Date() },
   });
   if (claim.count !== 1) return;
   await (notifierInstance ?? getNotifier()).send({

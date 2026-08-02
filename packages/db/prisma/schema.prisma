@@ -310,9 +310,15 @@ model Flag {
   branch       Branch?   @relation(fields: [branch_id], references: [id])
   context_json Json
   created_at   DateTime  @default(now())
+  // When an alert about this flag was sent out. NOT a resolution marker.
   notified_at  DateTime?
+  // When a human dealt with it (admin dismissed, or the employee punched and
+  // auto-cleared it). Kept separate from notified_at: conflating the two let the
+  // 23:30 sweep silently drop flags nobody had reviewed.
+  resolved_at  DateTime?
 
   @@index([created_at(sort: Desc)])
+  @@index([resolved_at])
 }
 
 model AuditLog {

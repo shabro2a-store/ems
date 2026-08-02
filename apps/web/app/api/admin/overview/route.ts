@@ -7,6 +7,29 @@ import { pendingPenaltyNotices } from '@/lib/services/penalty';
 // How far back the penalty review queue looks. Older ones are a payroll matter.
 const PENALTY_LOOKBACK_DAYS = 7;
 
+// A flag row that only names its kind ("watched") tells the admin nothing about
+// why the system raised it. The detail is already in context_json — this turns it
+// into the sentence the admin actually needs.
+function flagReason(kind: string, ctx: unknown): string {
+  const c = (ctx ?? {}) as { scheduled_start?: string; scheduled_end?: string; since_min?: number };
+  const mins = typeof c.since_min === 'number' ? c.since_min : null;
+  const late = mins === null ? '' : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  switch (kind) {
+    case 'WATCHED':
+      return c.scheduled_start
+        ? `No punch in — their shift started at ${c.scheduled_start}${late ? `, ${late} ago` : ''}.`
+        : 'Scheduled to work but has not punched in.';
+    case 'MISSED_CHECKOUT':
+      return c.scheduled_end
+        ? `Still clocked in — their shift ended at ${c.scheduled_end}${late ? `, ${late} ago` : ''}. Overtime, or forgot to punch out?`
+        : 'Still clocked in well past the end of their shift.';
+    case 'TRIP_OVER_THRESHOLD':
+      return 'Out on an order longer than the branch threshold.';
+    default:
+      return 'Needs a look.';
+  }
+}
+
 // Powers the redesigned admin dashboard: live per-employee status, KPIs, and the
 // "needs attention" queue. Supports ?branchId=<id> to scope everything to one branch
 // (omit or 'all' for every branch).
@@ -80,7 +103,7 @@ export async function GET(req: Request) {
         select: { user_id: true },
       }),
       prisma.flag.findMany({
-        where: { created_at: { gte: startUtc, lt: endUtc }, notified_at: null },
+        where: { created_at: { gte: startUtc, lt: endUtc }, resolved_at: null },
         orderBy: { created_at: 'desc' },
         take: 30,
         include: { user: { select: { username: true, branch_id: true } }, branch: { select: { name: true } } },
@@ -181,6 +204,7 @@ export async function GET(req: Request) {
       branch_name: f.branch?.name ?? (f.user?.branch_id ? branchName.get(f.user.branch_id) ?? null : null),
       created_at: f.created_at.toISOString(),
       notified_at: f.notified_at ? f.notified_at.toISOString() : null,
+      reason: flagReason(f.kind, f.context_json),
     }));
 
   // Late / early-leave penalties apply automatically, so this queue is a review

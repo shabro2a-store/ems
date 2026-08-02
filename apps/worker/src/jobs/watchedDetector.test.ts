@@ -8,6 +8,7 @@ type FlagRow = {
   context_json: unknown;
   created_at: Date;
   notified_at: Date | null;
+  resolved_at: Date | null;
 };
 type ScheduleRow = { id: string; user_id: string; weekday: number; start_time: string; end_time: string };
 type UserRow = {
@@ -69,11 +70,10 @@ function makeDb() {
       },
     },
     flag: {
-      findFirst: async ({ where }: { where: { kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; user_id: string; notified_at: Date | null; created_at?: { gte: Date; lt: Date } } }) => {
+      findFirst: async ({ where }: { where: { kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; user_id: string; created_at?: { gte: Date; lt: Date } } }) => {
         return store.flags.find((f) => {
           if (f.kind !== where.kind) return false;
           if (f.user_id !== where.user_id) return false;
-          if (where.notified_at !== null && f.notified_at === null) return false;
           if (where.created_at && (f.created_at < where.created_at.gte || f.created_at >= where.created_at.lt)) return false;
           return true;
         }) ?? null;
@@ -88,6 +88,7 @@ function makeDb() {
           context_json: data.context_json,
           created_at: new Date('2026-07-12T08:00:00Z'),
           notified_at: null,
+          resolved_at: null,
         };
         store.flags.push(f);
         return f;
@@ -150,6 +151,26 @@ describe('runWatchedDetector', () => {
     expect(r1.flags_created).toBe(1);
     const r2 = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:01:00+03:00') });
     expect(r2.flags_created).toBe(0);
+  });
+
+  it('does not re-raise a flag the admin already dismissed', async () => {
+    // Regression: the dedup guard used to require an unresolved flag, so
+    // dismissing one made it stop matching and the next run — a minute later —
+    // created a duplicate. From the admin's side the notice came back by itself.
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
+
+    const db = makeDb();
+    const first = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:00:00+03:00') });
+    expect(first.flags_created).toBe(1);
+
+    store.flags[0]!.resolved_at = new Date('2026-07-12T10:00:30+03:00');
+
+    const after = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:01:00+03:00') });
+    expect(after.flags_created).toBe(0);
+    expect(store.flags.length).toBe(1);
   });
 
   it('does not fire before scheduled start + 30 min', async () => {

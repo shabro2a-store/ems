@@ -19,8 +19,11 @@ export async function runEndOfDayWatcher(
   const db = opts.db ?? defaultPrisma;
   const now = opts.now ?? new Date();
 
+  // Unreviewed flags, not un-alerted ones. This job only sends the 23:30
+  // summary; marking them notified must not take them off the admin's queue,
+  // which is what happened while both meanings shared one column.
   const flags = await db.flag.findMany({
-    where: { kind: 'WATCHED', notified_at: null },
+    where: { kind: 'WATCHED', resolved_at: null, notified_at: null },
     include: { user: true },
   });
 

@@ -20,24 +20,24 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const flag = await prisma.flag.findUnique({ where: { id: params.id } });
   if (!flag) return jsonError('NOT_FOUND', 'Flag not found', 404);
-  if (flag.notified_at) {
-    return NextResponse.json({ ok: true, data: { id: flag.id, resolved_at: flag.notified_at.toISOString() } });
+  if (flag.resolved_at) {
+    return NextResponse.json({ ok: true, data: { id: flag.id, resolved_at: flag.resolved_at.toISOString() } });
   }
 
   const updated = await prisma.flag.update({
     where: { id: params.id },
-    data: { notified_at: new Date() },
+    data: { resolved_at: new Date() },
   });
   await writeAuditLog({
     actorId: adminId,
     action: 'flag.resolve',
     entity: 'Flag',
     entityId: flag.id,
-    before: { notified_at: null },
-    after: { notified_at: updated.notified_at?.toISOString() ?? null },
+    before: { resolved_at: null },
+    after: { resolved_at: updated.resolved_at?.toISOString() ?? null },
   });
 
-  return NextResponse.json({ ok: true, data: { id: updated.id, resolved_at: updated.notified_at?.toISOString() ?? null } });
+  return NextResponse.json({ ok: true, data: { id: updated.id, resolved_at: updated.resolved_at?.toISOString() ?? null } });
 }
 
 export const dynamic = 'force-dynamic';

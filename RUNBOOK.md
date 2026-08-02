@@ -188,10 +188,11 @@ Run once on the VPS after first deploy:
 
 - **Asia/Beirut**: the only timezone the business logic speaks. UTC stored in DB; conversion at display time via `packages/time`.
 - **RateChange**: append-only table; payout reads only from this. `User.hourly_rate_cent` is display-only.
-- **Flag**: notify-able event (WATCHED / MISSED_CHECKOUT / TRIP_OVER_THRESHOLD). Insert-only except `notified_at`.
-  Note `notified_at` currently means three things at once — alert sent, admin dismissed, and
-  auto-resolved by punching. See SYSTEM_MAP §9; it is why the 23:30 sweep can clear a WATCHED
-  flag nobody reviewed. `TRIP_OVER_THRESHOLD` is declared but never written.
+- **Flag**: notify-able event (WATCHED / MISSED_CHECKOUT / TRIP_OVER_THRESHOLD). Insert-only
+  except `notified_at` (an alert was sent) and `resolved_at` (a human dealt with it). The
+  attention queue filters on `resolved_at`; `watchedDetector` dedups on "any flag today"
+  regardless of either. If a dismissed notice ever reappears, check that dedup first — it is
+  what caused it last time. `TRIP_OVER_THRESHOLD` is declared but never written.
 - **Penalty**: never stored. Computed from schedule vs punches at read time. A **PenaltyWaiver**
   revokes one (money returns); a **PenaltyAck** upholds one (money unchanged, notice cleared).
 - **PenaltyAck vs PenaltyWaiver**: only the waiver touches pay. If an employee disputes a

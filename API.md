@@ -123,6 +123,9 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     acknowledged. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
   - `pendingLeaves[]` includes `start_time` / `end_time` — a `TIME_CHANGE` cannot be
     reviewed without the hours being requested.
+  - `flags[]` includes a rendered **`reason`** ("No punch in — their shift started at
+    09:00, 45m ago"), built server-side from `context_json`. Only unresolved flags appear
+    (`resolved_at IS NULL`); being alerted about one does not remove it from the queue.
 - **GET /api/admin/activity?branchId=&limit=** → `{ events: [{ id, type, username, at }] }`
   (punches + trips, newest first).
 - **GET /api/admin/trends?branchId=&days=** → `{ points: [{ date, label, present, hours }] }`.

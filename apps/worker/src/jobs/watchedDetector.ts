@@ -66,8 +66,12 @@ export async function runWatchedDetector(
     });
     if (hasPunch) continue;
 
+    // One flag per user per day, regardless of whether it has been dealt with.
+    // Filtering on an unresolved flag here meant that dismissing one made this
+    // guard stop matching, so the next run (a minute later) created a duplicate
+    // and the notice appeared to come back by itself.
     const existing = await db.flag.findFirst({
-      where: { kind: 'WATCHED', user_id: s.user_id, notified_at: null, created_at: { gte: startOfDay, lt: endOfDay } },
+      where: { kind: 'WATCHED', user_id: s.user_id, created_at: { gte: startOfDay, lt: endOfDay } },
     });
     if (existing) continue;
 

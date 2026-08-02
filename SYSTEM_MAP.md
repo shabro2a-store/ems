@@ -78,7 +78,11 @@ cuid PKs, money = Int cents.
   stand. Changes **no money** — it exists only so the attention queue stops recomputing a
   penalty the admin has already reviewed. Waiver = revoked; ack = reviewed and upheld.
 - **Flag** — kind(WATCHED / MISSED_CHECKOUT / TRIP_OVER_THRESHOLD), user?, branch?, context_json,
-  notified_at?(= resolved/acknowledged marker).
+  **notified_at?** (an alert was sent) and **resolved_at?** (a human dealt with it: admin
+  dismissed, or the employee punched and auto-cleared it). Keeping them separate matters —
+  while they shared one column, the 23:30 sweep dropped flags nobody had reviewed, and
+  dismissing one made `watchedDetector`'s dedup miss so the cron recreated it a minute later.
+  `context_json` carries the detail the dashboard renders as the flag's reason.
 - **AuditLog** — append-only (DB revokes UPDATE/DELETE). actor/action/entity/before/after.
 - **IdempotencyKey** — (key,user)→cached response, 24h TTL. **RateLimitBucket** — token bucket store.
 
@@ -282,15 +286,15 @@ requires a short-lived code shown only to a logged-in admin.
 
 ## 9. Known issues
 
-Two, both needing one migration, both narrow:
+One left:
 
 1. **`driverStale` re-alerts every 30 min.** No per-trip guard, unlike `tripThreshold`'s
    `threshold_alerted_at`. A driver out 8h generates ~9 identical messages. → Add
    `stale_alerted_at` on `Trip` and gate on it.
-2. **`Flag.notified_at` carries three meanings.** "Alert sent" (`endOfDayWatcher`), "admin
-   dismissed" (`flags/[id]/resolve`), and "auto-resolved by punching" ([punch.ts](apps/web/lib/services/punch.ts)).
-   The 23:30 sweep therefore drops WATCHED flags off the attention list with no human review.
-   → Add a distinct `resolved_at`.
+
+*(The `Flag.notified_at` overload is fixed — `resolved_at` now exists. It had been causing
+two visible bugs: dismissed flags reappearing within a minute, and the 23:30 sweep silently
+clearing flags nobody had reviewed.)*
 
 Minor / by design: `tripThreshold` sets `over_threshold` on the Trip but writes no
 `TRIP_OVER_THRESHOLD` Flag — over-threshold trips reach the dashboard through the live
