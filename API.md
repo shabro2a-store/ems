@@ -116,7 +116,13 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **GET /api/admin/overview?branchId=all|<id>** → live KPIs + per-employee status +
   attention queue: `{ branches, branchId, kpis{ present, absent, driversOut,
   driversOver, tripsToday, hoursToday, laborTodayCent }, people[] (drivers include
-  trips_today), attention{ lateDrivers, flags, pendingAdvances, pendingLeaves } }`.
+  trips_today), attention{ lateDrivers, flags, penalties, pendingAdvances,
+  pendingLeaves } }`.
+  - `penalties[]` — `{ user_id, username, date, kind: LATE|EARLY_LEAVE, minutes, hours,
+    amount_cent }`. Computed on the fly, last 7 days, excluding any already waived or
+    acknowledged. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
+  - `pendingLeaves[]` includes `start_time` / `end_time` — a `TIME_CHANGE` cannot be
+    reviewed without the hours being requested.
 - **GET /api/admin/activity?branchId=&limit=** → `{ events: [{ id, type, username, at }] }`
   (punches + trips, newest first).
 - **GET /api/admin/trends?branchId=&days=** → `{ points: [{ date, label, present, hours }] }`.
@@ -182,10 +188,20 @@ payroll as `penalties_cent` and reduce `net_cent`.
   "LATE"|"EARLY_LEAVE", waived: bool, reason? }` — removes (`waived:true`) or
   re-applies (`waived:false`) one auto-penalty. Only ever writes `PenaltyWaiver`
   rows; never a manual adjustment. → `{ waived }`.
+- **POST /api/admin/penalties/ack** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:
+  "LATE"|"EARLY_LEAVE" }` — upholds one auto-penalty: writes a `PenaltyAck` so the
+  attention queue stops recomputing it. **Changes no money** — `waive` is the one
+  that refunds. Audited. → `{ acknowledged: true }`.
 
 ### Flags
 - **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag
-  (sets `notified_at`); audited. → `{ id, resolved_at }`.
+  (sets `notified_at`); audited. Changes no punch or pay record. → `{ id, resolved_at }`.
+
+### Telegram binding
+- **GET /api/admin/telegram/code** → `{ code, expires_in_s, bound, bot_configured }`.
+  The 6-digit code the admin sends the bot as `/start <code>`. Derived by HMAC from
+  `JWT_SECRET` over a 10-minute window, so nothing is stored and nothing expires in the
+  DB. A bare `/start`, or a wrong/expired code, is refused — see the webhook below.
 
 ---
 
@@ -195,8 +211,14 @@ The POS caller's board. A caller belongs to one branch and can only see/ring dri
 
 ### GET /api/caller/drivers
 → `{ branch, drivers: [{ id, username, name, clocked_in, available, open_trip_since,
-trips_today, ringing }] }`. `available` = clocked in and not on a trip; `trips_today` counts
-trips since this shift's clock-in.
+trips_today, ringing, last_trip_at }] }`. `available` = clocked in and not on a trip;
+`trips_today` counts trips since this shift's clock-in.
+
+**Order is meaningful — the board renders it as-is.** Available drivers come first, then
+those out on an order, then off-shift. Within the available group, the driver who went out
+**least recently** is first (`last_trip_at` ascending, never-dispatched first), so whoever
+just took an order sinks to the bottom and everyone gets a turn. The caller may still ring
+anyone.
 
 ### POST /api/caller/ring  *(CSRF)*
 Body `{ driverId }`. Records a ring the driver's app picks up. → `{ rang: true }`.
@@ -206,4 +228,13 @@ Errors: `WRONG_BRANCH` 403 (driver not in caller's branch), `NOT_FOUND` 404.
 
 ### POST /api/telegram/webhook (public, secret-guarded)
 Guarded by the `x-telegram-bot-api-secret-token` header vs `TELEGRAM_WEBHOOK_SECRET`.
-On `/start`, binds the sender's chat id to the admin user. → `200 { bound }` / `{ skipped }`.
+That header proves the request came **from Telegram**, not *who* messaged the bot, so
+binding is additionally gated on a code from `GET /api/admin/telegram/code`:
+
+- `/start <valid code>` → binds that chat to the admin. `200 { bound }`
+- `/start` with no code → `200 { needsCode: true }`, replies with instructions
+- `/start <wrong or expired code>` → `200 { rejected: true }`, no binding
+- `/help` → `200 { helped: true }`
+- anything else → `200 { skipped: true }` (ack so Telegram stops retrying)
+
+Always `200` on handled updates — a non-2xx makes Telegram retry the same update.

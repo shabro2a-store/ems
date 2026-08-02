@@ -4,10 +4,14 @@ Time-and-attendance for a multi-branch supermarket in Beirut: geofenced punch
 in/out, driver trips, monthly payroll (money in integer cents), leave/day-off
 scheduling, cash advances, and a Telegram-notifying background worker.
 
-- **Admin** (owner): live operations dashboard, employees + weekly schedules,
-  branches + GPS geofences, punch log + corrections, payroll + PDF export.
+- **Admin** (owner): live operations dashboard with a **Needs attention** work queue
+  (penalties, flags, advance and leave requests — each action reports what it changed),
+  employees + weekly schedules, branches + GPS geofences, punch log + corrections,
+  payroll + PDF export.
 - **Employee / Driver** (phone): one-tap geofenced check in/out or trip out/back,
-  advances, leave, and their own payslip.
+  advances, leave and hours-change requests, and their own payslip.
+- **Caller** (POS tablet): rings drivers for pickups. The board rotates by fair turn —
+  whoever just went out sinks to the bottom. Drivers can only leave once rung.
 
 ## Docs
 - [SYSTEM_MAP.md](SYSTEM_MAP.md) — what the system does (roles, data model, rules, worker jobs).

@@ -26,7 +26,7 @@ interface Overview {
     flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null }[];
     penalties: { user_id: string; username: string; date: string; kind: 'LATE' | 'EARLY_LEAVE'; minutes: number; hours: number; amount_cent: number }[];
     pendingAdvances: { id: string; username: string; amount_cent: number; reason: string | null }[];
-    pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; note: string | null }[];
+    pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; start_time: string | null; end_time: string | null; note: string | null }[];
   };
 }
 interface TrendPoint { date: string; label: string; present: number; hours: number }
@@ -383,9 +383,17 @@ export default function AdminDashboard() {
                   <li key={l.id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
                     <Badge tone="primary">Leave</Badge>
                     <div className="min-w-0 flex-1 text-sm">
-                      <div className="font-medium">{l.username} · {l.kind.replace(/_/g, ' ').toLowerCase()}</div>
+                      <div className="font-medium">
+                        {l.username} · {l.kind === 'DAY_OFF' ? 'day off' : 'hours change'}
+                        {l.kind === 'TIME_CHANGE' && l.start_time && l.end_time ? ` → ${l.start_time}–${l.end_time}` : ''}
+                      </div>
                       <div className="text-xs text-muted">
                         {l.start_date}{l.end_date !== l.start_date ? ` → ${l.end_date}` : ''}{l.note ? ` · ${l.note}` : ''}
+                      </div>
+                      <div className="mt-1 text-xs text-muted">
+                        {l.kind === 'DAY_OFF'
+                          ? 'Approving marks those days off on their schedule.'
+                          : 'Approving rewrites their hours for those days automatically.'}
                       </div>
                       <div className="mt-2 flex gap-2">
                         <Button
@@ -397,7 +405,10 @@ export default function AdminDashboard() {
                               body: { decision: 'APPROVED' },
                               success: (d) => {
                                 const n = (d as { overrides_created?: number })?.overrides_created ?? 0;
-                                return `Leave approved — ${n} day${n === 1 ? '' : 's'} written to ${l.username}'s schedule.`;
+                                const days = `${n} day${n === 1 ? '' : 's'}`;
+                                return l.kind === 'TIME_CHANGE' && l.start_time && l.end_time
+                                  ? `Hours change approved — ${l.username} now works ${l.start_time}–${l.end_time} (${days} updated on their schedule).`
+                                  : `Day off approved — ${days} marked off on ${l.username}'s schedule.`;
                               },
                             })
                           }

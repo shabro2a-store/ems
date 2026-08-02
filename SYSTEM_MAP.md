@@ -9,8 +9,12 @@ scheduling, cash advances, and a Telegram-notifying cron worker. Business timezo
 Stack: Next.js 14 (App Router) web app + a `node-cron` worker + Postgres (Prisma).
 Packages: `db` (schema/seed), `time` (Beirut tz), `notify` (Telegram), `pdf` (payroll PDF).
 
-**Status:** fully redesigned admin + field UI, shipped and running in production.
-The one remaining planned feature is the notification wiring (see §9).
+**Status:** feature-complete and running in production. Everything below is built,
+tested and deployed. What remains is operational rather than developmental: linking
+the Telegram bot (see [DEPLOY.md](DEPLOY.md)) and the two known issues in §9.
+
+**This document describes `master`.** Production only matches it after a deploy —
+check `/api/health`'s `uptime_s` if in doubt.
 
 ---
 
@@ -70,6 +74,9 @@ cuid PKs, money = Int cents.
 - **PenaltyWaiver** — (user, date, kind LATE/EARLY_LEAVE) unique. Penalties themselves are
   **computed on the fly** (schedule vs punches, see §4), not stored; a waiver is the admin
   "remove penalty" for one (user, day, kind) and can never touch an Adjustment.
+- **PenaltyAck** — (user, date, kind) unique. The admin saw an auto-penalty and let it
+  stand. Changes **no money** — it exists only so the attention queue stops recomputing a
+  penalty the admin has already reviewed. Waiver = revoked; ack = reviewed and upheld.
 - **Flag** — kind(WATCHED / MISSED_CHECKOUT / TRIP_OVER_THRESHOLD), user?, branch?, context_json,
   notified_at?(= resolved/acknowledged marker).
 - **AuditLog** — append-only (DB revokes UPDATE/DELETE). actor/action/entity/before/after.
@@ -107,8 +114,10 @@ Full request/response detail is in [API.md](API.md). Summary:
   `POST adjustments` · `GET advances` · `POST advances/[id]/decision` ·
   `POST leave/[id]/decision`.
 - Penalties: `GET penalties?userId&month` (computed list + waived flag) · `POST penalties/waive`
-  (remove/restore one auto-penalty; never touches adjustments).
+  (remove/restore one auto-penalty; never touches adjustments) · `POST penalties/ack`
+  (uphold one; clears it from the attention queue without changing pay).
 - Flags: `POST flags/[id]/resolve`.
+- Telegram: `GET telegram/code` (the 6-digit bind code + whether a bot/chat is configured).
 
 **Telegram**: `POST /api/telegram/webhook` (secret-guarded; `/start` binds admin chat_id).
 
@@ -141,7 +150,18 @@ Full request/response detail is in [API.md](API.md). Summary:
 - **Caller dispatch gate**: a driver can only go "out on order" (start a trip) after the caller
   rings them — the trip requires a `DriverCall` from the last 30 min with no trip yet; starting
   the trip consumes that call (`trip_id`). Prevents undispatched trips and ties each trip to its
-  ring. Error `NOT_DISPATCHED` 409 if not rung.
+  ring. Error `NOT_DISPATCHED` 409 if not rung. **A branch with no active CALLER cannot
+  dispatch at all** — see the deploy checklist.
+- **Fair driver rotation** (`compareForRotation` in `caller.ts`): the caller board orders
+  available drivers by who went out **least recently**, so whoever just took an order sinks to
+  the bottom. With 1, 2, 3 up and 2 dispatched, 2 returns to a board reading 1, 3, 2. A driver
+  who has not been out at all outranks everyone. The caller can still ring anybody — this only
+  makes the fair choice the obvious one so nobody slacks off.
+- **Penalty review**: penalties apply automatically, so the admin queue is a *review* list, not
+  an approval one. **Accept** upholds it (writes a `PenaltyAck`, changes no money); **Revoke**
+  waives it (writes a `PenaltyWaiver`, returns the money) — for someone who did give notice,
+  since the penalty targets people who ghost. Scoped to the last 7 days; older ones are a
+  payroll-page matter.
 - **Punch (`punch.ts`)** gate order: user active+branch → driver open-trip block →
   geofence (accuracy then radius) → session state. Writes full evidence + audit; resolves the
   oldest open WATCHED flag atomically.
@@ -196,8 +216,8 @@ an "Open in app" deep link) — all actions happen in the web app.
 
 - **Public**: `/login` (branded).
 - **Admin** (desktop-first, responsive): `/admin` command center (branch filter, KPIs + labor,
-  live per-employee status, weekly trends chart, needs-attention with inline approve/reject/resolve,
-  activity feed) · `/admin/users` (Employees: branch filter, add/edit incl. name+username, rate,
+  live per-employee status, weekly trends chart, **Needs attention**, activity feed, Telegram
+  bind card) · `/admin/users` (Employees: branch filter, add/edit incl. name+username, rate,
   reset/set password, deactivate, per-employee weekly schedule) · `/admin/branches` (create/edit/
   remove, record GPS) · `/admin/punches` (log + persistent correction) · `/admin/payroll` (month +
   branch filter, totals incl. **Total to pay / Adjustments / Penalties**, editable rate, inline
@@ -213,6 +233,23 @@ an "Open in app" deep link) — all actions happen in the web app.
   metaphor); shows live Out timer + trips today; tap = ring. Polls every 3s.
 - The **admin dashboard** also shows a **Trips today** KPI and per-driver trip counts.
 
+### Needs attention (the admin's work queue)
+
+Five row types. Every action reports what it changed — a row that merely vanishes is
+indistinguishable from a button that does nothing, which is exactly how this failed before.
+
+| Row | Actions | What they do |
+|---|---|---|
+| **Late** driver | none | Informational; clears itself when the driver presses Back. |
+| **Flag** | Dismiss (+ Fix punch) | Dismiss is an acknowledgement only — no record changes. `MISSED_CHECKOUT` also links to `/admin/punches`, where the punch can actually be corrected. |
+| **Penalty** | Accept · Revoke | Accept upholds (no money moves); Revoke waives and returns the money. |
+| **Advance** | Approve · Reject | Approve deducts from this month's pay. |
+| **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`, **new hours for `TIME_CHANGE`**. The row shows the requested hours so the admin is not approving blind. |
+
+Every irreversible action (Reject, Revoke) is **two-step**: the first tap arms the button,
+the second commits. The decision endpoints answer `ALREADY_DECIDED` forever after, so a
+misclick could not otherwise be undone.
+
 ---
 
 ## 8. Resolved findings
@@ -227,44 +264,36 @@ The bugs found in the initial audit are fixed:
 - Error UI shows human messages; CSRF/idempotency/modal boilerplate extracted to shared helpers.
 - Security: admin account protected; `password_hash` never returned; self + admin password management.
 
-## 9. Outstanding
-
 **Caller ring** is fully shipped: a loud in-app alarm while the app is open **plus** Web Push
 (`push.ts` + service worker + VAPID) so it also reaches a **locked/closed** phone — solid on
 Android; iPhones must "Add to Home Screen" (install the PWA) on iOS 16.4+. Push is optional:
 with no VAPID keys set it degrades to the in-app alarm only. Setup: see DEPLOY.md.
 
-### "Needs Attention → Telegram" — the last planned feature (spec)
+**Notifications** were audited end-to-end and repaired. What was wrong and is now fixed:
+the web app could not reach Telegram at all (`punchEmployee` fell back to a hardcoded
+`ConsoleNotifier`; both it and `requestAdvance` now resolve through `getNotifier()`); `punch.ts`
+sent a `watched.resolved` key no template matched, rendering raw JSON; four templates deep-linked
+to `/admin/flags` and `/admin/pending`, neither of which exists; `trip.over_threshold` always
+printed "30 min" because the job never sent `threshold_min`; advance requests fired no alert;
+`/start` advertised a `/help` that did not exist; and `resolveRecipient` opened a fresh
+`PrismaClient` per message. **Security:** binding was open to anyone who found the bot — the
+webhook secret proves a request came *from Telegram*, not *who* sent it — so `/start` now
+requires a short-lived code shown only to a logged-in admin.
 
-The Telegram **transport** (`packages/notify/src/telegram.ts`) and the `/start` chat-id binding
-(`/api/telegram/webhook`) are correct and wired. Everything **upstream** needs work. Fixes, in
-priority order (each verified against the code by an audit):
+## 9. Known issues
 
-1. **Web app never sends to Telegram (blocker).** The web `notifier` export is a hardcoded
-   `ConsoleNotifier` ([packages/notify/src/index.ts:43](packages/notify/src/index.ts)); the punch
-   route calls `punchEmployee` without passing a notifier, so it uses that console one. Only the
-   **worker** uses `getNotifier()`. → Route web callers (punch, and #3) through `getNotifier()` so
-   web-originated alerts can reach Telegram when a token is set.
-2. **Template key typo (blocker).** `punch.ts` sends `template: 'watched.resolved'` but the only
-   template is `'watched_resolved'` → falls to the default branch and renders raw JSON. → Make the
-   keys match (rename one).
-3. **Advance request sends no alert (bug).** `requestAdvance` (and `/api/me/advances`) never notify;
-   the `advance_requested` template is defined but never fired. → Send it on request.
-4. **`driverStale` re-alerts every 30 min (bug).** No per-trip guard (unlike `tripThreshold`'s
-   `threshold_alerted_at`). → Add a `stale_alerted_at` field on `Trip` and gate on it.
-5. **`tripThreshold` writes no Flag (design gap).** It sets `over_threshold`/`threshold_alerted_at`
-   on the Trip but never creates a `TRIP_OVER_THRESHOLD` Flag, so over-threshold trips reach the
-   dashboard only via the separate live `lateDrivers` computation, not the flags list. → Either
-   create the flag (so it's resolvable) or accept the live path and drop the unused enum value.
-6. **"Late driver" attention row is not actionable (UX).** It has no button/endpoint, unlike flags/
-   advances/leaves. → Give it an action or relabel it as informational.
-7. **`Flag.notified_at` is overloaded (consistency bug).** It means both "alert sent" and "admin
-   resolved": `endOfDayWatcher` sets it when *sending* the 23:30 alert, silently dropping WATCHED
-   flags off the attention list with no admin action; `missedCheckout` never sets it. → Add a
-   distinct `resolved_at` so alerting and resolution don't collide.
+Two, both needing one migration, both narrow:
 
-Also planned: an in-app notification **bell** fed by the same events (informational; actions stay
-in the web app). Needs the client's `TELEGRAM_BOT_TOKEN` (+ `/start`) for the real end-to-end test.
+1. **`driverStale` re-alerts every 30 min.** No per-trip guard, unlike `tripThreshold`'s
+   `threshold_alerted_at`. A driver out 8h generates ~9 identical messages. → Add
+   `stale_alerted_at` on `Trip` and gate on it.
+2. **`Flag.notified_at` carries three meanings.** "Alert sent" (`endOfDayWatcher`), "admin
+   dismissed" (`flags/[id]/resolve`), and "auto-resolved by punching" ([punch.ts](apps/web/lib/services/punch.ts)).
+   The 23:30 sweep therefore drops WATCHED flags off the attention list with no human review.
+   → Add a distinct `resolved_at`.
 
-Minor: trips write no separate AuditLog entry; three notify templates are currently unreachable
-(`advance_requested`, `end_of_day_watched`, and — until #2 — `watched_resolved`).
+Minor / by design: `tripThreshold` sets `over_threshold` on the Trip but writes no
+`TRIP_OVER_THRESHOLD` Flag — over-threshold trips reach the dashboard through the live
+`lateDrivers` computation instead, so the enum value is written by nothing. Trips write no
+separate AuditLog entry. The `end_of_day_watched` template is unreachable because
+`endOfDayWatcher` sends `watched.unresolved` (which *is* handled) — dead code, not a bug.

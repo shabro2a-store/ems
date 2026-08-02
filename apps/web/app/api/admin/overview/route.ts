@@ -213,6 +213,9 @@ export async function GET(req: Request) {
       kind: l.kind,
       start_date: l.start_date.toISOString().slice(0, 10),
       end_date: l.end_date.toISOString().slice(0, 10),
+      // A TIME_CHANGE is unreviewable without the hours being asked for.
+      start_time: l.start_time,
+      end_time: l.end_time,
       note: l.note,
     }));
 
