@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiGet, apiSend, centsToUsd, formatBeirutTime } from '@/lib/api';
-import { Card, CardBody, CardHeader, Badge, StatTile, EmptyState, Spinner, Select, Button } from '@/components/ui';
+import { apiGet, apiSend, centsToUsd, formatBeirutTime, errorMessage } from '@/lib/api';
+import { Card, CardBody, CardHeader, Badge, StatTile, EmptyState, Spinner, Select, Button, Alert } from '@/components/ui';
 import { TelegramAlertsCard } from './TelegramAlertsCard';
 
 interface Person {
@@ -57,6 +57,8 @@ export default function AdminDashboard() {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [updated, setUpdated] = useState<Date | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const branchRef = useRef(branchId);
   branchRef.current = branchId;
 
@@ -84,11 +86,31 @@ export default function AdminDashboard() {
     return () => clearInterval(id);
   }, [branchId, loadOverview, loadAux]);
 
-  async function act(id: string, url: string, body?: unknown) {
-    setBusy(id);
-    await apiSend(url, { body, idempotent: true, idemPrefix: 'dash' });
+  // `key` is per-button (id + action) so only the clicked button shows a spinner.
+  async function act(key: string, url: string, opts: { body?: unknown; success: string }) {
+    setBusy(key);
+    setMsg(null);
+    setConfirming(null);
+    const res = await apiSend(url, { body: opts.body, idempotent: true, idemPrefix: 'dash' });
     await Promise.all([loadOverview(), loadAux()]);
     setBusy(null);
+    setMsg(
+      res.ok
+        ? { tone: 'success', text: opts.success }
+        : { tone: 'danger', text: errorMessage(res) },
+    );
+  }
+
+  // Approve/reject are final — the endpoints answer ALREADY_DECIDED on a second
+  // attempt — so a misclick on Reject cannot be walked back. First click arms
+  // the button, second click commits.
+  async function reject(key: string, url: string, what: string) {
+    if (confirming !== key) {
+      setConfirming(key);
+      return;
+    }
+    setConfirming(null);
+    await act(key, url, { body: { decision: 'REJECTED' }, success: `${what} rejected.` });
   }
 
   if (!ov) {
@@ -211,6 +233,11 @@ export default function AdminDashboard() {
         <div className="flex flex-col gap-4">
           <Card>
             <CardHeader title="Needs attention" subtitle={`${attentionCount} item${attentionCount === 1 ? '' : 's'}`} />
+            {msg && (
+              <div className="px-4 pt-3 sm:px-5">
+                <Alert tone={msg.tone}>{msg.text}</Alert>
+              </div>
+            )}
             {attentionCount === 0 ? (
               <CardBody>
                 <EmptyState title="All clear" hint="Nothing needs your attention right now." />
@@ -223,6 +250,7 @@ export default function AdminDashboard() {
                     <div className="min-w-0 flex-1 text-sm">
                       <div className="font-medium">{d.driver_username} is {dur(d.since_min)} out</div>
                       <div className="text-xs text-muted">{d.branch_name} · threshold {d.threshold_min}m</div>
+                      <div className="mt-1 text-xs text-muted">Clears itself when the driver presses Back — nothing to action here.</div>
                     </div>
                   </li>
                 ))}
@@ -233,7 +261,12 @@ export default function AdminDashboard() {
                       <div className="font-medium">{f.username ?? 'Employee'} · {f.kind.replace(/_/g, ' ').toLowerCase()}</div>
                       <div className="text-xs text-muted">{f.branch_name ?? '—'} · {formatBeirutTime(f.created_at)}</div>
                       <div className="mt-2">
-                        <Button size="sm" variant="secondary" loading={busy === f.id} onClick={() => act(f.id, `/api/admin/flags/${f.id}/resolve`)}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          loading={busy === `flag:${f.id}`}
+                          onClick={() => act(`flag:${f.id}`, `/api/admin/flags/${f.id}/resolve`, { success: 'Flag resolved.' })}
+                        >
                           Resolve
                         </Button>
                       </div>
@@ -247,11 +280,21 @@ export default function AdminDashboard() {
                       <div className="font-medium">{a.username} requested {centsToUsd(a.amount_cent)}</div>
                       {a.reason && <div className="text-xs text-muted">{a.reason}</div>}
                       <div className="mt-2 flex gap-2">
-                        <Button size="sm" variant="success" loading={busy === a.id} onClick={() => act(a.id, `/api/admin/advances/${a.id}/decision`, { decision: 'APPROVED' })}>
+                        <Button
+                          size="sm"
+                          variant="success"
+                          loading={busy === `adv-ok:${a.id}`}
+                          onClick={() => act(`adv-ok:${a.id}`, `/api/admin/advances/${a.id}/decision`, { body: { decision: 'APPROVED' }, success: `Advance approved for ${a.username}.` })}
+                        >
                           Approve
                         </Button>
-                        <Button size="sm" variant="secondary" loading={busy === a.id} onClick={() => act(a.id, `/api/admin/advances/${a.id}/decision`, { decision: 'REJECTED' })}>
-                          Reject
+                        <Button
+                          size="sm"
+                          variant={confirming === `adv-no:${a.id}` ? 'danger' : 'secondary'}
+                          loading={busy === `adv-no:${a.id}`}
+                          onClick={() => reject(`adv-no:${a.id}`, `/api/admin/advances/${a.id}/decision`, 'Advance')}
+                        >
+                          {confirming === `adv-no:${a.id}` ? 'Tap again to confirm' : 'Reject'}
                         </Button>
                       </div>
                     </div>
@@ -266,11 +309,21 @@ export default function AdminDashboard() {
                         {l.start_date}{l.end_date !== l.start_date ? ` → ${l.end_date}` : ''}{l.note ? ` · ${l.note}` : ''}
                       </div>
                       <div className="mt-2 flex gap-2">
-                        <Button size="sm" variant="success" loading={busy === l.id} onClick={() => act(l.id, `/api/admin/leave/${l.id}/decision`, { decision: 'APPROVED' })}>
+                        <Button
+                          size="sm"
+                          variant="success"
+                          loading={busy === `lv-ok:${l.id}`}
+                          onClick={() => act(`lv-ok:${l.id}`, `/api/admin/leave/${l.id}/decision`, { body: { decision: 'APPROVED' }, success: `Leave approved for ${l.username}.` })}
+                        >
                           Approve
                         </Button>
-                        <Button size="sm" variant="secondary" loading={busy === l.id} onClick={() => act(l.id, `/api/admin/leave/${l.id}/decision`, { decision: 'REJECTED' })}>
-                          Reject
+                        <Button
+                          size="sm"
+                          variant={confirming === `lv-no:${l.id}` ? 'danger' : 'secondary'}
+                          loading={busy === `lv-no:${l.id}`}
+                          onClick={() => reject(`lv-no:${l.id}`, `/api/admin/leave/${l.id}/decision`, 'Leave')}
+                        >
+                          {confirming === `lv-no:${l.id}` ? 'Tap again to confirm' : 'Reject'}
                         </Button>
                       </div>
                     </div>
