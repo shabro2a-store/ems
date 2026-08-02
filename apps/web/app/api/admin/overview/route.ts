@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
 import { todayInBeirut, todayInBeirutDateRange } from 'time';
+import { pendingPenaltyNotices } from '@/lib/services/penalty';
+
+// How far back the penalty review queue looks. Older ones are a payroll matter.
+const PENALTY_LOOKBACK_DAYS = 7;
 
 // Powers the redesigned admin dashboard: live per-employee status, KPIs, and the
 // "needs attention" queue. Supports ?branchId=<id> to scope everything to one branch
@@ -179,6 +183,24 @@ export async function GET(req: Request) {
       notified_at: f.notified_at ? f.notified_at.toISOString() : null,
     }));
 
+  // Late / early-leave penalties apply automatically, so this queue is a review
+  // list: the admin either lets one stand (acknowledge) or revokes it for
+  // someone who did give notice. Scoped to the recent past — an old penalty is
+  // a payroll matter, not something needing attention today.
+  const penaltyUsers = users.filter((u) => inScope(u.branch_id)).map((u) => ({ id: u.id, username: u.name || u.username }));
+  const since = new Date(startUtc.getTime() - PENALTY_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const penalties = (
+    await pendingPenaltyNotices(penaltyUsers, todayStr.slice(0, 7), prisma, { since })
+  ).map((p) => ({
+    user_id: p.user_id,
+    username: p.username,
+    date: p.date,
+    kind: p.kind,
+    minutes: p.minutes,
+    hours: p.hours,
+    amount_cent: p.amount_cent,
+  }));
+
   const pendingAdvances = pendingAdv
     .filter((a) => inScope(a.user?.branch_id))
     .map((a) => ({ id: a.id, username: a.user?.username ?? '—', amount_cent: a.amount_cent, reason: a.reason }));
@@ -218,6 +240,7 @@ export async function GET(req: Request) {
           threshold_min: d.threshold_min,
         })),
         flags,
+        penalties,
         pendingAdvances,
         pendingLeaves,
       },

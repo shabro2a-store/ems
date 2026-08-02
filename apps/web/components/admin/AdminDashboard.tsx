@@ -24,6 +24,7 @@ interface Overview {
   attention: {
     lateDrivers: { trip_id: string; driver_username: string; branch_name: string; since_min: number; threshold_min: number }[];
     flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null }[];
+    penalties: { user_id: string; username: string; date: string; kind: 'LATE' | 'EARLY_LEAVE'; minutes: number; hours: number; amount_cent: number }[];
     pendingAdvances: { id: string; username: string; amount_cent: number; reason: string | null }[];
     pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; note: string | null }[];
   };
@@ -134,7 +135,7 @@ export default function AdminDashboard() {
   const k = ov.kpis;
   const att = ov.attention;
   const attentionCount =
-    att.lateDrivers.length + att.flags.length + att.pendingAdvances.length + att.pendingLeaves.length;
+    att.lateDrivers.length + att.flags.length + att.penalties.length + att.pendingAdvances.length + att.pendingLeaves.length;
   const maxPresent = Math.max(1, ...trends.map((p) => p.present));
   const hoursWeek = Math.round(trends.reduce((s, p) => s + p.hours, 0) * 10) / 10;
 
@@ -293,6 +294,59 @@ export default function AdminDashboard() {
                     </div>
                   </li>
                 ))}
+                {att.penalties.map((p) => {
+                  const key = `${p.user_id}|${p.date}|${p.kind}`;
+                  const what = p.kind === 'LATE' ? 'clocking in late' : 'leaving early';
+                  const body = { userId: p.user_id, date: p.date, kind: p.kind };
+                  return (
+                    <li key={key} className="flex items-start gap-3 px-4 py-3 sm:px-5">
+                      <Badge tone="danger">Penalty</Badge>
+                      <div className="min-w-0 flex-1 text-sm">
+                        <div className="font-medium">
+                          {p.username} · {centsToUsd(p.amount_cent)} docked for {what}
+                        </div>
+                        <div className="text-xs text-muted">
+                          {p.date} · {p.minutes} min · {p.hours}h penalty
+                        </div>
+                        <div className="mt-1 text-xs text-muted">
+                          Already applied. Accept to file it, or revoke it if they gave notice.
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            loading={busy === `pen-ok:${key}`}
+                            onClick={() =>
+                              act(`pen-ok:${key}`, '/api/admin/penalties/ack', {
+                                body,
+                                success: `Penalty for ${p.username} stands — ${centsToUsd(p.amount_cent)} stays docked.`,
+                              })
+                            }
+                          >
+                            Accept
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={confirming === `pen-no:${key}` ? 'danger' : 'ghost'}
+                            loading={busy === `pen-no:${key}`}
+                            onClick={() => {
+                              if (confirming !== `pen-no:${key}`) {
+                                setConfirming(`pen-no:${key}`);
+                                return;
+                              }
+                              void act(`pen-no:${key}`, '/api/admin/penalties/waive', {
+                                body: { ...body, waived: true },
+                                success: `Penalty revoked — ${centsToUsd(p.amount_cent)} returned to ${p.username}'s pay.`,
+                              });
+                            }}
+                          >
+                            {confirming === `pen-no:${key}` ? 'Tap again to confirm' : 'Revoke'}
+                          </Button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
                 {att.pendingAdvances.map((a) => (
                   <li key={a.id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
                     <Badge tone="primary">Advance</Badge>

@@ -12,6 +12,7 @@ interface Driver {
   open_trip_since: string | null;
   trips_today: number;
   ringing: boolean;
+  last_trip_at: string | null;
 }
 
 function elapsed(sinceIso: string, now: number): string {
@@ -22,7 +23,9 @@ function elapsed(sinceIso: string, now: number): string {
 }
 
 // Available first (brightest), then out-on-order, then off-shift — the "lights
-// off" metaphor: unavailable cards dim and sink to the bottom.
+// off" metaphor: unavailable cards dim and sink to the bottom. Within the
+// available group the server orders by fair turn (least recently dispatched
+// first), so the tie-break here keeps that order rather than re-sorting by name.
 function rank(d: Driver): number {
   if (d.available) return 0;
   if (d.open_trip_since) return 1;
@@ -75,7 +78,7 @@ export default function CallerBoard() {
     window.location.href = '/login';
   }
 
-  const sorted = [...drivers].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  const sorted = [...drivers].sort((a, b) => rank(a) - rank(b));
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-4">

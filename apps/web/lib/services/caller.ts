@@ -12,6 +12,7 @@ export interface DriverStatus {
   open_trip_since: string | null; // ISO out_at while on a trip, else null
   trips_today: number; // trips since this shift's clock-in (resets at clock-out)
   ringing: boolean; // an unacknowledged ring in the last 2 minutes
+  last_trip_at: string | null; // ISO out_at of the driver's most recent trip, for rotation
 }
 
 const RING_WINDOW_MS = 2 * 60 * 1000;
@@ -29,7 +30,7 @@ export async function branchDriverStatuses(
 
   const ringCutoff = new Date(Date.now() - RING_WINDOW_MS);
 
-  return Promise.all(
+  const statuses = await Promise.all(
     drivers.map(async (d) => {
       const lastIn = await db.punch.findFirst({
         where: { user_id: d.id, kind: 'IN' },
@@ -63,6 +64,12 @@ export async function branchDriverStatuses(
         select: { id: true },
       });
 
+      const lastTrip = await db.trip.findFirst({
+        where: { driver_id: d.id },
+        orderBy: { out_at: 'desc' },
+        select: { out_at: true },
+      });
+
       return {
         id: d.id,
         username: d.username,
@@ -72,9 +79,30 @@ export async function branchDriverStatuses(
         open_trip_since: openTrip ? openTrip.out_at.toISOString() : null,
         trips_today: tripsToday,
         ringing: Boolean(pendingRing),
+        last_trip_at: lastTrip ? lastTrip.out_at.toISOString() : null,
       };
     }),
   );
+
+  return statuses.sort(compareForRotation);
+}
+
+// Fair-turn rotation. Available drivers first, and among them the one who went
+// out least recently comes first — so whoever just took an order sinks to the
+// bottom and everyone gets a turn. A driver who has not been out at all this
+// shift outranks everyone. The caller can still ring anyone; this only orders
+// the board so the fair choice is the obvious one.
+export function compareForRotation(a: DriverStatus, b: DriverStatus): number {
+  const rank = (d: DriverStatus) => (d.available ? 0 : d.open_trip_since ? 1 : 2);
+  const byRank = rank(a) - rank(b);
+  if (byRank !== 0) return byRank;
+
+  if (a.last_trip_at === null && b.last_trip_at !== null) return -1;
+  if (a.last_trip_at !== null && b.last_trip_at === null) return 1;
+  if (a.last_trip_at !== null && b.last_trip_at !== null && a.last_trip_at !== b.last_trip_at) {
+    return a.last_trip_at < b.last_trip_at ? -1 : 1;
+  }
+  return a.name.localeCompare(b.name);
 }
 
 export type RingResult = { ok: true; id: string } | { ok: false; code: 'NOT_FOUND' | 'WRONG_BRANCH' | 'NOT_CLOCKED_IN' };

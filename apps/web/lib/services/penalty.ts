@@ -217,3 +217,109 @@ export async function penaltiesForUser(
 export function sumActivePenaltiesCent(items: PenaltyItem[]): number {
   return items.reduce((s, p) => (p.waived ? s : s + p.amount_cent), 0);
 }
+
+export interface PenaltyNotice extends PenaltyItem {
+  user_id: string;
+  username: string;
+}
+
+// Penalties the admin has not dealt with yet, for the attention queue.
+// Everything is batch-loaded across all the users at once — the dashboard polls
+// every 10s, and a per-user round trip would be dozens of queries each time.
+// A penalty drops off this list when it is waived (revoked) or acknowledged.
+export async function pendingPenaltyNotices(
+  users: Array<{ id: string; username: string }>,
+  month: string,
+  db: PrismaClient,
+  opts: { since: string; now?: Date },
+): Promise<PenaltyNotice[]> {
+  if (users.length === 0) return [];
+  const ids = users.map((u) => u.id);
+  const { start, end } = monthRangeUtc(month);
+
+  const [punches, schedules, overrides, rateChanges, waivers, acks] = await Promise.all([
+    db.punch.findMany({
+      where: { user_id: { in: ids }, at: { gte: start, lt: end } },
+      orderBy: { at: 'asc' },
+      select: { user_id: true, kind: true, at: true },
+    }),
+    db.schedule.findMany({
+      where: { user_id: { in: ids } },
+      select: { user_id: true, weekday: true, start_time: true, end_time: true },
+    }),
+    db.scheduleOverride.findMany({
+      where: { user_id: { in: ids }, date: { gte: start, lt: end } },
+      select: { user_id: true, date: true, kind: true, start_time: true, end_time: true },
+    }),
+    db.rateChange.findMany({
+      where: { user_id: { in: ids }, effective_from: { lt: end } },
+      orderBy: { effective_from: 'asc' },
+      select: { user_id: true, rate_cent: true, effective_from: true },
+    }),
+    db.penaltyWaiver.findMany({
+      where: { user_id: { in: ids }, date: { gte: start, lt: end } },
+      select: { user_id: true, date: true, kind: true },
+    }),
+    db.penaltyAck.findMany({
+      where: { user_id: { in: ids }, date: { gte: start, lt: end } },
+      select: { user_id: true, date: true, kind: true },
+    }),
+  ]);
+
+  const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
+    const m = new Map<string, T[]>();
+    for (const r of rows) {
+      const list = m.get(r.user_id);
+      if (list) list.push(r);
+      else m.set(r.user_id, [r]);
+    }
+    return m;
+  };
+  const punchesBy = by(punches);
+  const schedulesBy = by(schedules);
+  const overridesBy = by(overrides);
+  const ratesBy = by(rateChanges);
+  const waiversBy = by(waivers);
+
+  const ackedKeys = new Set<string>();
+  for (const a of acks) ackedKeys.add(`${a.user_id}|${a.date.toISOString().slice(0, 10)}|${a.kind}`);
+
+  const notices: PenaltyNotice[] = [];
+  for (const u of users) {
+    const schedulesByWeekday = new Map<number, ScheduleLite>();
+    for (const s of schedulesBy.get(u.id) ?? []) {
+      schedulesByWeekday.set(s.weekday, { start_time: s.start_time, end_time: s.end_time });
+    }
+    const overridesByDate = new Map<string, OverrideLite>();
+    for (const o of overridesBy.get(u.id) ?? []) {
+      overridesByDate.set(o.date.toISOString().slice(0, 10), {
+        kind: o.kind as 'DAY_OFF' | 'TIME_CHANGE',
+        start_time: o.start_time,
+        end_time: o.end_time,
+      });
+    }
+    const waivedKeys = new Set<string>();
+    for (const w of waiversBy.get(u.id) ?? []) {
+      waivedKeys.add(`${w.date.toISOString().slice(0, 10)}|${w.kind}`);
+    }
+
+    const items = computePenalties({
+      punches: (punchesBy.get(u.id) ?? []) as PunchLite[],
+      schedulesByWeekday,
+      overridesByDate,
+      rateChanges: (ratesBy.get(u.id) ?? []) as RateChangeLite[],
+      waivedKeys,
+      now: opts.now,
+    });
+
+    for (const p of items) {
+      if (p.waived) continue;
+      if (p.date < opts.since) continue;
+      if (ackedKeys.has(`${u.id}|${p.date}|${p.kind}`)) continue;
+      notices.push({ ...p, user_id: u.id, username: u.username });
+    }
+  }
+
+  notices.sort((a, b) => (a.date === b.date ? a.username.localeCompare(b.username) : b.date.localeCompare(a.date)));
+  return notices;
+}

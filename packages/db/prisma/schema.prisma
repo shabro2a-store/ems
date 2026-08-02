@@ -76,6 +76,7 @@ model User {
   adjustments          Adjustment[]
   flags                Flag[]
   penalty_waivers      PenaltyWaiver[]
+  penalty_acks         PenaltyAck[]
   calls_received       DriverCall[]       @relation("CallsReceived")
   calls_made           DriverCall[]       @relation("CallsMade")
   push_subscriptions   PushSubscription[]
@@ -246,6 +247,22 @@ model PenaltyWaiver {
   reason     String?
   waived_by  String
   created_at DateTime    @default(now())
+
+  @@unique([user_id, date, kind])
+  @@index([user_id, date])
+}
+
+// The admin has seen an auto-computed penalty and let it stand. Unlike a
+// PenaltyWaiver this changes no money — it only takes the notice off the
+// attention queue, which otherwise recomputes it forever.
+model PenaltyAck {
+  id              String      @id @default(cuid())
+  user_id         String
+  user            User        @relation(fields: [user_id], references: [id])
+  date            DateTime    @db.Date
+  kind            PenaltyKind
+  acknowledged_by String
+  created_at      DateTime    @default(now())
 
   @@unique([user_id, date, kind])
   @@index([user_id, date])
