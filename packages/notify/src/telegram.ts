@@ -108,29 +108,29 @@ export function renderTemplate(
     case 'end_of_day_watched': {
       return {
         text: `📋 <b>End-of-day watch</b>\n${c.user?.username ?? 'Employee'} never punched in today (flagged since ${c.scheduled_start ?? 'morning'}).`,
-        deepLink: `${publicAppUrl}/admin/flags${deepLinkSuffix}`,
+        deepLink: `${publicAppUrl}/admin${deepLinkSuffix}`,
       };
     }
 
     case 'watched_resolved': {
       return {
         text: `✅ <b>Watched user punched</b>\n${c.message ?? `${c.user?.username} punched in/out after being flagged.`}`,
-        deepLink: `${publicAppUrl}/admin/flags${deepLinkSuffix}`,
+        deepLink: `${publicAppUrl}/admin${deepLinkSuffix}`,
       };
     }
 
     case 'watched.unresolved': {
       return {
         text: `⚠️ <b>Watched flag never resolved</b>\n${c.message ?? `${c.user?.username ?? 'Employee'} never punched in today`}`,
-        deepLink: `${publicAppUrl}/admin/flags${deepLinkSuffix}`,
+        deepLink: `${publicAppUrl}/admin${deepLinkSuffix}`,
       };
     }
 
     case 'advance_requested': {
       const amount = ((c.amount ?? 0) / 100).toFixed(2);
       return {
-        text: `💰 <b>Advance requested</b>\n${c.user?.username ?? 'Employee'} requested $${amount}.\n\nApprove or dismiss in the pending panel.`,
-        deepLink: `${publicAppUrl}/admin/pending${deepLinkSuffix}`,
+        text: `💰 <b>Advance requested</b>\n${c.user?.username ?? 'Employee'} requested $${amount}.\n\nApprove or reject it in Needs attention.`,
+        deepLink: `${publicAppUrl}/admin${deepLinkSuffix}`,
       };
     }
 

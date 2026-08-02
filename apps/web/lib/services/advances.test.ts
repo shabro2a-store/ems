@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
     update: vi.fn(),
   },
   auditLog: { create: vi.fn() },
+  user: { findUnique: vi.fn() },
   punch: { findMany: vi.fn() },
   rateChange: { findMany: vi.fn() },
   adjustment: { findMany: vi.fn() },
@@ -52,9 +53,18 @@ function resetStore() {
   store.adjustments.length = 0;
 }
 
+// requestAdvance looks the requester up to name them in the admin alert.
+const silentNotifier = { send: async () => {} };
+
 beforeEach(() => {
   vi.clearAllMocks();
   resetStore();
+
+  mocks.user.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => ({
+    id: where.id,
+    username: where.id,
+    name: null,
+  }));
 
   mocks.advance.aggregate.mockImplementation(async ({ where }: { where: { user_id: string; status?: string; created_at?: { gte: Date; lt: Date } } }) => {
     const sum = store.advances
@@ -123,7 +133,7 @@ describe('requestAdvance', () => {
     );
     store.rateChanges.push({ user_id: 'u1', rate_cent: 600, effective_from: new Date('2026-01-01T00:00:00Z') });
 
-    const r = await requestAdvance({ userId: 'u1', amountCent: 5000, month: '2026-07' });
+    const r = await requestAdvance({ userId: 'u1', amountCent: 5000, month: '2026-07', notifier: silentNotifier });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.status).toBe('PENDING');
 
@@ -163,7 +173,7 @@ describe('requestAdvance', () => {
     // ...but a $50 bonus was granted.
     store.adjustments.push({ user_id: 'u1', kind: 'BONUS', amount_cent: 5000, period: new Date('2026-07-01T00:00:00Z') });
 
-    const r = await requestAdvance({ userId: 'u1', amountCent: 2000, month: '2026-07' });
+    const r = await requestAdvance({ userId: 'u1', amountCent: 2000, month: '2026-07', notifier: silentNotifier });
     expect(r.ok).toBe(true);
   });
 

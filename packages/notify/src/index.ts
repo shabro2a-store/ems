@@ -4,6 +4,17 @@ import { Notifier } from './types';
 
 let cached: Notifier | null = null;
 
+type RecipientPrisma = { user: { findFirst: (args: unknown) => Promise<{ telegram_chat_id: string | null } | null> } };
+let recipientPrisma: RecipientPrisma | null = null;
+
+async function getRecipientPrisma(): Promise<RecipientPrisma> {
+  if (!recipientPrisma) {
+    const { PrismaClient } = await import('@prisma/client');
+    recipientPrisma = new PrismaClient() as unknown as RecipientPrisma;
+  }
+  return recipientPrisma;
+}
+
 export function makeNotifier(env: NodeJS.ProcessEnv = process.env): Notifier {
   const token = env.TELEGRAM_BOT_TOKEN;
   const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET ?? '';
@@ -15,18 +26,15 @@ export function makeNotifier(env: NodeJS.ProcessEnv = process.env): Notifier {
       webhookSecret,
       publicAppUrl,
       resolveRecipient: async () => {
-        // Lazy import to avoid loading Prisma on cold paths.
-        const { PrismaClient } = await import('@prisma/client');
-        const prisma = new PrismaClient();
-        try {
-          const admin = await prisma.user.findFirst({
-            where: { role: 'ADMIN' },
-            select: { telegram_chat_id: true },
-          });
-          return admin?.telegram_chat_id ?? null;
-        } finally {
-          await prisma.$disconnect();
-        }
+        // Lazy import to avoid loading Prisma on cold paths, then keep the
+        // client: the cron jobs notify every minute, and a connect/disconnect
+        // per message churns through Postgres connections for no benefit.
+        const prisma = await getRecipientPrisma();
+        const admin = await prisma.user.findFirst({
+          where: { role: 'ADMIN' },
+          select: { telegram_chat_id: true },
+        });
+        return admin?.telegram_chat_id ?? null;
       },
     });
   }

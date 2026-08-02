@@ -446,7 +446,7 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
     });
 
     expect(sent.length).toBe(1);
-    expect((sent[0] as { template: string }).template).toBe('watched.resolved');
+    expect((sent[0] as { template: string }).template).toBe('watched_resolved');
     expect(store.flags[0]!.notified_at).not.toBeNull();
   });
 

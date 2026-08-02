@@ -2,7 +2,7 @@ import type { PrismaClient, Punch } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
 import { writeAuditLog } from './audit';
-import { notifier, type Notifier } from 'notify';
+import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
 
@@ -43,7 +43,7 @@ export async function punchEmployee(
   db: PrismaClient = defaultPrisma,
 ): Promise<PunchResult> {
   const now = input.now ?? new Date();
-  const notify = input.notifier ?? notifier;
+  const notify = input.notifier ?? getNotifier();
 
   const user = await db.user.findUnique({
     where: { id: input.userId },
@@ -160,7 +160,7 @@ export async function resolveWatchedFlag(
   db: PrismaClient,
   user: UserWithBranch,
   punch: Punch,
-  notifierInstance: Notifier = notifier,
+  notifierInstance?: Notifier,
 ): Promise<void> {
   const candidate = await db.flag.findFirst({
     where: { kind: 'WATCHED', user_id: user.id, notified_at: null },
@@ -172,10 +172,10 @@ export async function resolveWatchedFlag(
     data: { notified_at: new Date() },
   });
   if (claim.count !== 1) return;
-  await notifierInstance.send({
+  await (notifierInstance ?? getNotifier()).send({
     channel: 'telegram',
     recipient: 'admin',
-    template: 'watched.resolved',
+    template: 'watched_resolved',
     context: { user: { id: user.id, username: user.username }, punch, watched: candidate },
   });
 }

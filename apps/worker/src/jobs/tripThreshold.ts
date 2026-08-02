@@ -47,6 +47,7 @@ export async function runTripThreshold(
         driver: { id: t.driver_id, username: t.driver.username },
         branch: { id: t.branch_id, name: t.branch.name },
         since_min: sinceMin,
+        threshold_min: t.branch.trip_threshold_min,
         message: `[Driver] ${t.driver.username} out ${sinceMin} min and counting.`,
       },
     });

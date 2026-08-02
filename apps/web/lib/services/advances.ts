@@ -3,6 +3,7 @@ import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { writeAuditLog } from './audit';
 import { accruedEarningsThisMonth, monthRangeUtc } from './payout';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
+import { getNotifier, type Notifier } from 'notify';
 
 export interface RequestAdvanceInput {
   userId: string;
@@ -10,6 +11,7 @@ export interface RequestAdvanceInput {
   reason?: string | null;
   month: string;
   db?: PrismaClient;
+  notifier?: Notifier;
 }
 
 export interface RequestAdvanceOk {
@@ -75,6 +77,21 @@ export async function requestAdvance(
     entityId: advance.id,
     after: { amount_cent: advance.amount_cent, status: advance.status },
     db,
+  });
+
+  const requester = await db.user.findUnique({
+    where: { id: input.userId },
+    select: { id: true, username: true, name: true },
+  });
+  await (input.notifier ?? getNotifier()).send({
+    channel: 'telegram',
+    recipient: 'admin',
+    template: 'advance_requested',
+    context: {
+      user: { id: input.userId, username: requester?.name ?? requester?.username ?? 'Employee' },
+      amount: advance.amount_cent,
+      reason: input.reason ?? null,
+    },
   });
 
   return { ok: true, id: advance.id, status: 'PENDING' };

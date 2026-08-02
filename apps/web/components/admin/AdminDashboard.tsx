@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend, centsToUsd, formatBeirutTime } from '@/lib/api';
 import { Card, CardBody, CardHeader, Badge, StatTile, EmptyState, Spinner, Select, Button } from '@/components/ui';
+import { TelegramAlertsCard } from './TelegramAlertsCard';
 
 interface Person {
   id: string;
@@ -299,6 +300,8 @@ export default function AdminDashboard() {
               </ul>
             )}
           </Card>
+
+          <TelegramAlertsCard />
         </div>
       </div>
     </>
