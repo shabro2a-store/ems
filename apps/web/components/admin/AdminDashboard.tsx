@@ -87,7 +87,14 @@ export default function AdminDashboard() {
   }, [branchId, loadOverview, loadAux]);
 
   // `key` is per-button (id + action) so only the clicked button shows a spinner.
-  async function act(key: string, url: string, opts: { body?: unknown; success: string }) {
+  // `success` may read the response so the confirmation can name what actually
+  // changed — approving a leave writes schedule overrides the admin never sees
+  // from here, and "done" alone reads as if the button did nothing.
+  async function act(
+    key: string,
+    url: string,
+    opts: { body?: unknown; success: string | ((data: unknown) => string) },
+  ) {
     setBusy(key);
     setMsg(null);
     setConfirming(null);
@@ -96,7 +103,10 @@ export default function AdminDashboard() {
     setBusy(null);
     setMsg(
       res.ok
-        ? { tone: 'success', text: opts.success }
+        ? {
+            tone: 'success',
+            text: typeof opts.success === 'function' ? opts.success(res.data) : opts.success,
+          }
         : { tone: 'danger', text: errorMessage(res) },
     );
   }
@@ -260,15 +270,25 @@ export default function AdminDashboard() {
                     <div className="min-w-0 flex-1 text-sm">
                       <div className="font-medium">{f.username ?? 'Employee'} · {f.kind.replace(/_/g, ' ').toLowerCase()}</div>
                       <div className="text-xs text-muted">{f.branch_name ?? '—'} · {formatBeirutTime(f.created_at)}</div>
-                      <div className="mt-2">
+                      <div className="mt-1 text-xs text-muted">
+                        {f.kind === 'MISSED_CHECKOUT'
+                          ? 'Dismissing only clears this notice. If the punch itself is wrong, correct it in Punches.'
+                          : 'Dismissing only clears this notice — no record is changed.'}
+                      </div>
+                      <div className="mt-2 flex gap-2">
                         <Button
                           size="sm"
                           variant="secondary"
                           loading={busy === `flag:${f.id}`}
-                          onClick={() => act(`flag:${f.id}`, `/api/admin/flags/${f.id}/resolve`, { success: 'Flag resolved.' })}
+                          onClick={() => act(`flag:${f.id}`, `/api/admin/flags/${f.id}/resolve`, { success: 'Notice dismissed. No punch or pay record was changed.' })}
                         >
-                          Resolve
+                          Dismiss
                         </Button>
+                        {f.kind === 'MISSED_CHECKOUT' && (
+                          <Button size="sm" variant="ghost" onClick={() => { window.location.href = '/admin/punches'; }}>
+                            Fix punch
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </li>
@@ -284,7 +304,12 @@ export default function AdminDashboard() {
                           size="sm"
                           variant="success"
                           loading={busy === `adv-ok:${a.id}`}
-                          onClick={() => act(`adv-ok:${a.id}`, `/api/admin/advances/${a.id}/decision`, { body: { decision: 'APPROVED' }, success: `Advance approved for ${a.username}.` })}
+                          onClick={() =>
+                            act(`adv-ok:${a.id}`, `/api/admin/advances/${a.id}/decision`, {
+                              body: { decision: 'APPROVED' },
+                              success: `Advance approved — ${centsToUsd(a.amount_cent)} will be deducted from ${a.username}'s pay this month.`,
+                            })
+                          }
                         >
                           Approve
                         </Button>
@@ -313,7 +338,15 @@ export default function AdminDashboard() {
                           size="sm"
                           variant="success"
                           loading={busy === `lv-ok:${l.id}`}
-                          onClick={() => act(`lv-ok:${l.id}`, `/api/admin/leave/${l.id}/decision`, { body: { decision: 'APPROVED' }, success: `Leave approved for ${l.username}.` })}
+                          onClick={() =>
+                            act(`lv-ok:${l.id}`, `/api/admin/leave/${l.id}/decision`, {
+                              body: { decision: 'APPROVED' },
+                              success: (d) => {
+                                const n = (d as { overrides_created?: number })?.overrides_created ?? 0;
+                                return `Leave approved — ${n} day${n === 1 ? '' : 's'} written to ${l.username}'s schedule.`;
+                              },
+                            })
+                          }
                         >
                           Approve
                         </Button>
