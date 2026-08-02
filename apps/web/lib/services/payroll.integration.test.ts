@@ -35,8 +35,11 @@ describe('admin payroll integration', () => {
     await seedTestPunch({ user_id: emp2.id, branch_id: branch.id, kind: 'OUT', at: new Date('2026-07-02T14:00:00Z') });
     await seedTestRateChange({ user_id: emp1.id, rate_cent: 200, effective_from: new Date('2026-01-01T00:00:00Z') });
     await seedTestRateChange({ user_id: emp2.id, rate_cent: 300, effective_from: new Date('2026-01-01T00:00:00Z') });
-    await seedTestAdjustment({ user_id: emp1.id, kind: 'BONUS', amount_cent: 1000, created_by: admin.id });
-    await seedTestAdvance({ user_id: emp1.id, amount_cent: 500, status: 'APPROVED', decided_by: admin.id, decided_at: new Date('2026-07-10T00:00:00Z') });
+    // Both must be pinned to the asserted month (2026-07): the adjustment is
+    // matched by period and the advance by created_at, and either defaulting to
+    // "now" makes this test fail from the next month onward.
+    await seedTestAdjustment({ user_id: emp1.id, kind: 'BONUS', amount_cent: 1000, created_by: admin.id, period: new Date('2026-07-01T00:00:00.000Z') });
+    await seedTestAdvance({ user_id: emp1.id, amount_cent: 500, status: 'APPROVED', decided_by: admin.id, decided_at: new Date('2026-07-10T00:00:00Z'), created_at: new Date('2026-07-10T00:00:00Z') });
 
     const aSession = await loginAs(admin.username, 'change-me');
     const res = await fetch(`${BASE_URL}/api/admin/payroll?month=2026-07`, {

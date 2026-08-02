@@ -180,6 +180,9 @@ export interface AdvanceOverrides {
   status?: 'PENDING' | 'APPROVED' | 'REJECTED';
   decided_by?: string | null;
   decided_at?: Date | null;
+  // Payroll scopes advances by created_at, so a test asserting a fixed month
+  // must pin this rather than inherit "now".
+  created_at?: Date;
 }
 
 export async function seedTestAdvance(overrides: AdvanceOverrides) {
@@ -192,6 +195,7 @@ export async function seedTestAdvance(overrides: AdvanceOverrides) {
       status: overrides.status ?? 'PENDING',
       decided_by: overrides.decided_by ?? null,
       decided_at: overrides.decided_at ?? null,
+      ...(overrides.created_at ? { created_at: overrides.created_at } : {}),
     },
   });
 }
