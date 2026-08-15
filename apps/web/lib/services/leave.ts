@@ -166,6 +166,8 @@ export async function leaveSummary(
     pending,
     upcoming: upcoming.map((o) => ({
       date: o.date.toISOString().slice(0, 10),
+      // Provisional: no caller produces HOURS_CHANGE yet. Task 9 wires it through
+      // this function - drop the cast then, it will hide a real case at that point.
       kind: o.kind as 'DAY_OFF' | 'TIME_CHANGE',
       start_time: o.start_time,
       end_time: o.end_time,

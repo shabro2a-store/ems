@@ -7,23 +7,42 @@ ALTER TABLE "Schedule" ADD COLUMN "shift_min" INTEGER;
 ALTER TABLE "ScheduleOverride" ADD COLUMN "shift_min" INTEGER;
 ALTER TABLE "LeaveRequest" ADD COLUMN "shift_min" INTEGER;
 
--- Backfill from the clock window. An end at or before the start is an overnight
--- shift, so it lands on the next day.
+-- Backfill from the clock window. End after start is a same-day shift; end at or
+-- before start wraps to the next day - so an equal start/end is a full 24h shift
+-- (1440), not a zero-length one.
 UPDATE "Schedule" SET "shift_min" =
-  ((EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
- - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
- + 1440) % 1440;
+  CASE
+    WHEN (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       > (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+    THEN (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+    ELSE (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+       + 1440
+  END;
 
 UPDATE "ScheduleOverride" SET "shift_min" =
-  ((EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
- - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
- + 1440) % 1440
+  CASE
+    WHEN (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       > (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+    THEN (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+    ELSE (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+       + 1440
+  END
 WHERE "start_time" IS NOT NULL AND "end_time" IS NOT NULL;
 
 UPDATE "LeaveRequest" SET "shift_min" =
-  ((EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
- - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
- + 1440) % 1440
+  CASE
+    WHEN (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       > (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+    THEN (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+    ELSE (EXTRACT(HOUR FROM "end_time"::time) * 60 + EXTRACT(MINUTE FROM "end_time"::time))
+       - (EXTRACT(HOUR FROM "start_time"::time) * 60 + EXTRACT(MINUTE FROM "start_time"::time))
+       + 1440
+  END
 WHERE "start_time" IS NOT NULL AND "end_time" IS NOT NULL;
 
 ALTER TABLE "Schedule" ADD CONSTRAINT schedule_shift_min_chk
