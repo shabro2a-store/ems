@@ -216,12 +216,7 @@ docker compose exec web env | grep -E 'VAPID|TELEGRAM|SENTRY|ENABLE_DEV'
 
 ---
 
-## 7. Emergency contacts
+## 7. Escalation
 
-> **FILL BEFORE GO-LIVE — these are placeholders.** An unfilled row here means
-> nobody gets reached during an incident.
-
-- [ ] **Kyvera engineering (on-call)**: `<phone + email>`
-- [ ] **Client primary (owner)**: `<name + phone>`
-- [ ] **VPS support**: `<provider + support ticket URL>`
-- [ ] **Cloudflare**: `<account dashboard URL>`
+Single-owner shop: the owner is the escalation path and is reachable directly,
+with a branch manager as backup. No on-call rota to maintain here.
