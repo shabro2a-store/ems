@@ -80,4 +80,47 @@ describe('POST /api/admin/overtime/decision', () => {
     expect(audits.length).toBe(1);
     expect(audits[0]?.actor_id).toBe(adminUser.id);
   });
+
+  it('changing the decision updates the same row instead of adding a second one', async () => {
+    const emp = await seedTestUser({ username: 'ot_emp3', role: 'EMPLOYEE' });
+    const adminUser = await seedTestUser({ username: 'ot_admin2', role: 'ADMIN' });
+    const admin = await loginAs('ot_admin2', 'change-me');
+    const baseHeaders = {
+      'Content-Type': 'application/json',
+      Cookie: admin.cookies,
+      'X-CSRF-Token': admin.csrf,
+    };
+
+    const acceptRes = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
+      method: 'POST',
+      headers: { ...baseHeaders, 'Idempotency-Key': idemKey('ot') },
+      body: JSON.stringify({ userId: emp.id, date: '2026-08-18', decision: 'ACCEPTED' }),
+    });
+    expect(acceptRes.status).toBe(200);
+    expect((await acceptRes.json()).data).toEqual({ decision: 'ACCEPTED' });
+
+    const revokeRes = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
+      method: 'POST',
+      headers: { ...baseHeaders, 'Idempotency-Key': idemKey('ot') },
+      body: JSON.stringify({ userId: emp.id, date: '2026-08-18', decision: 'REVOKED', reason: 'changed my mind' }),
+    });
+    expect(revokeRes.status).toBe(200);
+    expect((await revokeRes.json()).data).toEqual({ decision: 'REVOKED' });
+
+    const rows = await getTestPrisma().overtimeDecision.findMany({
+      where: { user_id: emp.id, date: new Date('2026-08-18T00:00:00.000Z') },
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0]?.decision).toBe('REVOKED');
+    expect(rows[0]?.reason).toBe('changed my mind');
+
+    const acceptedAudit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'OvertimeDecision', entity_id: `${emp.id}:2026-08-18`, action: 'overtime.accepted' },
+    });
+    const revokedAudit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'OvertimeDecision', entity_id: `${emp.id}:2026-08-18`, action: 'overtime.revoked' },
+    });
+    expect(acceptedAudit).not.toBeNull();
+    expect(revokedAudit).not.toBeNull();
+  });
 });
