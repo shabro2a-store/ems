@@ -25,6 +25,7 @@ interface Overview {
     lateDrivers: { trip_id: string; driver_username: string; branch_name: string; since_min: number; threshold_min: number }[];
     flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null; reason: string }[];
     penalties: { user_id: string; username: string; date: string; kind: 'SHORTFALL'; minutes: number; hours: number; amount_cent: number }[];
+    overtime: { user_id: string; username: string; date: string; overtimeMin: number; amount_cent: number }[];
     pendingAdvances: { id: string; username: string; amount_cent: number; reason: string | null }[];
     pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; start_time: string | null; end_time: string | null; note: string | null }[];
   };
@@ -42,6 +43,11 @@ function dur(min: number): string {
 }
 function initials(name: string): string {
   return name.slice(0, 2).toUpperCase();
+}
+function formatMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 const STATUS: Record<Person['status'], { label: (p: Person) => string; tone: 'success' | 'primary' | 'danger' | 'warning' | 'neutral' }> = {
@@ -135,7 +141,12 @@ export default function AdminDashboard() {
   const k = ov.kpis;
   const att = ov.attention;
   const attentionCount =
-    att.lateDrivers.length + att.flags.length + att.penalties.length + att.pendingAdvances.length + att.pendingLeaves.length;
+    att.lateDrivers.length +
+    att.flags.length +
+    att.penalties.length +
+    att.overtime.length +
+    att.pendingAdvances.length +
+    att.pendingLeaves.length;
   const maxPresent = Math.max(1, ...trends.map((p) => p.present));
   const hoursWeek = Math.round(trends.reduce((s, p) => s + p.hours, 0) * 10) / 10;
 
@@ -299,17 +310,16 @@ export default function AdminDashboard() {
                 ))}
                 {att.penalties.map((p) => {
                   const key = `${p.user_id}|${p.date}|${p.kind}`;
-                  const what = 'a shortfall';
                   const body = { userId: p.user_id, date: p.date, kind: p.kind };
                   return (
                     <li key={key} className="flex items-start gap-3 px-4 py-3 sm:px-5">
                       <Badge tone="danger">Penalty</Badge>
                       <div className="min-w-0 flex-1 text-sm">
                         <div className="font-medium">
-                          {p.username} · {centsToUsd(p.amount_cent)} docked for {what}
+                          {p.username} · {centsToUsd(p.amount_cent)} docked
                         </div>
                         <div className="text-xs text-muted">
-                          {p.date} · {p.minutes} min · {p.hours}h penalty
+                          {p.date} · short {formatMinutes(p.minutes)} · {p.hours}h docked
                         </div>
                         <div className="mt-1 text-xs text-muted">
                           Already applied. Accept to file it, or revoke it if they gave notice.
@@ -344,6 +354,58 @@ export default function AdminDashboard() {
                             }}
                           >
                             {confirming === `pen-no:${key}` ? 'Tap again to confirm' : 'Revoke'}
+                          </Button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+                {att.overtime.map((o) => {
+                  const key = `${o.user_id}|${o.date}`;
+                  const body = { userId: o.user_id, date: o.date };
+                  return (
+                    <li key={key} className="flex items-start gap-3 px-4 py-3 sm:px-5">
+                      <Badge tone="warning">Overtime</Badge>
+                      <div className="min-w-0 flex-1 text-sm">
+                        <div className="font-medium">
+                          {o.username} · {centsToUsd(o.amount_cent)} overtime pay
+                        </div>
+                        <div className="text-xs text-muted">
+                          {o.date} · over by {formatMinutes(o.overtimeMin)} · {centsToUsd(o.amount_cent)} paid
+                        </div>
+                        <div className="mt-1 text-xs text-muted">
+                          Already paid. Accept to leave it as is, or revoke it to deduct the pay.
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            loading={busy === `ot-ok:${key}`}
+                            onClick={() =>
+                              act(`ot-ok:${key}`, '/api/admin/overtime/decision', {
+                                body: { ...body, decision: 'ACCEPTED' },
+                                success: `Overtime stands — ${centsToUsd(o.amount_cent)} stays in ${o.username}'s pay.`,
+                              })
+                            }
+                          >
+                            Accept
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={confirming === `ot-no:${key}` ? 'danger' : 'ghost'}
+                            loading={busy === `ot-no:${key}`}
+                            onClick={() => {
+                              if (confirming !== `ot-no:${key}`) {
+                                setConfirming(`ot-no:${key}`);
+                                return;
+                              }
+                              void act(`ot-no:${key}`, '/api/admin/overtime/decision', {
+                                body: { ...body, decision: 'REVOKED' },
+                                success: `Overtime revoked — ${centsToUsd(o.amount_cent)} removed from ${o.username}'s pay.`,
+                              });
+                            }}
+                          >
+                            {confirming === `ot-no:${key}` ? 'Tap again to confirm' : 'Revoke'}
                           </Button>
                         </div>
                       </div>

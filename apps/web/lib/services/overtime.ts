@@ -121,3 +121,114 @@ export async function overtimeDeductionForUser(
   const items = await overtimeForUser(userId, month, db);
   return sumRevokedOvertimeCent(items);
 }
+
+export interface OvertimeNotice extends OvertimeItem {
+  user_id: string;
+  username: string;
+}
+
+// Overtime the admin has not dealt with yet, for the attention queue. Batch-loaded
+// across all users at once, mirroring pendingPenaltyNotices - the dashboard polls
+// every 10s, and a per-user round trip would be dozens of queries each time.
+// A day drops off this list once it has a decision (accepted or revoked).
+export async function pendingOvertimeNotices(
+  users: Array<{ id: string; username: string }>,
+  month: string,
+  db: PrismaClient,
+  opts: { since: string },
+): Promise<OvertimeNotice[]> {
+  if (users.length === 0) return [];
+  const ids = users.map((u) => u.id);
+  const { start, end } = monthRangeUtc(month);
+
+  const [punches, schedules, overrides, rateChanges, decisions, userBranches] = await Promise.all([
+    db.punch.findMany({
+      where: { user_id: { in: ids }, at: { gte: start, lt: end } },
+      orderBy: { at: 'asc' },
+      select: { user_id: true, kind: true, at: true },
+    }),
+    db.schedule.findMany({
+      where: { user_id: { in: ids } },
+      select: { user_id: true, weekday: true, shift_min: true },
+    }),
+    db.scheduleOverride.findMany({
+      where: { user_id: { in: ids }, date: { gte: start, lt: end } },
+      select: { user_id: true, date: true, kind: true, shift_min: true },
+    }),
+    db.rateChange.findMany({
+      where: { user_id: { in: ids }, effective_from: { lt: end } },
+      orderBy: { effective_from: 'asc' },
+      select: { user_id: true, rate_cent: true, effective_from: true },
+    }),
+    db.overtimeDecision.findMany({
+      where: { user_id: { in: ids }, date: { gte: start, lt: end } },
+      select: { user_id: true, date: true, decision: true },
+    }),
+    db.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, branch: { select: { overtime_grace_min: true } } },
+    }),
+  ]);
+
+  const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
+    const m = new Map<string, T[]>();
+    for (const r of rows) {
+      const list = m.get(r.user_id);
+      if (list) list.push(r);
+      else m.set(r.user_id, [r]);
+    }
+    return m;
+  };
+  const punchesBy = by(punches);
+  const schedulesBy = by(schedules);
+  const overridesBy = by(overrides);
+  const ratesBy = by(rateChanges);
+
+  const decisionsByUser = new Map<string, Map<string, 'ACCEPTED' | 'REVOKED'>>();
+  for (const d of decisions) {
+    const dateKey = d.date.toISOString().slice(0, 10);
+    const forUser = decisionsByUser.get(d.user_id);
+    if (forUser) forUser.set(dateKey, d.decision);
+    else decisionsByUser.set(d.user_id, new Map([[dateKey, d.decision]]));
+  }
+
+  const graceByUser = new Map<string, number>();
+  for (const u of userBranches) graceByUser.set(u.id, u.branch?.overtime_grace_min ?? 15);
+
+  const notices: OvertimeNotice[] = [];
+  for (const u of users) {
+    const shiftMinByWeekday = new Map<number, number>();
+    for (const s of schedulesBy.get(u.id) ?? []) {
+      shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
+    }
+    const overridesByDate = new Map<string, OverrideLite>();
+    for (const o of overridesBy.get(u.id) ?? []) {
+      if (o.kind !== 'DAY_OFF' && o.kind !== 'HOURS_CHANGE') continue;
+      overridesByDate.set(o.date.toISOString().slice(0, 10), {
+        kind: o.kind,
+        shift_min: o.shift_min,
+      });
+    }
+
+    const coverage = computeCoverage({
+      punches: (punchesBy.get(u.id) ?? []) as PunchLite[],
+      shiftMinByWeekday,
+      overridesByDate,
+    });
+    const items = computeOvertime({
+      coverage,
+      rateChanges: (ratesBy.get(u.id) ?? []) as RateChangeLite[],
+      graceMin: graceByUser.get(u.id) ?? 15,
+      decisionsByDate: decisionsByUser.get(u.id) ?? new Map(),
+    });
+
+    for (const o of items) {
+      if (o.decision !== null) continue;
+      if (o.date < opts.since) continue;
+      notices.push({ ...o, user_id: u.id, username: u.username });
+    }
+  }
+
+  notices.sort((a, b) => (a.date === b.date ? a.username.localeCompare(b.username) : b.date.localeCompare(a.date)));
+  return notices;
+}

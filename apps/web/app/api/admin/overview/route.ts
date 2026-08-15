@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
 import { todayInBeirut, todayInBeirutDateRange } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
+import { pendingOvertimeNotices } from '@/lib/services/overtime';
 
 // How far back the penalty review queue looks. Older ones are a payroll matter.
 const PENALTY_LOOKBACK_DAYS = 7;
@@ -11,17 +12,21 @@ const PENALTY_LOOKBACK_DAYS = 7;
 // why the system raised it. The detail is already in context_json — this turns it
 // into the sentence the admin actually needs.
 function flagReason(kind: string, ctx: unknown): string {
-  const c = (ctx ?? {}) as { scheduled_start?: string; scheduled_end?: string; since_min?: number };
+  // watchedDetector/missedCheckout still populate this from the clock-window
+  // schedule (scheduled_start/scheduled_end); shift_min lands here once those
+  // jobs are migrated to hours-based shifts. Until then both cases fall back
+  // to their generic text below.
+  const c = (ctx ?? {}) as { shift_min?: number; since_min?: number };
   const mins = typeof c.since_min === 'number' ? c.since_min : null;
   const late = mins === null ? '' : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
   switch (kind) {
     case 'WATCHED':
-      return c.scheduled_start
-        ? `No punch in — their shift started at ${c.scheduled_start}${late ? `, ${late} ago` : ''}.`
-        : 'Scheduled to work but has not punched in.';
+      return c.shift_min
+        ? `No punch at all - they were scheduled ${Math.round(c.shift_min / 60)}h.`
+        : 'No punch at all on a scheduled day.';
     case 'MISSED_CHECKOUT':
-      return c.scheduled_end
-        ? `Still clocked in — their shift ended at ${c.scheduled_end}${late ? `, ${late} ago` : ''}. Overtime, or forgot to punch out?`
+      return c.shift_min
+        ? `Still clocked in past their ${Math.round(c.shift_min / 60)}h shift${late ? `, ${late} over` : ''}. Overtime, or forgot to punch out?`
         : 'Still clocked in well past the end of their shift.';
     case 'TRIP_OVER_THRESHOLD':
       return 'Out on an order longer than the branch threshold.';
@@ -207,10 +212,11 @@ export async function GET(req: Request) {
       reason: flagReason(f.kind, f.context_json),
     }));
 
-  // Late / early-leave penalties apply automatically, so this queue is a review
-  // list: the admin either lets one stand (acknowledge) or revokes it for
-  // someone who did give notice. Scoped to the recent past — an old penalty is
-  // a payroll matter, not something needing attention today.
+  // Shortfall penalties and overtime pay both apply automatically, so this queue
+  // is a review list: the admin either lets one stand (acknowledge/accept) or
+  // reverses it — waiving a penalty someone gave notice for, or revoking
+  // overtime that wasn't warranted. Scoped to the recent past — an old one is a
+  // payroll matter, not something needing attention today.
   const penaltyUsers = users.filter((u) => inScope(u.branch_id)).map((u) => ({ id: u.id, username: u.name || u.username }));
   const since = new Date(startUtc.getTime() - PENALTY_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
   const penalties = (
@@ -223,6 +229,16 @@ export async function GET(req: Request) {
     minutes: p.minutes,
     hours: p.hours,
     amount_cent: p.amount_cent,
+  }));
+
+  const overtime = (
+    await pendingOvertimeNotices(penaltyUsers, todayStr.slice(0, 7), prisma, { since })
+  ).map((o) => ({
+    user_id: o.user_id,
+    username: o.username,
+    date: o.date,
+    overtimeMin: o.overtimeMin,
+    amount_cent: o.amount_cent,
   }));
 
   const pendingAdvances = pendingAdv
@@ -268,6 +284,7 @@ export async function GET(req: Request) {
         })),
         flags,
         penalties,
+        overtime,
         pendingAdvances,
         pendingLeaves,
       },
