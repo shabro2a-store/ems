@@ -123,4 +123,45 @@ describe('POST /api/admin/overtime/decision', () => {
     expect(acceptedAudit).not.toBeNull();
     expect(revokedAudit).not.toBeNull();
   });
+
+  it('rejects a date that is shaped right but names no real calendar day', async () => {
+    const emp = await seedTestUser({ username: 'ot_emp4', role: 'EMPLOYEE' });
+    await seedTestUser({ username: 'ot_admin3', role: 'ADMIN' });
+    const admin = await loginAs('ot_admin3', 'change-me');
+    const baseHeaders = {
+      'Content-Type': 'application/json',
+      Cookie: admin.cookies,
+      'X-CSRF-Token': admin.csrf,
+    };
+
+    // Day-overflow: passes the shape regex, but new Date(...) silently rolls
+    // 2026-02-30 over to 2026-03-02.
+    const dayOverflow = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
+      method: 'POST',
+      headers: { ...baseHeaders, 'Idempotency-Key': idemKey('ot') },
+      body: JSON.stringify({ userId: emp.id, date: '2026-02-30', decision: 'REVOKED' }),
+    });
+    expect(dayOverflow.status).toBe(400);
+    const dayOverflowBody = (await dayOverflow.json()) as { ok: boolean; error?: { code: string } };
+    expect(dayOverflowBody.ok).toBe(false);
+    expect(dayOverflowBody.error?.code).toBe('INVALID_INPUT');
+
+    // Month-overflow: passes the shape regex, but new Date(...) produces an
+    // Invalid Date that would otherwise throw unguarded inside Prisma.
+    const monthOverflow = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
+      method: 'POST',
+      headers: { ...baseHeaders, 'Idempotency-Key': idemKey('ot') },
+      body: JSON.stringify({ userId: emp.id, date: '2026-13-01', decision: 'REVOKED' }),
+    });
+    expect(monthOverflow.status).toBe(400);
+    const monthOverflowBody = (await monthOverflow.json()) as { ok: boolean; error?: { code: string } };
+    expect(monthOverflowBody.ok).toBe(false);
+    expect(monthOverflowBody.error?.code).toBe('INVALID_INPUT');
+
+    // Neither request may reach Prisma. Check for any row for this user at
+    // all, not just one keyed on the literal bad string - that also rules
+    // out the Feb-30 case silently writing under the rolled-over 2026-03-02.
+    const rows = await getTestPrisma().overtimeDecision.findMany({ where: { user_id: emp.id } });
+    expect(rows.length).toBe(0);
+  });
 });

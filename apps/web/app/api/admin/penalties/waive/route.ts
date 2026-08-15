@@ -5,9 +5,18 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
 
+// The regex only checks shape. Round-tripping through a UTC Date catches a
+// string that is shaped like a date but names no real calendar day (e.g.
+// 2026-02-30 silently rolls over to 2026-03-02; 2026-13-01 parses to
+// Invalid Date) - either would otherwise reach Prisma unguarded.
+function isValidCalendarDate(value: string): boolean {
+  const d = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
 const Body = z.object({
   userId: z.string().min(1),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, 'date must be a real calendar day'),
   kind: z.enum(['LATE', 'EARLY_LEAVE']),
   waived: z.boolean(),
   reason: z.string().max(500).optional(),
