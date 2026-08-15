@@ -91,7 +91,7 @@ model Branch {
   lng                Float
   gps_radius_m       Int     @default(50)
   gps_accuracy_max_m Int     @default(100)
-  absent_grace_min   Int     @default(15)
+  overtime_grace_min Int     @default(15)
   trip_threshold_min Int     @default(30)
   is_active          Boolean @default(true)
   users              User[]

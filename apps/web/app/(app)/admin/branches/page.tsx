@@ -11,7 +11,7 @@ interface Branch {
   lng: number;
   gps_radius_m: number;
   gps_accuracy_max_m: number;
-  absent_grace_min: number;
+  overtime_grace_min: number;
   trip_threshold_min: number;
   is_active: boolean;
 }
@@ -116,7 +116,7 @@ export default function AdminBranchesPage() {
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
                   <Row k="Radius" v={`${b.gps_radius_m} m`} />
                   <Row k="Max accuracy" v={`${b.gps_accuracy_max_m} m`} />
-                  <Row k="Absent grace" v={`${b.absent_grace_min} min`} />
+                  <Row k="Overtime grace" v={`${b.overtime_grace_min} min`} />
                   <Row k="Trip threshold" v={`${b.trip_threshold_min} min`} />
                 </dl>
 
@@ -183,7 +183,7 @@ function EditBranchModal({ branch, onClose, onSaved }: { branch: Branch; onClose
     name: branch.name,
     gpsRadiusM: String(branch.gps_radius_m),
     gpsAccuracyMaxM: String(branch.gps_accuracy_max_m),
-    absentGraceMin: String(branch.absent_grace_min),
+    overtimeGraceMin: String(branch.overtime_grace_min),
     tripThresholdMin: String(branch.trip_threshold_min),
     isActive: branch.is_active,
   });
@@ -198,7 +198,7 @@ function EditBranchModal({ branch, onClose, onSaved }: { branch: Branch; onClose
         name: f.name,
         gpsRadiusM: parseInt(f.gpsRadiusM, 10),
         gpsAccuracyMaxM: parseInt(f.gpsAccuracyMaxM, 10),
-        absentGraceMin: parseInt(f.absentGraceMin, 10),
+        overtimeGraceMin: parseInt(f.overtimeGraceMin, 10),
         tripThresholdMin: parseInt(f.tripThresholdMin, 10),
         isActive: f.isActive,
       },
@@ -215,7 +215,7 @@ function EditBranchModal({ branch, onClose, onSaved }: { branch: Branch; onClose
         <div className="grid grid-cols-2 gap-3">
           <Field label="Geofence radius (m)" htmlFor="er"><Input id="er" type="number" min="1" value={f.gpsRadiusM} onChange={(e) => setF({ ...f, gpsRadiusM: e.target.value })} /></Field>
           <Field label="Max accuracy (m)" htmlFor="ea"><Input id="ea" type="number" min="1" value={f.gpsAccuracyMaxM} onChange={(e) => setF({ ...f, gpsAccuracyMaxM: e.target.value })} /></Field>
-          <Field label="Absent grace (min)" htmlFor="eg"><Input id="eg" type="number" min="0" value={f.absentGraceMin} onChange={(e) => setF({ ...f, absentGraceMin: e.target.value })} /></Field>
+          <Field label="Overtime grace (min)" htmlFor="eg" hint="Overruns shorter than this are not reported."><Input id="eg" type="number" min="0" value={f.overtimeGraceMin} onChange={(e) => setF({ ...f, overtimeGraceMin: e.target.value })} /></Field>
           <Field label="Trip threshold (min)" htmlFor="et"><Input id="et" type="number" min="1" value={f.tripThresholdMin} onChange={(e) => setF({ ...f, tripThresholdMin: e.target.value })} /></Field>
         </div>
         <label className="flex items-center gap-2 text-sm">

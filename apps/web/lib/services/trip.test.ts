@@ -83,7 +83,7 @@ function makeBranch(over: Partial<{ id: string; gps_radius_m: number; gps_accura
     lng: 35.4827,
     gps_radius_m: over.gps_radius_m ?? 200,
     gps_accuracy_max_m: over.gps_accuracy_max_m ?? 100,
-    absent_grace_min: 15,
+    overtime_grace_min: 15,
     trip_threshold_min: over.trip_threshold_min ?? 30,
     is_active: true,
   };

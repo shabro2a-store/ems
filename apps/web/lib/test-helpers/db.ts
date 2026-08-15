@@ -73,7 +73,7 @@ export interface BranchOverrides {
   lng?: number;
   gps_radius_m?: number;
   gps_accuracy_max_m?: number;
-  absent_grace_min?: number;
+  overtime_grace_min?: number;
   trip_threshold_min?: number;
   is_active?: boolean;
 }
@@ -87,7 +87,7 @@ export async function seedTestBranch(overrides: BranchOverrides = {}) {
       lng: overrides.lng ?? 35.4827,
       gps_radius_m: overrides.gps_radius_m ?? 50,
       gps_accuracy_max_m: overrides.gps_accuracy_max_m ?? 100,
-      absent_grace_min: overrides.absent_grace_min ?? 15,
+      overtime_grace_min: overrides.overtime_grace_min ?? 15,
       trip_threshold_min: overrides.trip_threshold_min ?? 30,
       is_active: overrides.is_active ?? true,
     },

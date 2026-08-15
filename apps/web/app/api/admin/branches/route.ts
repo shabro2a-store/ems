@@ -11,7 +11,7 @@ const Create = z.object({
   lng: z.number().min(-180).max(180).optional(),
   gpsRadiusM: z.number().int().min(1).max(10_000).optional(),
   gpsAccuracyMaxM: z.number().int().min(1).max(10_000).optional(),
-  absentGraceMin: z.number().int().min(0).max(120).optional(),
+  overtimeGraceMin: z.number().int().min(0).max(120).optional(),
   tripThresholdMin: z.number().int().min(1).max(240).optional(),
 });
 
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
       lng: body.lng ?? 0,
       ...(body.gpsRadiusM !== undefined ? { gps_radius_m: body.gpsRadiusM } : {}),
       ...(body.gpsAccuracyMaxM !== undefined ? { gps_accuracy_max_m: body.gpsAccuracyMaxM } : {}),
-      ...(body.absentGraceMin !== undefined ? { absent_grace_min: body.absentGraceMin } : {}),
+      ...(body.overtimeGraceMin !== undefined ? { overtime_grace_min: body.overtimeGraceMin } : {}),
       ...(body.tripThresholdMin !== undefined ? { trip_threshold_min: body.tripThresholdMin } : {}),
     },
   });
