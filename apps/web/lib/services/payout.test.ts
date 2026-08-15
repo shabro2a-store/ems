@@ -129,6 +129,21 @@ describe('computePayoutFromRows', () => {
     expect(res.netCent).toBe(-5_000);
   });
 
+  it('deduction cancels exactly the overtime portion of a real gross', () => {
+    const res = computePayoutFromRows({
+      userId: 'u1',
+      punches: [p('IN', '2026-07-01T08:00:00Z'), p('OUT', '2026-07-01T17:30:00Z')],
+      rateChanges: [rc(60_000, '2026-01-01T00:00:00Z')],
+      adjustments: [],
+      approvedAdvances: [],
+      overtimeDeductionCent: 90_000,
+    });
+    // 570 worked minutes at 60_000 cent/hour is a 570_000 gross; deducting the
+    // 90_000 (90-minute) overtime portion should leave exactly 8 paid hours.
+    expect(res.grossCent).toBe(570_000);
+    expect(res.netCent).toBe(480_000);
+  });
+
   it('returns 0 hours when there are no punches', () => {
     const result = computePayoutFromRows({
       userId: 'u',
