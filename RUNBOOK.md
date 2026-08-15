@@ -1,6 +1,12 @@
-# RUNBOOK — Supermarket EMS
+# RUNBOOK — Shabro2a EMS
 
 Operational procedures for local dev, production deploy, and on-call response.
+
+Production is a VPS running Docker Compose behind a Cloudflare Tunnel
+(`https://app.shabro2a.com` → `localhost:3000`). Three containers — `db`
+(Postgres 16), `web` (Next.js), `worker` (cron) — all defined in the single
+`docker-compose.yml` at the repo root. [DEPLOY.md](DEPLOY.md) is the source of
+truth for first-time setup; this file covers running it day to day.
 
 ---
 
@@ -11,58 +17,77 @@ Prereqs: Node 20, pnpm 9, Docker (for the Postgres dev DB).
 ```bash
 git clone <repo>
 cd <repo>
+docker compose up -d db                       # Postgres on :5433
 pnpm install
-docker compose up -d db
-pnpm --filter db prisma migrate dev
-pnpm --filter db prisma db seed
-pnpm dev
-# web:    http://localhost:3000
-# worker: cron runner in foreground (Ctrl+C to stop)
+pnpm --filter db exec prisma generate
+pnpm --filter db exec prisma migrate deploy   # or `prisma migrate dev` on a fresh DB
+pnpm --filter db db:seed
+```
+
+The web and worker processes need these in the environment:
+
+```bash
+DATABASE_URL=postgresql://ems:ems_dev_password@localhost:5433/ems
+JWT_SECRET=<any 32+ char string for local>
+ENABLE_DEV_ENDPOINTS=true    # shows the Dev IN/OUT GPS bypass (laptops have no GPS)
+```
+
+Then:
+
+```bash
+pnpm --filter web dev      # http://localhost:3000
+pnpm --filter worker dev   # cron runner in foreground (Ctrl+C to stop)
 ```
 
 Seed credentials (development only — never in prod):
 - Admin: `owner` / `change-me`
 - Sample employee/driver per branch: see `packages/db/prisma/seed.ts`
 
-Run tests:
+Run checks:
 ```bash
-pnpm --filter web test           # unit + integration (needs web server up for integration)
-pnpm typecheck                    # typecheck entire monorepo
+pnpm -r typecheck                 # typecheck entire monorepo
+pnpm -r test                      # unit + HTTP integration tests
+```
+The integration tests hit a live server at `TEST_BASE_URL`
+(default `http://127.0.0.1:3000`) and need a reachable Postgres. To run only the
+standalone unit tests:
+```bash
+pnpm --filter web exec vitest run --exclude "**/*.integration.test.ts"
 ```
 
 ---
 
-## 2. Production deploy via Coolify
+## 2. Production deploy
 
-Assumes Coolify is already installed on the VPS.
+Full first-time setup (env file, VAPID keys, Telegram, Cloudflare) lives in
+[DEPLOY.md](DEPLOY.md). The routine redeploy, on the VPS:
 
-1. **Create the application** in Coolify:
-   - Source: GitHub repo, branch `main`.
-   - Build pack: `Docker Compose`.
-   - Compose file: `docker-compose.prod.yml`.
+```bash
+cd /opt/ems
+git pull                                      # branch: master
+docker compose build
+docker compose run --rm -w /app/packages/db web node_modules/.bin/prisma migrate deploy
+docker compose up -d
+```
 
-2. **Provision the Postgres DB** as a separate Coolify resource (not in the compose file).
-   - Postgres 16, persistent volume, expose a strong password as a Coolify secret.
+Build first, migrate second, swap last. `migrate deploy` is a no-op when the pull
+added no migration, so this order is always safe.
 
-3. **Set environment variables** in Coolify (the `.env` file is **not** shipped):
-   - `DATABASE_URL=postgresql://ems:<password>@<db-host>:5432/ems`
-   - `JWT_SECRET=<openssl rand -hex 32>`
-   - `NODE_ENV=production`
-   - `PUBLIC_APP_URL=https://app.example.com`
-   - `TELEGRAM_BOT_TOKEN=…` (Phase 5b)
-   - `TELEGRAM_WEBHOOK_SECRET=<openssl rand -hex 16>`
-   - `SENTRY_DSN=https://…@sentry.io/…`
-   - `BACKUP_GPG_PASSPHRASE_PATH=/run/secrets/backup.key`
-   - `RCLONE_CONFIG=/root/.config/rclone/rclone.conf`
+Verify the swap actually happened — `uptime_s` should be near zero:
 
-4. **Point Cloudflare** at the Coolify origin (`app.example.com` → VPS IP, Full strict SSL).
+```bash
+docker compose ps
+curl -s http://localhost:3000/api/health
+```
 
-5. **First deploy**: push to `main` triggers Coolify build. Watch logs for:
-   - `prisma migrate deploy` succeeds.
-   - `next build` completes.
-   - `node server.js` starts and `/api/health` returns 200.
+If `uptime_s` is large, the containers were never replaced (usually a build that
+failed earlier in the chain).
 
-6. **Configure the UptimeRobot monitor** on `https://app.example.com/api/health` (every 5 min).
+**Environment lives in `/opt/ems/.env`**, which `docker-compose.yml` reads via
+`${VAR}` substitution. The stack refuses to start without `JWT_SECRET`. See
+`.env.example` for the full list. Note that adding a variable to `.env` is not
+enough on its own — it must also be listed under the service's `environment:`
+block in `docker-compose.yml`, or the container never sees it.
 
 ---
 
@@ -139,23 +164,35 @@ Run once on the VPS after first deploy:
 ## 5. Common ops
 
 ### Add a new branch
-1. Owner adds via `https://app.example.com/admin/branches` → fill lat/lng (drop pin in Google Maps), radius (default 50m), trip threshold.
-2. Recompute payroll unchanged — payout uses branches only for filtering if needed.
-3. Update `RUNBOOK.md` with the new branch's coordinates.
+1. Owner adds via `https://app.shabro2a.com/admin/branches` → fill lat/lng, radius
+   (default 50m), trip threshold.
+2. **Record the GPS on-site.** A new branch defaults to 0,0 and nobody can punch
+   until its location is recorded: on a phone, standing at the branch, open
+   Branches → the branch → **📍 Record location**.
+3. Payroll is unaffected — payout uses branches only for filtering.
 
 ### Rotate `JWT_SECRET`
-- **All users get logged out.** Set a new value in Coolify env, redeploy.
-- No data loss; cookies become invalid, users re-login.
+- **All users get logged out.** Edit `/opt/ems/.env`, then `docker compose up -d`
+  to recreate the containers with the new value.
+- No data loss; cookies become invalid and users re-login.
+- Also invalidates any outstanding Telegram bind codes (existing bindings survive).
 
 ### Deploy a hotfix
-- Push to `main` → Coolify auto-deploys (if webhook configured).
-- Watch Coolify logs for the new container starting healthy (`/api/health` 200).
-- No manual DB migrations required for hotfixes that don't touch `schema.prisma`.
+- Push to `master`, then run the section 2 redeploy on the VPS. There is no
+  auto-deploy webhook — deploys are manual.
+- Hotfixes that don't touch `schema.prisma` still run `migrate deploy` harmlessly.
 
 ### Pause / resume the worker
-- `docker compose -f docker-compose.prod.yml stop worker` — cron jobs halt; no missed-checkout detection runs.
-- Restart with `… start worker`.
-- Owner dashboard stays available; only cron-side alerts pause.
+- `docker compose stop worker` — cron jobs halt; no missed-checkout detection,
+  trip-threshold alerts, or daily summary run.
+- Restart with `docker compose start worker`.
+- The owner dashboard stays available; only cron-side alerts pause.
+
+### Check what the containers actually received
+Env vars must be listed in `docker-compose.yml`, not just present in `.env`:
+```bash
+docker compose exec web env | grep -E 'VAPID|TELEGRAM|SENTRY|ENABLE_DEV'
+```
 
 ---
 
@@ -163,38 +200,28 @@ Run once on the VPS after first deploy:
 
 | Alert | Likely cause | First action |
 |---|---|---|
-| `GET /api/health` 3xx/5xx | Container crashed, or OOMKilled | `docker logs <web>`; check memory limit |
-| `GET /api/health/db` 503 | Postgres down or slow (>50ms) | `docker logs <db>`; check disk; check connection pool |
-| Backup didn't run (no new file in `/var/backups/ems/`) | Cron misconfigured, or rclone auth expired | Run `backup.sh` manually with `--verbose`; rotate rclone token |
-| Telegram webhook 4xx spike | Bot token rotated but `TELEGRAM_BOT_TOKEN` env not refreshed | Update env, redeploy worker |
+| `GET /api/health` 3xx/5xx | Container crashed, or OOMKilled | `docker compose logs web`; check memory limit |
+| `GET /api/health/db` 503 | Postgres down or slow (>50ms) | `docker compose logs db`; check disk; check connection pool |
+| Backup didn't run (no new file in `/var/backups/ems/`) | Cron misconfigured, or rclone auth expired | Run `backup.sh` manually; rotate rclone token |
+| Telegram webhook 4xx spike | Bot token rotated but `TELEGRAM_BOT_TOKEN` env not refreshed | Update `/opt/ems/.env`, `docker compose up -d` |
 | Telegram webhook 5xx spike | Network issue to api.telegram.org | Check VPS outbound; usually self-resolves |
-| Sentry alert: spike of `UNAUTHORIZED` | JWT_SECRET rotated (expected) or cookie domain misconfigured | Check most recent deploy; correlate with JWT_SECRET changes |
-| Sentry alert: spike of `INVALID_INPUT` | Schema drift between client + server | Verify both are on latest `main` |
-| `/admin/punches` shows empty | Pre-existing data-source gap (`/api/me/today` has no history) | Owner uses payroll export instead |
+| Sentry alert: spike of `UNAUTHORIZED` | `JWT_SECRET` rotated (expected) or cookie domain misconfigured | Check most recent deploy; correlate with `JWT_SECRET` changes |
+| Sentry alert: spike of `INVALID_INPUT` | Schema drift between client + server | Verify both are on the latest `master` |
+| Drivers stop receiving the ring on locked phones | `VAPID_*` keys missing from the container, or rolled | `docker compose exec web env \| grep VAPID`; if rolled, each driver re-taps **Enable** |
+| `/admin/punches` empty | Genuine fault — this page is backed by `/api/admin/punches` and should show history | Check `docker compose logs web` for the API error; verify the branch/date filters aren't excluding everything |
+
+**No Sentry alerts at all?** Sentry only initialises when both `SENTRY_DSN` is set
+*and* `NODE_ENV=production`. Confirm with
+`docker compose exec web env | grep SENTRY_DSN`.
 
 ---
 
 ## 7. Emergency contacts
 
-- **Kyvera engineering**: <on-call phone + email>
-- **Client primary**: <owner name + phone>
-- **Hetzner VPS support**: <support ticket URL>
-- **Cloudflare**: <account dashboard>
-- **Telegram bot**: <@botfather handle>
+> **FILL BEFORE GO-LIVE — these are placeholders.** An unfilled row here means
+> nobody gets reached during an incident.
 
----
-
-## 8. Glossary
-
-- **Asia/Beirut**: the only timezone the business logic speaks. UTC stored in DB; conversion at display time via `packages/time`.
-- **RateChange**: append-only table; payout reads only from this. `User.hourly_rate_cent` is display-only.
-- **Flag**: notify-able event (WATCHED / MISSED_CHECKOUT / TRIP_OVER_THRESHOLD). Insert-only
-  except `notified_at` (an alert was sent) and `resolved_at` (a human dealt with it). The
-  attention queue filters on `resolved_at`; `watchedDetector` dedups on "any flag today"
-  regardless of either. If a dismissed notice ever reappears, check that dedup first — it is
-  what caused it last time. `TRIP_OVER_THRESHOLD` is declared but never written.
-- **Penalty**: never stored. Computed from schedule vs punches at read time. A **PenaltyWaiver**
-  revokes one (money returns); a **PenaltyAck** upholds one (money unchanged, notice cleared).
-- **PenaltyAck vs PenaltyWaiver**: only the waiver touches pay. If an employee disputes a
-  deduction, look for a waiver row — an ack means the admin reviewed it and let it stand.
-- **AuditLog**: REVOKE UPDATE/DELETE; only inserts.
+- [ ] **Kyvera engineering (on-call)**: `<phone + email>`
+- [ ] **Client primary (owner)**: `<name + phone>`
+- [ ] **VPS support**: `<provider + support ticket URL>`
+- [ ] **Cloudflare**: `<account dashboard URL>`

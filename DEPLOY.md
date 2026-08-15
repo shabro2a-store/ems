@@ -40,7 +40,12 @@ PUBLIC_APP_URL=https://app.shabro2a.com    # makes auth cookies Secure
 ENABLE_DEV_ENDPOINTS=false                 # keep the GPS-bypass endpoints OFF in prod
 # POSTGRES_PASSWORD=<optional>             # defaults to ems_dev_password if unset
 # TELEGRAM_BOT_TOKEN / TELEGRAM_WEBHOOK_SECRET  # see "Telegram alerts" below
+# VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT  # see "Web Push" below
+# SENTRY_DSN=<optional>                    # error monitoring; off when unset
 ```
+Adding a variable to `.env` is only half the job — it must also appear under the
+service's `environment:` block in `docker-compose.yml`, or the container never
+sees it. `.env.example` lists every variable the app reads.
 Generate the secret once (won't overwrite an existing one):
 ```bash
 grep -q '^JWT_SECRET=' .env || echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env

@@ -38,6 +38,8 @@ services:
       # Keep dev GPS-bypass endpoints OFF in production.
       ENABLE_DEV_ENDPOINTS: ${ENABLE_DEV_ENDPOINTS:-false}
       NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS: ${ENABLE_DEV_ENDPOINTS:-false}
+      # Error monitoring. Unset = Sentry stays off (app still runs normally).
+      SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
       db:
         condition: service_healthy

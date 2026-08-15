@@ -20,8 +20,8 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: '/icon.svg',
-      badge: '/icon.svg',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
       vibrate: [400, 150, 400, 150, 400],
       requireInteraction: true,
       tag: 'driver-ring',

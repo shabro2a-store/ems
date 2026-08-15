@@ -1,16 +1,17 @@
 import type { Metadata, Viewport } from 'next';
-import { initSentry } from '@/lib/sentry';
 import './globals.css';
-
-if (typeof window === 'undefined') {
-  initSentry();
-}
 
 export const metadata: Metadata = {
   title: 'Shabro2a',
   description: 'Shabro2a Employee Management',
   manifest: '/manifest.json',
-  icons: { icon: '/icon.svg', apple: '/icon.svg' },
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
   appleWebApp: { capable: true, statusBarStyle: 'default', title: 'Shabro2a' },
 };
 

@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "db:migrate": "prisma migrate dev --schema=./packages/db/prisma/schema.prisma",
-    "db:generate": "prisma generate --schema=./packages/db/prisma/schema.prisma",
-    "db:validate": "prisma validate --schema=./packages/db/prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts"
   },
   "prisma": {
