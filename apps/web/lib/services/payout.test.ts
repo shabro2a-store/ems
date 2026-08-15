@@ -116,6 +116,19 @@ describe('computePayoutFromRows', () => {
     expect(result.netCent).toBe(1600 + 1000 - 400);
   });
 
+  it('subtracts revoked overtime from net', () => {
+    const res = computePayoutFromRows({
+      userId: 'u1',
+      punches: [],
+      rateChanges: [],
+      adjustments: [],
+      approvedAdvances: [],
+      overtimeDeductionCent: 5_000,
+    });
+    expect(res.overtimeDeductionCent).toBe(5_000);
+    expect(res.netCent).toBe(-5_000);
+  });
+
   it('returns 0 hours when there are no punches', () => {
     const result = computePayoutFromRows({
       userId: 'u',

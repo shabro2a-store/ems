@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
+import { overtimeDeductionForUser } from './overtime';
 
 export interface PayoutForUserResult {
   hours: number;
@@ -7,6 +8,7 @@ export interface PayoutForUserResult {
   adjustmentsCent: number;
   advancesCent: number;
   penaltiesCent: number;
+  overtimeDeductionCent: number;
   netCent: number;
 }
 
@@ -82,6 +84,7 @@ export function computePayoutFromRows(args: {
   adjustments: AdjustmentRow[];
   approvedAdvances: AdvanceRow[];
   penaltiesCent?: number;
+  overtimeDeductionCent?: number;
 }): PayoutForUserResult {
   const adjustmentsCent = args.adjustments.reduce((s, a) => {
     return s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent);
@@ -90,9 +93,10 @@ export function computePayoutFromRows(args: {
     .filter((a) => a.status === 'APPROVED')
     .reduce((s, a) => s + a.amount_cent, 0);
   const penaltiesCent = args.penaltiesCent ?? 0;
+  const overtimeDeductionCent = args.overtimeDeductionCent ?? 0;
   const { hours, grossCent } = pairHours(args.punches, args.rateChanges);
-  const netCent = grossCent + adjustmentsCent - advancesCent - penaltiesCent;
-  return { hours, grossCent, adjustmentsCent, advancesCent, penaltiesCent, netCent };
+  const netCent = grossCent + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
+  return { hours, grossCent, adjustmentsCent, advancesCent, penaltiesCent, overtimeDeductionCent, netCent };
 }
 
 export async function payoutForUser(
@@ -101,7 +105,7 @@ export async function payoutForUser(
   db: PrismaClient,
 ): Promise<PayoutForUserResult> {
   const { start, end } = monthRangeUtc(month);
-  const [punches, rateChanges, adjustments, approvedAdvances, penalties] = await Promise.all([
+  const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -121,6 +125,7 @@ export async function payoutForUser(
       select: { user_id: true, amount_cent: true, status: true },
     }),
     penaltiesForUser(userId, month, db),
+    overtimeDeductionForUser(userId, month, db),
   ]);
   return computePayoutFromRows({
     userId,
@@ -129,6 +134,7 @@ export async function payoutForUser(
     adjustments: adjustments as AdjustmentRow[],
     approvedAdvances: approvedAdvances as AdvanceRow[],
     penaltiesCent: sumActivePenaltiesCent(penalties),
+    overtimeDeductionCent,
   });
 }
 
