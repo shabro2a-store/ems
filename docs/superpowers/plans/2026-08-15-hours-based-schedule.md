@@ -502,6 +502,7 @@ Replaces the `LATE` and `EARLY_LEAVE` branches of `computePenalties` with one sh
 
 **Files:**
 - Modify: `apps/web/lib/services/penalty.ts` (replace `computePenalties`, adapt `penaltiesForUser` and `pendingPenaltyNotices`)
+- Modify: `apps/web/components/admin/AdminDashboard.tsx:27` (kind union only — the full rewording is Task 7)
 - Test: `apps/web/lib/services/penalty.test.ts` (replace lateness/early-leave cases)
 
 **Interfaces:**
@@ -692,7 +693,17 @@ In `penaltiesForUser`, change the `schedule.findMany` select to `{ weekday: true
 
 Apply the same two select changes. Inside the per-user loop, replace the `schedulesByWeekday` / `overridesByDate` construction and the `computePenalties` call with the `computeCoverage` + `shortfallPenalties` pair from Step 4, keeping the surrounding `waived` / `since` / `ackedKeys` filtering exactly as it is. Delete the now-unused `now` plumbing: `computeCoverage` takes no `now`, so drop `now: opts.now` from the call but keep `opts.now` in the signature — Task 8 still passes it and removing it would break that caller.
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 6: Keep the dashboard compiling**
+
+Narrowing `PenaltyKind` breaks `apps/web/components/admin/AdminDashboard.tsx:27`, whose union still names the old kinds. Change that one union now so the tree stays green — the row wording and the overtime block are Task 7's job, not yours:
+
+```ts
+    penalties: { user_id: string; username: string; date: string; kind: 'SHORTFALL'; minutes: number; hours: number; amount_cent: number }[];
+```
+
+Change nothing else in that file.
+
+- [ ] **Step 7: Run the tests**
 
 Run:
 
@@ -700,12 +711,12 @@ Run:
 pnpm --filter web exec vitest run lib/services/penalty.test.ts lib/services/coverage.test.ts && pnpm -r typecheck
 ```
 
-Expected: PASS. Typecheck will still flag `AdminDashboard.tsx` for the `'LATE' | 'EARLY_LEAVE'` union — that is fixed in Task 7. If typecheck fails only there, continue.
+Expected: both PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add apps/web/lib/services/penalty.ts apps/web/lib/services/penalty.test.ts
+git add apps/web/lib/services/penalty.ts apps/web/lib/services/penalty.test.ts apps/web/components/admin/AdminDashboard.tsx
 git commit -m "feat(penalty): replace late/early-leave with a shortfall rule
 
 Coverage against the day's required hours, priced by the existing
@@ -729,7 +740,16 @@ penalised, which is the point."
   - `interface OvertimeItem { date: string; overtimeMin: number; rate_cent: number; amount_cent: number; decision: 'ACCEPTED' | 'REVOKED' | null }`
   - `function computeOvertime(args: { coverage: DayCoverage[]; rateChanges: RateChangeLite[]; graceMin: number; decisionsByDate: Map<string, 'ACCEPTED' | 'REVOKED'> }): OvertimeItem[]`
   - `function sumRevokedOvertimeCent(items: OvertimeItem[]): number`
+  - `async function overtimeForUser(userId: string, month: string, db: PrismaClient): Promise<OvertimeItem[]>`
+  - `async function overtimeDeductionForUser(userId: string, month: string, db: PrismaClient): Promise<number>`
   - `PayoutForUserResult` gains `overtimeDeductionCent: number`.
+
+**Known and accepted:** `overtime.ts` imports `rateAt` from `payout.ts` while
+`payout.ts` imports `overtimeDeductionForUser` back. This is a circular import.
+It mirrors the cycle already in the codebase between `payout.ts` and
+`penalty.ts`, and works for the same reason — the calls happen at runtime, not
+at module-init. The owner chose consistency with the existing pattern over
+restructuring `rateAt` into a separate module. Do not "fix" it.
 
 - [ ] **Step 1: Write the failing overtime tests**
 
