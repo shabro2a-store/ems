@@ -1,11 +1,11 @@
 import type { PrismaClient } from '@prisma/client';
-import { inBeirut, beirutWeekday, scheduledToUtc } from 'time';
 import { rateAt, monthRangeUtc } from './payout';
+import { computeCoverage, type DayCoverage, type OverrideLite, type PunchLite } from './coverage';
 
-// Unannounced lateness / early-leave penalty.
-//   penalty hours = min(4, floor(minutesLate / 15))
-// i.e. under 15 min late is free (grace), then 1 hour docked per 15-min block,
-// capped at 4 hours. Same rule mirrored for leaving before the scheduled end.
+// Shortfall penalty: covering fewer minutes than the day required.
+//   penalty hours = min(4, floor(shortfallMinutes / 15))
+// i.e. under 15 min short is free (grace), then 1 hour docked per 15-min block,
+// capped at 4 hours.
 const BLOCK_MIN = 15;
 const MAX_HOURS = 4;
 
@@ -14,147 +14,51 @@ export function penaltyHours(minutes: number): number {
   return Math.min(MAX_HOURS, Math.floor(minutes / BLOCK_MIN));
 }
 
-export type PenaltyKind = 'LATE' | 'EARLY_LEAVE';
+export type PenaltyKind = 'SHORTFALL';
 
 export interface PenaltyItem {
   date: string; // YYYY-MM-DD (Beirut)
   kind: PenaltyKind;
-  minutes: number; // minutes late / early
+  minutes: number; // minutes short of the required coverage
   hours: number; // penalty hours (1..4)
   rate_cent: number; // hourly rate applied
   amount_cent: number; // hours * rate_cent
   waived: boolean;
 }
 
-interface PunchLite {
-  kind: 'IN' | 'OUT';
-  at: Date;
-}
-interface ScheduleLite {
-  start_time: string;
-  end_time: string;
-}
-interface OverrideLite {
-  kind: 'DAY_OFF' | 'TIME_CHANGE';
-  start_time: string | null;
-  end_time: string | null;
-}
 interface RateChangeLite {
   rate_cent: number;
   effective_from: Date;
 }
 
-function nextDateStr(date: string): string {
-  const [y, m, d] = date.split('-').map(Number);
-  const nd = new Date(Date.UTC(y!, m! - 1, d! + 1));
-  return nd.toISOString().slice(0, 10);
-}
-
 /**
- * Compute late / early-leave penalties for one user over a set of punches,
- * given their weekly schedule, date overrides, rate history and any waivers.
- * Pure — no DB. The current Beirut day is skipped for early-leave (the shift
- * may not be finished yet); lateness on the current day is still final.
+ * Shortfall penalties from a day's coverage. Unclosed days are skipped - their
+ * hours are unknowable until the missing punch is corrected.
  */
-export function computePenalties(args: {
-  punches: PunchLite[];
-  schedulesByWeekday: Map<number, ScheduleLite>;
-  overridesByDate: Map<string, OverrideLite>;
+export function shortfallPenalties(args: {
+  coverage: DayCoverage[];
   rateChanges: RateChangeLite[];
-  waivedKeys: Set<string>; // `${date}|${kind}`
-  now?: Date;
+  waivedKeys: Set<string>; // `${date}|SHORTFALL`
 }): PenaltyItem[] {
-  const now = args.now ?? new Date();
-
-  // All punches, chronological — used to find a shift's closing OUT even when it
-  // lands on the next calendar day (overnight shifts).
-  const allSorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
-
-  // Group punches by Beirut calendar day (a shift belongs to its arrival day).
-  const byDay = new Map<string, PunchLite[]>();
-  for (const p of args.punches) {
-    const day = inBeirut(p.at).date;
-    const arr = byDay.get(day) ?? byDay.set(day, []).get(day)!;
-    arr.push(p);
-  }
-
   const items: PenaltyItem[] = [];
-
-  for (const [date, dayPunches] of byDay) {
-    const override = args.overridesByDate.get(date);
-    if (override?.kind === 'DAY_OFF') continue; // not scheduled to work
-
-    const weekday = beirutWeekday(dayPunches[0]!.at);
-    const schedule = args.schedulesByWeekday.get(weekday);
-
-    const effStart =
-      override?.kind === 'TIME_CHANGE' ? override.start_time ?? schedule?.start_time : schedule?.start_time;
-    const effEnd =
-      override?.kind === 'TIME_CHANGE' ? override.end_time ?? schedule?.end_time : schedule?.end_time;
-    if (!effStart && !effEnd) continue; // no scheduled shift this day
-
-    const sorted = [...dayPunches].sort((a, b) => a.at.getTime() - b.at.getTime());
-    const firstIn = sorted.find((p) => p.kind === 'IN');
-    if (!firstIn) continue; // no arrival that day → nothing to measure against
-
-    const schedStartUtc = effStart ? scheduledToUtc(date, effStart) : null;
-
-    // LATE — first arrival vs scheduled start.
-    if (schedStartUtc) {
-      const lateMin = Math.floor((firstIn.at.getTime() - schedStartUtc.getTime()) / 60_000);
-      const hours = penaltyHours(lateMin);
-      if (hours > 0) {
-        const rate = rateAt(args.rateChanges, firstIn.at);
-        items.push({
-          date,
-          kind: 'LATE',
-          minutes: lateMin,
-          hours,
-          rate_cent: rate,
-          amount_cent: hours * rate,
-          waived: args.waivedKeys.has(`${date}|LATE`),
-        });
-      }
-    }
-
-    // EARLY_LEAVE — the shift's closing OUT vs scheduled end. Works for overnight
-    // shifts (the OUT can be on the next calendar day). Only evaluated once the
-    // shift is actually over (scheduled end is in the past).
-    if (effEnd) {
-      let schedEndUtc = scheduledToUtc(date, effEnd);
-      // Overnight shift (end <= start): the scheduled end is the next day.
-      if (schedStartUtc && schedEndUtc.getTime() <= schedStartUtc.getTime()) {
-        schedEndUtc = scheduledToUtc(nextDateStr(date), effEnd);
-      }
-      if (schedEndUtc.getTime() <= now.getTime()) {
-        // The closing OUT is the last OUT between arrival and a grace window past
-        // scheduled end (allows overtime); the grace lets it cross midnight.
-        const graceEndMs = schedEndUtc.getTime() + 6 * 60 * 60 * 1000;
-        const shiftPunches = allSorted.filter(
-          (p) => p.at.getTime() >= firstIn.at.getTime() && p.at.getTime() <= graceEndMs,
-        );
-        const last = shiftPunches[shiftPunches.length - 1];
-        if (last && last.kind === 'OUT') {
-          const earlyMin = Math.floor((schedEndUtc.getTime() - last.at.getTime()) / 60_000);
-          const hours = penaltyHours(earlyMin);
-          if (hours > 0) {
-            const rate = rateAt(args.rateChanges, last.at);
-            items.push({
-              date,
-              kind: 'EARLY_LEAVE',
-              minutes: earlyMin,
-              hours,
-              rate_cent: rate,
-              amount_cent: hours * rate,
-              waived: args.waivedKeys.has(`${date}|EARLY_LEAVE`),
-            });
-          }
-        }
-      }
-    }
+  for (const day of args.coverage) {
+    if (!day.closed) continue;
+    if (day.deltaMin >= 0) continue;
+    const minutes = -day.deltaMin;
+    const hours = penaltyHours(minutes);
+    if (hours === 0) continue;
+    const rate = rateAt(args.rateChanges, day.lastPunchAt);
+    items.push({
+      date: day.date,
+      kind: 'SHORTFALL',
+      minutes,
+      hours,
+      rate_cent: rate,
+      amount_cent: hours * rate,
+      waived: args.waivedKeys.has(`${day.date}|SHORTFALL`),
+    });
   }
-
-  items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.kind.localeCompare(b.kind)));
+  items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return items;
 }
 
@@ -173,11 +77,11 @@ export async function penaltiesForUser(
     }),
     db.schedule.findMany({
       where: { user_id: userId },
-      select: { weekday: true, start_time: true, end_time: true },
+      select: { weekday: true, shift_min: true },
     }),
     db.scheduleOverride.findMany({
       where: { user_id: userId, date: { gte: start, lt: end } },
-      select: { date: true, kind: true, start_time: true, end_time: true },
+      select: { date: true, kind: true, shift_min: true },
     }),
     db.rateChange.findMany({
       where: { user_id: userId, effective_from: { lt: end } },
@@ -190,25 +94,28 @@ export async function penaltiesForUser(
     }),
   ]);
 
-  const schedulesByWeekday = new Map<number, ScheduleLite>();
-  for (const s of schedules) schedulesByWeekday.set(s.weekday, { start_time: s.start_time, end_time: s.end_time });
+  const shiftMinByWeekday = new Map<number, number>();
+  for (const s of schedules) shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
 
   const overridesByDate = new Map<string, OverrideLite>();
   for (const o of overrides) {
+    if (o.kind !== 'DAY_OFF' && o.kind !== 'HOURS_CHANGE') continue;
     overridesByDate.set(o.date.toISOString().slice(0, 10), {
-      kind: o.kind as 'DAY_OFF' | 'TIME_CHANGE',
-      start_time: o.start_time,
-      end_time: o.end_time,
+      kind: o.kind,
+      shift_min: o.shift_min,
     });
   }
 
   const waivedKeys = new Set<string>();
   for (const w of waivers) waivedKeys.add(`${w.date.toISOString().slice(0, 10)}|${w.kind}`);
 
-  return computePenalties({
+  const coverage = computeCoverage({
     punches: punches as PunchLite[],
-    schedulesByWeekday,
+    shiftMinByWeekday,
     overridesByDate,
+  });
+  return shortfallPenalties({
+    coverage,
     rateChanges: rateChanges as RateChangeLite[],
     waivedKeys,
   });
@@ -245,11 +152,11 @@ export async function pendingPenaltyNotices(
     }),
     db.schedule.findMany({
       where: { user_id: { in: ids } },
-      select: { user_id: true, weekday: true, start_time: true, end_time: true },
+      select: { user_id: true, weekday: true, shift_min: true },
     }),
     db.scheduleOverride.findMany({
       where: { user_id: { in: ids }, date: { gte: start, lt: end } },
-      select: { user_id: true, date: true, kind: true, start_time: true, end_time: true },
+      select: { user_id: true, date: true, kind: true, shift_min: true },
     }),
     db.rateChange.findMany({
       where: { user_id: { in: ids }, effective_from: { lt: end } },
@@ -286,16 +193,16 @@ export async function pendingPenaltyNotices(
 
   const notices: PenaltyNotice[] = [];
   for (const u of users) {
-    const schedulesByWeekday = new Map<number, ScheduleLite>();
+    const shiftMinByWeekday = new Map<number, number>();
     for (const s of schedulesBy.get(u.id) ?? []) {
-      schedulesByWeekday.set(s.weekday, { start_time: s.start_time, end_time: s.end_time });
+      shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
     }
     const overridesByDate = new Map<string, OverrideLite>();
     for (const o of overridesBy.get(u.id) ?? []) {
+      if (o.kind !== 'DAY_OFF' && o.kind !== 'HOURS_CHANGE') continue;
       overridesByDate.set(o.date.toISOString().slice(0, 10), {
-        kind: o.kind as 'DAY_OFF' | 'TIME_CHANGE',
-        start_time: o.start_time,
-        end_time: o.end_time,
+        kind: o.kind,
+        shift_min: o.shift_min,
       });
     }
     const waivedKeys = new Set<string>();
@@ -303,13 +210,15 @@ export async function pendingPenaltyNotices(
       waivedKeys.add(`${w.date.toISOString().slice(0, 10)}|${w.kind}`);
     }
 
-    const items = computePenalties({
+    const coverage = computeCoverage({
       punches: (punchesBy.get(u.id) ?? []) as PunchLite[],
-      schedulesByWeekday,
+      shiftMinByWeekday,
       overridesByDate,
+    });
+    const items = shortfallPenalties({
+      coverage,
       rateChanges: (ratesBy.get(u.id) ?? []) as RateChangeLite[],
       waivedKeys,
-      now: opts.now,
     });
 
     for (const p of items) {

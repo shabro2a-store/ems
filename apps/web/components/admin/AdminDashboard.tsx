@@ -24,7 +24,7 @@ interface Overview {
   attention: {
     lateDrivers: { trip_id: string; driver_username: string; branch_name: string; since_min: number; threshold_min: number }[];
     flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null; reason: string }[];
-    penalties: { user_id: string; username: string; date: string; kind: 'LATE' | 'EARLY_LEAVE'; minutes: number; hours: number; amount_cent: number }[];
+    penalties: { user_id: string; username: string; date: string; kind: 'SHORTFALL'; minutes: number; hours: number; amount_cent: number }[];
     pendingAdvances: { id: string; username: string; amount_cent: number; reason: string | null }[];
     pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; start_time: string | null; end_time: string | null; note: string | null }[];
   };
@@ -299,7 +299,7 @@ export default function AdminDashboard() {
                 ))}
                 {att.penalties.map((p) => {
                   const key = `${p.user_id}|${p.date}|${p.kind}`;
-                  const what = p.kind === 'LATE' ? 'clocking in late' : 'leaving early';
+                  const what = 'a shortfall';
                   const body = { userId: p.user_id, date: p.date, kind: p.kind };
                   return (
                     <li key={key} className="flex items-start gap-3 px-4 py-3 sm:px-5">
