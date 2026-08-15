@@ -196,6 +196,18 @@ payroll as `penalties_cent` and reduce `net_cent`.
   attention queue stops recomputing it. **Changes no money** — `waive` is the one
   that refunds. Audited. → `{ acknowledged: true }`.
 
+### Overtime
+A day that ran past its required hours by more than the branch's overtime grace
+is **computed**, not stored, until the owner decides it (see `overtimeForUser`).
+A pending day (no decision) is already paid — pairHours pays every worked minute —
+so it surfaces in payroll only if revoked.
+- **POST /api/admin/overtime/decision** *(CSRF, Idempotent)* `{ userId, date:
+  "YYYY-MM-DD", decision: "ACCEPTED"|"REVOKED", reason? }` — upserts the one
+  `OvertimeDecision` row for that (user, date). `ACCEPTED` **changes no money**
+  and only takes the notice off the attention queue; `REVOKED` makes payroll
+  subtract that day's excess. Audited as `overtime.accepted` / `overtime.revoked`.
+  → `{ decision }`.
+
 ### Flags
 - **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag
   (sets `notified_at`); audited. Changes no punch or pay record. → `{ id, resolved_at }`.
