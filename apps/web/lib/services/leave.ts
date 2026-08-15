@@ -166,7 +166,7 @@ export async function leaveSummary(
     pending,
     upcoming: upcoming.map((o) => ({
       date: o.date.toISOString().slice(0, 10),
-      kind: o.kind,
+      kind: o.kind as 'DAY_OFF' | 'TIME_CHANGE',
       start_time: o.start_time,
       end_time: o.end_time,
       note: o.note,

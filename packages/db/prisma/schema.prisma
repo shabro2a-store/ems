@@ -22,6 +22,7 @@ enum PunchKind {
 enum OverrideKind {
   DAY_OFF
   TIME_CHANGE
+  HOURS_CHANGE
 }
 
 enum OverrideSource {
@@ -50,6 +51,12 @@ enum FlagKind {
 enum PenaltyKind {
   LATE
   EARLY_LEAVE
+  SHORTFALL
+}
+
+enum OvertimeDecisionKind {
+  ACCEPTED
+  REVOKED
 }
 
 model User {
@@ -77,6 +84,7 @@ model User {
   flags                Flag[]
   penalty_waivers      PenaltyWaiver[]
   penalty_acks         PenaltyAck[]
+  overtimeDecisions    OvertimeDecision[]
   calls_received       DriverCall[]       @relation("CallsReceived")
   calls_made           DriverCall[]       @relation("CallsMade")
   push_subscriptions   PushSubscription[]
@@ -140,9 +148,11 @@ model Schedule {
   weekday    Int
   start_time String
   end_time   String
+  shift_min  Int?
   // Raw SQL CHECK in migration:
   //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_weekday_chk CHECK (weekday BETWEEN 0 AND 6);
   //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_time_chk CHECK (start_time ~ '^\d{2}:\d{2}$' AND end_time ~ '^\d{2}:\d{2}$');
+  //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_shift_min_chk CHECK ("shift_min" IS NULL OR ("shift_min" >= 0 AND "shift_min" <= 1440));
 
   @@unique([user_id, weekday])
 }
@@ -155,9 +165,12 @@ model ScheduleOverride {
   kind       OverrideKind
   start_time String?
   end_time   String?
+  shift_min  Int?
   note       String?
   source     OverrideSource
   created_at DateTime       @default(now())
+  // Raw SQL CHECK in migration:
+  //   ALTER TABLE "ScheduleOverride" ADD CONSTRAINT override_shift_min_chk CHECK ("shift_min" IS NULL OR ("shift_min" >= 0 AND "shift_min" <= 1440));
 
   @@unique([user_id, date])
 }
@@ -171,6 +184,7 @@ model LeaveRequest {
   end_date   DateTime      @db.Date
   start_time String?
   end_time   String?
+  shift_min  Int?
   note       String?
   status     RequestStatus
   decided_by String?
@@ -178,6 +192,7 @@ model LeaveRequest {
   created_at DateTime      @default(now())
   // Raw SQL CHECK in migration:
   //   ALTER TABLE "LeaveRequest" ADD CONSTRAINT leave_range_chk CHECK (end_date >= start_date);
+  //   ALTER TABLE "LeaveRequest" ADD CONSTRAINT leave_shift_min_chk CHECK ("shift_min" IS NULL OR ("shift_min" >= 0 AND "shift_min" <= 1440));
 
   @@index([user_id, status])
 }
@@ -265,6 +280,23 @@ model PenaltyAck {
   created_at      DateTime    @default(now())
 
   @@unique([user_id, date, kind])
+  @@index([user_id, date])
+}
+
+// The owner has reviewed a day's overtime. No row means pending, and pending
+// overtime is already paid - pairHours pays every minute worked. REVOKED makes
+// payroll subtract that day's excess.
+model OvertimeDecision {
+  id         String               @id @default(cuid())
+  user_id    String
+  user       User                 @relation(fields: [user_id], references: [id])
+  date       DateTime             @db.Date
+  decision   OvertimeDecisionKind
+  reason     String?
+  decided_by String
+  created_at DateTime             @default(now())
+
+  @@unique([user_id, date])
   @@index([user_id, date])
 }
 
