@@ -19,10 +19,10 @@ describe('cron: missedCheckout integration', () => {
     await getTestPrisma().$disconnect();
   });
 
-  it('creates a Flag row and sends neutral notifier message when still clocked in past end+35', async () => {
+  it('creates a Flag row and sends neutral notifier message when still clocked in past shift+grace', async () => {
     const branch = await seedTestBranch();
     const user = await seedTestUser({ username: 'mc-emp1', branch_id: branch.id });
-    await seedTestSchedule({ user_id: user.id, weekday: 0, start_time: '09:00', end_time: '18:00' });
+    await seedTestSchedule({ user_id: user.id, weekday: 0, shift_min: 540 });
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: new Date('2026-07-12T09:00:00+03:00') });
 
     const r = await runMissedCheckout({ now: new Date('2026-07-12T18:36:00+03:00'), notifier });

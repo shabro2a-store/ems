@@ -263,7 +263,7 @@ function AdjustModal({ row, onClose, onSaved }: { row: Row; onClose: () => void;
 
 interface PenaltyItem {
   date: string;
-  kind: 'LATE' | 'EARLY_LEAVE';
+  kind: 'SHORTFALL';
   minutes: number;
   hours: number;
   rate_cent: number;
@@ -295,19 +295,17 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
     onChanged();
   }
 
-  const label = (k: PenaltyItem['kind']) => (k === 'LATE' ? 'Late arrival' : 'Left early');
-
   return (
     <Modal title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
       <p className="mb-3 text-sm text-muted">
-        Automatic penalties for unannounced lateness / early leaving this month. Remove one when the employee
+        Automatic penalties for covering fewer hours than the day required. Remove one when the employee
         gave notice — this never affects manual adjustments.
       </p>
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
       {items === null ? (
         <div className="grid place-items-center py-8 text-muted"><Spinner /></div>
       ) : items.length === 0 ? (
-        <EmptyState title="No penalties" hint="This employee has no late / early-leave penalties this month." />
+        <EmptyState title="No penalties" hint="This employee has no shortfall penalties this month." />
       ) : (
         <ul className="divide-y divide-border">
           {items.map((p) => {
@@ -316,7 +314,7 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
               <li key={id} className="flex items-center justify-between gap-3 py-2.5">
                 <div className={p.waived ? 'opacity-50' : ''}>
                   <div className="text-sm font-medium">
-                    {label(p.kind)} · <span className="tabular">{p.minutes} min</span>
+                    Hours short · <span className="tabular">{p.minutes} min</span>
                     {p.waived && <span className="ml-2 text-xs font-normal text-muted">(removed)</span>}
                   </div>
                   <div className="text-xs text-muted">

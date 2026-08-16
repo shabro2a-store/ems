@@ -80,7 +80,7 @@ worked wages + bonuses − deductions − advances already approved this month.
 
 ### GET /api/me/leave  ·  POST /api/me/leave  *(POST: CSRF, Idempotent)*
 Summary `{ pending, upcoming: [...] }`; request body
-`{ kind: "DAY_OFF"|"TIME_CHANGE", start_date, end_date, start_time?, end_time?, note? }`.
+`{ kind: "DAY_OFF"|"HOURS_CHANGE", start_date, end_date, hoursOff?, note? }`.
 → `200 { id, status: "PENDING" }`. Error: `PAST_DATE` 400.
 
 ### Driver trips (role DRIVER)
@@ -118,11 +118,11 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   driversOver, tripsToday, hoursToday, laborTodayCent }, people[] (drivers include
   trips_today), attention{ lateDrivers, flags, penalties, pendingAdvances,
   pendingLeaves } }`.
-  - `penalties[]` — `{ user_id, username, date, kind: LATE|EARLY_LEAVE, minutes, hours,
+  - `penalties[]` — `{ user_id, username, date, kind: SHORTFALL, minutes, hours,
     amount_cent }`. Computed on the fly, last 7 days, excluding any already waived or
     acknowledged. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
-  - `pendingLeaves[]` includes `start_time` / `end_time` — a `TIME_CHANGE` cannot be
-    reviewed without the hours being requested.
+  - `pendingLeaves[]` includes `off_min` — an `HOURS_CHANGE` cannot be reviewed
+    without the hours being requested.
   - `flags[]` includes a rendered **`reason`** ("No punch in — their shift started at
     09:00, 45m ago"), built server-side from `context_json`. Only unresolved flags appear
     (`resolved_at IS NULL`); being alerted about one does not remove it from the queue.
@@ -150,7 +150,7 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **PATCH /api/admin/users/[id]/notification-prefs** *(CSRF)* `{ dailySummary?, routinePings? }`.
 - **GET /api/admin/schedules/[userId]** → `{ weeklySchedule, overrides, pendingLeaves }`.
 - **PUT /api/admin/schedules/[userId]** *(CSRF)* `{ weeklySchedule: [{ weekday 0-6,
-  start_time, end_time }] }` (full replace).
+  shift_hours 0-24 }] }` (full replace).
 
 ### Branches
 - **GET /api/admin/branches** → `{ branches: [...] }`.
@@ -182,17 +182,17 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   `{ id, status, overrides_created }` (approval materializes ScheduleOverrides).
 
 ### Penalties
-Late / early-leave penalties are **computed** from schedule vs punches
-(`min(4, floor(minutesLate / 15))` hours × rate), not stored. Both surface in
+Shortfall penalties are **computed** from hours owed vs hours covered
+(`min(4, floor(shortfallMinutes / 15))` hours × rate), not stored. They surface in
 payroll as `penalties_cent` and reduce `net_cent`.
 - **GET /api/admin/penalties?userId=&month=YYYY-MM** → `{ penalties: [{ date, kind:
-  "LATE"|"EARLY_LEAVE", minutes, hours, rate_cent, amount_cent, waived }] }`.
+  "SHORTFALL", minutes, hours, rate_cent, amount_cent, waived }] }`.
 - **POST /api/admin/penalties/waive** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:
-  "LATE"|"EARLY_LEAVE", waived: bool, reason? }` — removes (`waived:true`) or
+  "SHORTFALL", waived: bool, reason? }` — removes (`waived:true`) or
   re-applies (`waived:false`) one auto-penalty. Only ever writes `PenaltyWaiver`
   rows; never a manual adjustment. → `{ waived }`.
 - **POST /api/admin/penalties/ack** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:
-  "LATE"|"EARLY_LEAVE" }` — upholds one auto-penalty: writes a `PenaltyAck` so the
+  "SHORTFALL" }` — upholds one auto-penalty: writes a `PenaltyAck` so the
   attention queue stops recomputing it. **Changes no money** — `waive` is the one
   that refunds. Audited. → `{ acknowledged: true }`.
 

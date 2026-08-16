@@ -21,7 +21,6 @@ enum PunchKind {
 
 enum OverrideKind {
   DAY_OFF
-  TIME_CHANGE
   HOURS_CHANGE
 }
 
@@ -49,8 +48,6 @@ enum FlagKind {
 }
 
 enum PenaltyKind {
-  LATE
-  EARLY_LEAVE
   SHORTFALL
 }
 
@@ -142,16 +139,13 @@ model RateChange {
 }
 
 model Schedule {
-  id         String  @id @default(cuid())
-  user_id    String
-  user       User    @relation(fields: [user_id], references: [id])
-  weekday    Int
-  start_time String?
-  end_time   String?
-  shift_min  Int?
+  id        String @id @default(cuid())
+  user_id   String
+  user      User   @relation(fields: [user_id], references: [id])
+  weekday   Int
+  shift_min Int
   // Raw SQL CHECK in migration:
   //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_weekday_chk CHECK (weekday BETWEEN 0 AND 6);
-  //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_time_chk CHECK (start_time ~ '^\d{2}:\d{2}$' AND end_time ~ '^\d{2}:\d{2}$');
   //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_shift_min_chk CHECK ("shift_min" IS NULL OR ("shift_min" >= 0 AND "shift_min" <= 1440));
 
   @@unique([user_id, weekday])
@@ -163,8 +157,6 @@ model ScheduleOverride {
   user       User           @relation(fields: [user_id], references: [id])
   date       DateTime       @db.Date
   kind       OverrideKind
-  start_time String?
-  end_time   String?
   shift_min  Int?
   note       String?
   source     OverrideSource
@@ -182,8 +174,6 @@ model LeaveRequest {
   kind       OverrideKind
   start_date DateTime      @db.Date
   end_date   DateTime      @db.Date
-  start_time String?
-  end_time   String?
   off_min    Int?
   note       String?
   status     RequestStatus

@@ -20,7 +20,7 @@ const BRANCHES: BranchSeed[] = [
 ];
 
 const DEFAULT_HOURLY_RATE_CENT = 200;
-const DEFAULT_SCHEDULE = { start_time: '09:00', end_time: '18:00' };
+const DEFAULT_SHIFT_MIN = 540;
 const SCHEDULE_WEEKDAYS = [6, 0, 1, 2, 3];
 
 async function main() {
@@ -98,8 +98,7 @@ async function main() {
           data: {
             user_id: employee.id,
             weekday,
-            start_time: DEFAULT_SCHEDULE.start_time,
-            end_time: DEFAULT_SCHEDULE.end_time,
+            shift_min: DEFAULT_SHIFT_MIN,
           },
         });
       }

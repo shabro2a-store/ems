@@ -52,7 +52,7 @@ type Store = {
     correction_reason: string | null;
     created_at: Date;
   }>;
-  overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }>;
+  overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE' }>;
   trips: Array<{ id: string; driver_id: string; back_at: Date | null }>;
   audits: Array<{ id: string }>;
   flags: Array<{ id: string; user_id: string; kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; resolved_at: Date | null; context_json: unknown; created_at: Date }>;

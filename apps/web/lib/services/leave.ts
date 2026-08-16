@@ -117,16 +117,12 @@ export async function decideLeave(
             user_id: leave.user_id,
             date: dateOnly,
             kind: leave.kind,
-            start_time: null,
-            end_time: null,
             shift_min: shiftMin,
             note: leave.note,
             source: 'EMPLOYEE_REQUEST',
           },
           update: {
             kind: leave.kind,
-            start_time: null,
-            end_time: null,
             shift_min: shiftMin,
             note: leave.note,
             source: 'EMPLOYEE_REQUEST',
@@ -158,7 +154,7 @@ export interface LeaveSummary {
   pending: number;
   upcoming: Array<{
     date: string;
-    kind: 'DAY_OFF' | 'TIME_CHANGE' | 'HOURS_CHANGE';
+    kind: 'DAY_OFF' | 'HOURS_CHANGE';
     shift_min: number | null;
     note: string | null;
   }>;

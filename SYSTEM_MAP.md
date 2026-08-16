@@ -58,9 +58,9 @@ cuid PKs, money = Int cents.
 - **Punch** — user, branch, kind(IN/OUT), at, evidence(lat/lng/accuracy_m/device_fp/ip),
   correction(corrected/corrected_by/correction_reason). Indexed by (user,at),(branch,at).
 - **RateChange** — point-in-time hourly rate history (payroll uses the rate in effect at each shift).
-- **Schedule** — one row per (user, weekday 0=Sun..6=Sat): start_time/end_time "HH:MM" Beirut.
-- **ScheduleOverride** — one per (user, date): DAY_OFF or TIME_CHANGE. DAY_OFF blocks punching.
-- **LeaveRequest** — kind, start/end date, optional times, status. Approval → ScheduleOverride rows.
+- **Schedule** — one row per (user, weekday 0=Sun..6=Sat): `shift_min`, the hours owed that day.
+- **ScheduleOverride** — one per (user, date): DAY_OFF or HOURS_CHANGE. DAY_OFF blocks punching.
+- **LeaveRequest** — kind, start/end date, optional `off_min`, status. Approval → ScheduleOverride rows.
 - **Trip** — driver, branch, out_at/lat/lng, back_at/lat/lng?, over_threshold, threshold_alerted_at.
   **Partial unique index: one open trip per driver.**
 - **Advance** — amount_cent, reason?, status. Approved advances reduce net pay (by created_at month).
@@ -71,7 +71,7 @@ cuid PKs, money = Int cents.
   a recent ring with no `trip_id` yet.
 - **PushSubscription** — a device's Web Push subscription (user, endpoint unique, p256dh, auth);
   lets a ring reach a locked/closed phone. Dead endpoints (404/410) are auto-pruned.
-- **PenaltyWaiver** — (user, date, kind LATE/EARLY_LEAVE) unique. Penalties themselves are
+- **PenaltyWaiver** — (user, date, kind SHORTFALL) unique. Penalties themselves are
   **computed on the fly** (schedule vs punches, see §4), not stored; a waiver is the admin
   "remove penalty" for one (user, day, kind) and can never touch an Adjustment.
 - **PenaltyAck** — (user, date, kind) unique. The admin saw an auto-penalty and let it
@@ -133,24 +133,24 @@ Full request/response detail is in [API.md](API.md). Summary:
   interval gross = `floor(minutes * rate_at_shift / 60)` (respects RateChange history). Open
   session pays nothing. `net = gross + Σadjustments − ΣapprovedAdvances(month) − Σpenalties(month)`.
   Can go negative.
-- **Penalties (`penalty.ts`)**: unannounced lateness / early-leave, docked from pay.
-  `penaltyHours = min(4, floor(minutesLate / 15))` — under 15 min is free (grace), then 1 hour
-  per 15-min block, capped at 4h; same rule for leaving before the scheduled end. Measured from
-  each day's first IN / last OUT vs the employee's Schedule (respecting overrides; DAY_OFF and
-  unscheduled days are skipped; the current day is skipped for early-leave). Computed on the fly
-  (not stored); an admin **waiver** removes one. Penalty amount = hours × rate-at-shift.
+- **Penalties (`penalty.ts`)**: covering fewer minutes than the day required (SHORTFALL), docked
+  from pay. `penaltyHours = min(4, floor(shortfallMinutes / 15))` — under 15 min short is free
+  (grace), then 1 hour per 15-min block, capped at 4h. Measured from the day's covered minutes vs
+  the employee's `shift_min` (respecting overrides; DAY_OFF and unscheduled days are skipped;
+  unclosed days are skipped until the missing punch is corrected). Computed on the fly (not
+  stored); an admin **waiver** removes one. Penalty amount = hours × rate-at-shift.
 - **Day-offs never block punching** — an approved DAY_OFF suppresses "absent" alerts and shows
   the person as off, but staff may still clock in to help during a rush.
-- **Overnight shifts**: a schedule whose `end_time <= start_time` ends the **next day** (e.g.
-  20:00 → 05:00). Handled everywhere — `missedCheckout` looks at yesterday's overnight + today's
-  same-day shifts; penalties pair the closing OUT across midnight (late **and** early-leave both
-  apply). Early-leave is only scored once the shift's scheduled end has passed.
-- **Approved schedule changes sync everywhere**: an approved TIME_CHANGE (not just DAY_OFF) shifts
-  the effective start/end used by penalties, `watchedDetector`, and `missedCheckout`, and shows in
-  the admin schedule editor. Employees request DAY_OFF / TIME_CHANGE from the field app.
-- **Correcting a punch clears its penalty**: penalties are computed from `punch.at` vs schedule,
-  so an admin correcting a 09:45 IN to 09:00 makes the lateness zero → the penalty disappears
-  automatically (no stored penalty to reverse).
+- **No clock windows**: a shift is a number of hours, not a start/end time, so an employee may
+  cover them whenever they like. Absence is therefore only judged once the Beirut day has fully
+  closed (`watchedDetector` looks at the day that just ended), and `missedCheckout` fires on
+  elapsed time past `shift_min` + the branch's grace, not past a scheduled end.
+- **Approved schedule changes sync everywhere**: an approved HOURS_CHANGE (not just DAY_OFF) shifts
+  the required hours used by penalties, `watchedDetector`, and `missedCheckout`, and shows in
+  the admin schedule editor. Employees request DAY_OFF / HOURS_CHANGE from the field app.
+- **Correcting a punch clears its penalty**: penalties are computed from `punch.at` vs the hours
+  owed, so an admin correcting a punch that restores the missing coverage makes the shortfall zero
+  → the penalty disappears automatically (no stored penalty to reverse).
 - **Caller dispatch gate**: a driver can only go "out on order" (start a trip) after the caller
   rings them — the trip requires a `DriverCall` from the last 30 min with no trip yet; starting
   the trip consumes that call (`trip_id`). Prevents undispatched trips and ties each trip to its
@@ -248,7 +248,7 @@ indistinguishable from a button that does nothing, which is exactly how this fai
 | **Flag** | Dismiss (+ Fix punch) | Dismiss is an acknowledgement only — no record changes. `MISSED_CHECKOUT` also links to `/admin/punches`, where the punch can actually be corrected. |
 | **Penalty** | Accept · Revoke | Accept upholds (no money moves); Revoke waives and returns the money. |
 | **Advance** | Approve · Reject | Approve deducts from this month's pay. |
-| **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`, **new hours for `TIME_CHANGE`**. The row shows the requested hours so the admin is not approving blind. |
+| **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`, **new hours for `HOURS_CHANGE`**. The row shows the requested hours so the admin is not approving blind. |
 
 Every irreversible action (Reject, Revoke) is **two-step**: the first tap arms the button,
 the second commits. The decision endpoints answer `ALREADY_DECIDED` forever after, so a

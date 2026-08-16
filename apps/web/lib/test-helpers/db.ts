@@ -261,8 +261,6 @@ export async function seedDispatchCall(driverId: string) {
 export interface ScheduleOverrides {
   user_id: string;
   weekday: number;
-  start_time: string;
-  end_time: string;
   // Production schedule queries now filter on this (Task 10); without a
   // default here, every row this helper seeds would be invisible to them.
   shift_min?: number;
@@ -274,8 +272,6 @@ export async function seedTestSchedule(overrides: ScheduleOverrides) {
     data: {
       user_id: overrides.user_id,
       weekday: overrides.weekday,
-      start_time: overrides.start_time,
-      end_time: overrides.end_time,
       shift_min: overrides.shift_min ?? 480,
     },
   });
@@ -314,11 +310,10 @@ export async function seedTestTrip(overrides: TripOverrides) {
 
 export interface LeaveRequestOverrides {
   user_id: string;
-  kind: 'DAY_OFF' | 'TIME_CHANGE';
+  kind: 'DAY_OFF' | 'HOURS_CHANGE';
   start_date: Date;
   end_date: Date;
-  start_time?: string | null;
-  end_time?: string | null;
+  off_min?: number | null;
   note?: string | null;
   status?: 'PENDING' | 'APPROVED' | 'REJECTED';
   decided_by?: string | null;
@@ -333,8 +328,7 @@ export async function seedTestLeaveRequest(overrides: LeaveRequestOverrides) {
       kind: overrides.kind,
       start_date: overrides.start_date,
       end_date: overrides.end_date,
-      start_time: overrides.start_time ?? null,
-      end_time: overrides.end_time ?? null,
+      off_min: overrides.off_min ?? null,
       note: overrides.note ?? null,
       status: overrides.status ?? 'PENDING',
       decided_by: overrides.decided_by ?? null,

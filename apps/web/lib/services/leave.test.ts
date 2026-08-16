@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const store = {
   leaves: [] as Array<{ id: string; user_id: string; kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_date: Date; end_date: Date; off_min: number | null; note: string | null; status: 'PENDING' | 'APPROVED' | 'REJECTED'; decided_by: string | null; decided_at: Date | null; created_at: Date }>,
-  overrides: [] as Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_time: string | null; end_time: string | null; shift_min: number | null; note: string | null; source: string }>,
+  overrides: [] as Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min: number | null; note: string | null; source: string }>,
   schedules: [] as Array<{ user_id: string; weekday: number; shift_min: number | null }>,
   audits: [] as Array<{ action: string; entity: string; entity_id: string }>,
   leafSeq: 0,
@@ -91,7 +91,7 @@ beforeEach(() => {
     return l;
   });
 
-  mocks.scheduleOverride.upsert.mockImplementation(async ({ where, create, update }: { where: { user_id_date: { user_id: string; date: Date } }; create: { user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_time: string | null; end_time: string | null; shift_min: number | null; note: string | null; source: string }; update: Partial<{ kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_time: string | null; end_time: string | null; shift_min: number | null; note: string | null; source: string }> }) => {
+  mocks.scheduleOverride.upsert.mockImplementation(async ({ where, create, update }: { where: { user_id_date: { user_id: string; date: Date } }; create: { user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min: number | null; note: string | null; source: string }; update: Partial<{ kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min: number | null; note: string | null; source: string }> }) => {
     let existing = store.overrides.find((o) => o.user_id === where.user_id_date.user_id && o.date.getTime() === where.user_id_date.date.getTime());
     if (existing) {
       Object.assign(existing, update);
@@ -234,7 +234,7 @@ describe('decideLeave REJECTED', () => {
 describe('leaveSummary', () => {
   it('returns pending count and upcoming overrides', async () => {
     store.overrides.push(
-      { user_id: 'u1', date: new Date('2026-12-01T00:00:00.000Z'), kind: 'DAY_OFF', start_time: null, end_time: null, shift_min: null, note: null, source: 'ADMIN_DIRECT' },
+      { user_id: 'u1', date: new Date('2026-12-01T00:00:00.000Z'), kind: 'DAY_OFF', shift_min: null, note: null, source: 'ADMIN_DIRECT' },
     );
     const cr = await requestLeave({ userId: 'u1', kind: 'DAY_OFF', startDate: '2026-12-05', endDate: '2026-12-05' });
     if (!cr.ok) throw new Error('create failed');

@@ -17,7 +17,7 @@ function isValidCalendarDate(value: string): boolean {
 const Body = z.object({
   userId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, 'date must be a real calendar day'),
-  kind: z.enum(['LATE', 'EARLY_LEAVE']),
+  kind: z.enum(['SHORTFALL']),
   waived: z.boolean(),
   reason: z.string().max(500).optional(),
 });

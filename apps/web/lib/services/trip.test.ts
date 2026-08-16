@@ -40,7 +40,7 @@ const store: {
     trip_threshold_min: number;
   }>;
   trips: TripRow[];
-  overrides: Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }>;
+  overrides: Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE' }>;
   calls: Array<{ id: string; driver_id: string; trip_id: string | null; created_at: Date }>;
   tripSeq: number;
 } = {
