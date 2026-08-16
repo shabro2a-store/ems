@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { verifyToken, signToken } from '@/lib/auth/jwt';
 import { generateCsrfToken, csrfFromRequest } from '@/lib/auth/csrf';
-import { sessionExpiryFor, type ScheduleEntry } from '@/lib/auth/session';
+import { sessionExpiryFor } from '@/lib/auth/session';
 import { setAuthCookies } from '@/lib/auth/cookies';
 import { REFRESH_COOKIE_NAME } from '@/lib/auth/constants';
 
@@ -30,20 +30,19 @@ export async function POST(req: Request) {
 
   const user = await prisma.user.findUnique({
     where: { id: payload.sub },
-    include: { schedules: true },
   });
   if (!user || !user.is_active) {
     return jsonError('UNAUTHORIZED', 'User inactive', 401);
   }
 
   const now = new Date();
-  // An hours-based schedule (Task 8) carries no clock window to extend a
-  // session against - Task 11 migrates sessionExpiryFor to shift_min. Until
-  // then, exclude rather than feed scheduledToUtc a null.
-  const schedules: ScheduleEntry[] = user.schedules
-    .filter((s) => s.start_time != null && s.end_time != null)
-    .map((s) => ({ weekday: s.weekday, start_time: s.start_time!, end_time: s.end_time! }));
-  const exp = sessionExpiryFor({ role: user.role }, schedules, now);
+  const lastPunch = await prisma.punch.findFirst({
+    where: { user_id: user.id },
+    orderBy: { at: 'desc' },
+    select: { kind: true },
+  });
+  const hasOpenPunch = lastPunch?.kind === 'IN';
+  const exp = sessionExpiryFor({ role: user.role }, hasOpenPunch, now);
   const newAccess = await signToken(
     { sub: user.id, role: user.role, branchId: user.branch_id ?? null },
     exp,
