@@ -17,7 +17,8 @@ Prereqs: Node 20, pnpm 9, Docker (for the Postgres dev DB).
 ```bash
 git clone <repo>
 cd <repo>
-docker compose up -d db                       # Postgres on :5433
+cp .env.example .env                          # POSTGRES_PASSWORD is required; compose won't start without it
+docker compose up -d db                       # Postgres on 127.0.0.1:5433 (host only)
 pnpm install
 pnpm --filter db exec prisma generate
 pnpm --filter db exec prisma migrate deploy   # or `prisma migrate dev` on a fresh DB

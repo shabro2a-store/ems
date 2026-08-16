@@ -42,12 +42,17 @@ check `/api/health`'s `uptime_s` if in doubt.
   self-service password change.
 - **Admin protection**: the admin account cannot be created via the app, promoted/demoted,
   or deactivated (fail-closed with 403). `password_hash` is never returned to the client.
-- Session TTL: employee 120 min; a driver checked in at login gets 12h (720 min,
+- Session TTL: employee 120 min; a **checked-in driver** gets 12h (720 min,
   `SESSION_TTL_DRIVER_CHECKED_IN_MIN`), comfortably outlasting any real shift; a driver
-  not checked in gets the standard 120 min. **This is not a rolling session** — nothing
-  in the app ever calls `POST /api/auth/refresh` (it exists and works, but no client code
-  invokes it), so the expiry is computed once at login and is final for that token; it does
-  not extend as the driver keeps working. `mustChangePassword` is returned when the
+  not checked in gets the standard 120 min. The switch happens at the **punch**, not at
+  login: `POST /api/me/punch` re-issues the access cookie for a DRIVER — the long TTL on
+  IN, the standard one on OUT. It has to, because a driver signs in *before* they can
+  punch, so at login the answer to "is this driver checked in" is always no. No other
+  role's expiry moves. **This is not a rolling session** — nothing in the app ever calls
+  `POST /api/auth/refresh` (it exists and works, but no client code invokes it), so the
+  expiry is fixed at the last punch and does not extend as the driver keeps working; the
+  access cookie's own lifetime tracks the token's expiry so it cannot end the session
+  early. `mustChangePassword` is returned when the
   password equals the seed default `change-me`.
 
 ---
@@ -158,8 +163,19 @@ Full request/response detail is in [API.md](API.md). Summary:
   no money: an admin **Accept** just clears it (writes an `OvertimeDecision`, no money moves);
   **Revoke** deducts that day's excess (`overtimeMin * rate / 60`) from payroll. A day with 0
   required hours (unscheduled, or a `DAY_OFF` override) makes every worked minute overtime.
-- **Day-offs never block punching** — an approved DAY_OFF suppresses "absent" alerts and shows
-  the person as off, but staff may still clock in to help during a rush.
+  A revoked day shows as its own line (`overtime_deduction_cent`) on both payroll screens,
+  and **Undo** on the payroll screen's overtime modal deletes the decision row, putting the
+  day back to pending and the money back in the employee's pay.
+- **One answer to "what did this day require"** (`requiredMinFor` in `coverage.ts`): a
+  `DAY_OFF` override is 0, an `HOURS_CHANGE` override with an explicit `shift_min` beats the
+  weekly pattern, otherwise the weekday's `Schedule.shift_min`, otherwise 0. Payroll, the
+  admin dashboard's DAY_OFF/ABSENT split, `watchedDetector` and `missedCheckout` all use it.
+  The worker cannot import from `apps/web`, so it keeps a mirror in
+  `apps/worker/src/jobs/requiredMin.ts` that `requiredMin.test.ts` pins to the original.
+- **Day-offs never block punching** — an approved day off suppresses "absent" alerts and shows
+  the person as off, but staff may still clock in to help during a rush. "Off" means the day
+  required 0 minutes, not that a `DAY_OFF` row exists: approving a whole shift of time off
+  writes an `HOURS_CHANGE` of 0, and that counts the same everywhere.
 - **No clock windows**: a shift is a number of hours, not a start/end time, so an employee may
   cover them whenever they like. Absence is therefore only judged once the Beirut day has fully
   closed (`watchedDetector` looks at the day that just ended), and `missedCheckout` fires on
@@ -205,8 +221,8 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 | Schedule | Job | Does |
 |---|---|---|
-| 00:10 daily | watchedDetector | Judges the Beirut day that just closed: scheduled (`shift_min > 0`), no `DAY_OFF` override, zero punches that day → WATCHED flag (absence notice, no automatic penalty) |
-| every 1 min | missedCheckout | Open check-in whose elapsed time exceeds `shift_min` + the branch's overtime grace → MISSED_CHECKOUT flag + notify |
+| 00:10 daily | watchedDetector | Judges the Beirut day that just closed: the day required more than 0 minutes (`requiredMinFor`, so an approved full day off is skipped whether it is a `DAY_OFF` or an `HOURS_CHANGE` to 0) and there were zero punches → WATCHED flag (absence notice, no automatic penalty) |
+| every 1 min | missedCheckout | Open check-in whose elapsed time exceeds that date's required minutes (`requiredMinFor`, so approved time off shortens the threshold) + the branch's overtime grace → MISSED_CHECKOUT flag + notify. A date requiring 0 minutes is skipped, not measured against zero |
 | every 1 min | tripThreshold | Open trip past branch threshold → set over_threshold + notify |
 | every 30 min | driverStale | Trip open ≥ 4h → notify |
 | 23:30 daily | endOfDayWatcher | Unresolved WATCHED flags → notify + close |

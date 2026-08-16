@@ -68,7 +68,9 @@ GPS/geofence (uses the branch centre) for testing on devices without GPS.
 approved_advance_balance_cent, net_cent }` — real earnings for the caller.
 
 ### GET /api/me/payroll?month=YYYY-MM
-→ `200 { hours, gross_cent, adjustments_cent, advances_cent, penalties_cent, net_cent }`.
+→ `200 { hours, gross_cent, adjustments_cent, advances_cent, penalties_cent,
+overtime_deduction_cent, net_cent }`. Every subtracted line is listed separately, so
+`gross + adjustments − advances − penalties − overtime_deduction === net`.
 
 ### GET /api/me/advances  ·  GET /api/me/advances?view=list
 Summary `{ pending, approved_balance_cent }`, or `{ advances: [...] }` (latest 50).
@@ -125,6 +127,14 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     on-the-fly computation and 7-day lookback as `penalties[]`; only days past the
     branch's overtime grace with no decision yet appear. Resolved with
     `overtime/decision` (see below).
+  - Both lists are loaded once per calendar month the 7-day lookback touches, so
+    the window still reaches back over a month boundary. It matters most for
+    overtime, where a day with no decision is already paid: a month-end overrun
+    that never surfaced would auto-approve.
+  - `people[].status` is `DAY_OFF` whenever the day resolves to **zero** required
+    minutes — a `DAY_OFF` override, an `HOURS_CHANGE` override for the whole
+    shift, or a weekday with no hours set — and only `ABSENT` when hours were
+    owed and no punch exists. Same resolution payroll uses (`requiredMinFor`).
   - `pendingLeaves[]` includes `off_min` — an `HOURS_CHANGE` cannot be reviewed
     without the hours being requested.
   - `flags[]` includes a rendered **`reason`** built server-side from `context_json` —
@@ -176,7 +186,8 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 ### Pay & approvals
 - **GET /api/admin/payroll?month=YYYY-MM&branchId=** → `{ rows[], totals, month,
   branchId, branches }`. Each row + `totals` include `gross_cent`, `adjustments_cent`,
-  `penalties_cent`, `advances_cent`, `net_cent`.
+  `penalties_cent`, `overtime_deduction_cent`, `advances_cent`, `net_cent` — every
+  line `net_cent` is built from, so the table reconciles.
 - **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
   scoped to the branch filter.
 - **POST /api/admin/adjustments** *(CSRF, Idempotent)* `{ userId, kind:
@@ -207,12 +218,18 @@ A day that ran past its required hours by more than the branch's overtime grace
 is **computed**, not stored, until the owner decides it (see `overtimeForUser`).
 A pending day (no decision) is already paid — pairHours pays every worked minute —
 so it surfaces in payroll only if revoked.
+- **GET /api/admin/overtime?userId=&month=YYYY-MM** → `{ overtime: [{ date,
+  overtimeMin, rate_cent, amount_cent, decision: "ACCEPTED"|"REVOKED"|null }] }`.
+  Unlike the attention queue this keeps **decided** days, which is what makes a
+  decision reversible — the queue drops a day the moment it has one.
 - **POST /api/admin/overtime/decision** *(CSRF, Idempotent)* `{ userId, date:
-  "YYYY-MM-DD", decision: "ACCEPTED"|"REVOKED", reason? }` — upserts the one
-  `OvertimeDecision` row for that (user, date). `ACCEPTED` **changes no money**
+  "YYYY-MM-DD", decision: "ACCEPTED"|"REVOKED"|"PENDING", reason? }` — upserts the
+  one `OvertimeDecision` row for that (user, date). `ACCEPTED` **changes no money**
   and only takes the notice off the attention queue; `REVOKED` makes payroll
-  subtract that day's excess. Audited as `overtime.accepted` / `overtime.revoked`.
-  → `{ decision }`.
+  subtract that day's excess. `PENDING` is the undo: it is not an
+  `OvertimeDecisionKind` — the absence of a row *is* pending — so it **deletes** the
+  row, returning the day to the queue and the money to the employee. Audited as
+  `overtime.accepted` / `overtime.revoked` / `overtime.undecided`. → `{ decision }`.
 
 ### Flags
 - **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag

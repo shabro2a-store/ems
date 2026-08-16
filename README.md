@@ -26,7 +26,8 @@ pnpm workspaces · Tailwind design system · react-pdf.
 
 ## Local development
 ```bash
-docker compose up -d db                       # Postgres on :5433
+cp .env.example .env                          # POSTGRES_PASSWORD is required; compose won't start without it
+docker compose up -d db                       # Postgres on 127.0.0.1:5433 (host only)
 pnpm install
 pnpm --filter db exec prisma generate
 pnpm --filter db exec prisma migrate deploy   # or `prisma migrate dev` for a fresh DB
