@@ -81,6 +81,77 @@ describe('admin payroll integration', () => {
     expect(body.error?.code).toBe('INVALID_INPUT');
   });
 
+  it('expected monthly salary is reference only — payroll totals unaffected by setting it', async () => {
+    const branch = await seedTestBranch({ gps_radius_m: 200 });
+    const emp = await seedTestUser({ username: 'pay-salary-emp', branch_id: branch.id });
+    const admin = await seedTestUser({ username: 'pay-salary-admin', role: Role.ADMIN });
+
+    await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date('2026-07-01T08:00:00Z') });
+    await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: new Date('2026-07-01T16:00:00Z') });
+    await seedTestRateChange({ user_id: emp.id, rate_cent: 200, effective_from: new Date('2026-01-01T00:00:00Z') });
+
+    const aSession = await loginAs(admin.username, 'change-me');
+
+    async function fetchPayroll() {
+      const res = await fetch(`${BASE_URL}/api/admin/payroll?month=2026-07`, {
+        headers: { Cookie: aSession.cookies, 'X-CSRF-Token': aSession.csrf },
+      });
+      expect(res.status).toBe(200);
+      return (await res.json()) as {
+        data: {
+          rows: Array<{
+            user_id: string;
+            expected_salary_cent: number | null;
+            hours: number;
+            gross_cent: number;
+            adjustments_cent: number;
+            advances_cent: number;
+            penalties_cent: number;
+            overtime_deduction_cent: number;
+            net_cent: number;
+          }>;
+          totals: Record<string, number>;
+        };
+      };
+    }
+
+    const before = await fetchPayroll();
+    const beforeRow = before.data.rows.find((r) => r.user_id === emp.id);
+    expect(beforeRow).toBeTruthy();
+    expect(beforeRow!.expected_salary_cent).toBeNull();
+    expect(beforeRow!.gross_cent).toBe(1600);
+    expect(beforeRow!.net_cent).toBe(1600);
+
+    // A deliberately huge, distinctive figure: if it ever leaks into a
+    // calculation, the totals below move by an unmistakable amount.
+    const patchRes = await fetch(`${BASE_URL}/api/admin/users/${emp.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `sal-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': aSession.csrf,
+        Cookie: aSession.cookies,
+      },
+      body: JSON.stringify({ expectedMonthlySalaryCent: 99_999_900 }),
+    });
+    expect(patchRes.status).toBe(200);
+
+    const after = await fetchPayroll();
+    const afterRow = after.data.rows.find((r) => r.user_id === emp.id);
+    expect(afterRow).toBeTruthy();
+    // The figure really did get set...
+    expect(afterRow!.expected_salary_cent).toBe(99_999_900);
+    // ...but every money and hours figure is untouched, row and totals alike.
+    expect(afterRow!.hours).toBe(beforeRow!.hours);
+    expect(afterRow!.gross_cent).toBe(beforeRow!.gross_cent);
+    expect(afterRow!.adjustments_cent).toBe(beforeRow!.adjustments_cent);
+    expect(afterRow!.advances_cent).toBe(beforeRow!.advances_cent);
+    expect(afterRow!.penalties_cent).toBe(beforeRow!.penalties_cent);
+    expect(afterRow!.overtime_deduction_cent).toBe(beforeRow!.overtime_deduction_cent);
+    expect(afterRow!.net_cent).toBe(beforeRow!.net_cent);
+    expect(after.data.totals).toEqual(before.data.totals);
+  });
+
   it('returns 403 for non-admin', async () => {
     const branch = await seedTestBranch();
     const employee = await seedTestUser({ username: 'pay-emp3', branch_id: branch.id });

@@ -78,6 +78,53 @@ describe('admin-users integration', () => {
     expect(rateChanges[1]?.rate_cent).toBe(350);
   });
 
+  it('PATCH /api/admin/users/:id sets and clears expectedMonthlySalaryCent, writing an AuditLog entry', async () => {
+    const admin = await seedTestUser({ username: 'u-admin5', role: Role.ADMIN });
+    const employee = await seedTestUser({ username: 'u-emp5' });
+    const session = await loginAs(admin.username, 'change-me');
+
+    const setRes = await fetch(`${BASE_URL}/api/admin/users/${employee.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idemKey('sal'),
+        'X-CSRF-Token': session.csrf,
+        Cookie: session.cookies,
+      },
+      body: JSON.stringify({ expectedMonthlySalaryCent: 75000 }),
+    });
+    expect(setRes.status).toBe(200);
+    const setBody = (await setRes.json()) as { ok: boolean; data?: { user: { expected_monthly_salary_cent: number | null } } };
+    expect(setBody.ok).toBe(true);
+    expect(setBody.data?.user.expected_monthly_salary_cent).toBe(75000);
+
+    const dbAfterSet = await getTestPrisma().user.findUnique({ where: { id: employee.id } });
+    expect(dbAfterSet?.expected_monthly_salary_cent).toBe(75000);
+
+    const audit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'User', entity_id: employee.id, action: 'user.update' },
+      orderBy: { at: 'desc' },
+    });
+    expect(audit).not.toBeNull();
+    expect((audit?.before_json as { expected_monthly_salary_cent?: number | null } | null)?.expected_monthly_salary_cent).toBeNull();
+    expect((audit?.after_json as { expected_monthly_salary_cent?: number | null } | null)?.expected_monthly_salary_cent).toBe(75000);
+
+    // The owner clears it back to unset the same way he set it.
+    const clearRes = await fetch(`${BASE_URL}/api/admin/users/${employee.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idemKey('sal'),
+        'X-CSRF-Token': session.csrf,
+        Cookie: session.cookies,
+      },
+      body: JSON.stringify({ expectedMonthlySalaryCent: null }),
+    });
+    expect(clearRes.status).toBe(200);
+    const dbAfterClear = await getTestPrisma().user.findUnique({ where: { id: employee.id } });
+    expect(dbAfterClear?.expected_monthly_salary_cent).toBeNull();
+  });
+
   it('POST /api/admin/users/:id/reset-password returns temp_password', async () => {
     const admin = await seedTestUser({ username: 'u-admin3', role: Role.ADMIN });
     const employee = await seedTestUser({ username: 'u-emp3' });

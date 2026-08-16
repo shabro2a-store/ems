@@ -62,7 +62,9 @@ check `/api/health`'s `uptime_s` if in doubt.
 cuid PKs, money = Int cents.
 
 - **User** — username(unique), **name?** (display), password_hash, role, branch_id?,
-  hourly_rate_cent, is_active, telegram_chat_id?, notify_daily_summary, notify_routine_pings.
+  hourly_rate_cent, **expected_monthly_salary_cent?** (owner's reference figure, editable
+  any time on `/admin/payroll`; display only — never read by payout.ts or any calculation),
+  is_active, telegram_chat_id?, notify_daily_summary, notify_routine_pings.
 - **Branch** — name, lat, lng, gps_radius_m(50), gps_accuracy_max_m(100), overtime_grace_min(15),
   trip_threshold_min(30), is_active.
 - **Punch** — user, branch, kind(IN/OUT), at, evidence(lat/lng/accuracy_m/device_fp/ip),
@@ -122,7 +124,8 @@ Full request/response detail is in [API.md](API.md). Summary:
 - Dashboard: `GET overview?branchId` (KPIs + people + attention queue) · `GET activity` ·
   `GET trends` · `GET now` (legacy, test-only).
 - Employees: `GET users` (no password_hash) · `POST users` (name/username/role/branch/rate;
-  ADMIN role rejected) · `PATCH users/[id]` (username/name/role/branch/rate; admin protected) ·
+  ADMIN role rejected) · `PATCH users/[id]` (username/name/role/branch/rate/expected monthly
+  salary; admin protected) ·
   `POST users/[id]/reset-password` (chosen or random) · `POST users/[id]/deactivate` (admin protected) ·
   `PATCH users/[id]/notification-prefs` · `GET/PUT schedules/[userId]`.
 - Branches: `GET branches` · `POST branches` (create) · `PATCH branches/[id]` ·
@@ -259,8 +262,10 @@ an "Open in app" deep link) — all actions happen in the web app.
   bind card) · `/admin/users` (Employees: branch filter, add/edit incl. name+username, rate,
   reset/set password, deactivate, per-employee weekly schedule) · `/admin/branches` (create/edit/
   remove, record GPS) · `/admin/punches` (log + persistent correction) · `/admin/payroll` (month +
-  branch filter, totals incl. **Total to pay / Adjustments / Penalties**, editable rate, inline
-  adjustments, per-employee penalties with **Remove/Restore**, branch-aware PDF).
+  branch filter, totals incl. **Total to pay / Adjustments / Penalties**, editable rate, an
+  editable **Expected** monthly salary reference (never part of any total — display only, for
+  the owner to eyeball against actual pay), inline adjustments, per-employee penalties with
+  **Remove/Restore**, branch-aware PDF).
 - **Employee** (phone): `/employee` (punch + today/earnings, greets by name) ·
   `/employee/advances` · `/employee/leave` · `/employee/payroll`.
 - **Driver** (phone): `/driver` — **clock in/out** (attendance punch) **and** trip out/back

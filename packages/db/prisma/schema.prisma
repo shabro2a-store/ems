@@ -65,6 +65,10 @@ model User {
   branch_id            String?
   branch               Branch?            @relation(fields: [branch_id], references: [id])
   hourly_rate_cent     Int
+  // What the owner expects to pay this person monthly. Reference only: never
+  // read by payout.ts or any other calculation, purely for the admin payroll
+  // screen to display next to actual earnings. Edited freely, no history kept.
+  expected_monthly_salary_cent Int?
   is_active            Boolean            @default(true)
   telegram_chat_id     String?
   notify_daily_summary Boolean            @default(true)

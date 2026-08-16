@@ -156,9 +156,11 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   rejected (403)**. **CALLER** needs a branch, gets no pay rate/RateChange, and is capped at
   **one active caller per branch** → `409 CALLER_EXISTS`.
 - **PATCH /api/admin/users/[id]** *(CSRF)* `{ username?, name?, role?, branchId?,
-  hourlyRateCent? }` (a rate change inserts a new `RateChange`; `username` is
-  uniqueness-checked → `409 USERNAME_TAKEN`). Promoting to admin, or changing the
+  hourlyRateCent?, expectedMonthlySalaryCent? }` (a rate change inserts a new `RateChange`;
+  `username` is uniqueness-checked → `409 USERNAME_TAKEN`). Promoting to admin, or changing the
   admin's role, is **rejected (403)** (the admin's username/name are still editable).
+  `expectedMonthlySalaryCent` (or `null` to clear) is a reference figure only — it is never
+  read by any payroll calculation, just displayed on `/admin/payroll` next to actual earnings.
 - **POST /api/admin/users/[id]/reset-password** *(CSRF)* optional `{ password }` —
   sets that password, or generates a random one. → `{ temp_password }`.
 - **POST /api/admin/users/[id]/deactivate** *(CSRF)* toggles active. Deactivating an
@@ -187,7 +189,9 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **GET /api/admin/payroll?month=YYYY-MM&branchId=** → `{ rows[], totals, month,
   branchId, branches }`. Each row + `totals` include `gross_cent`, `adjustments_cent`,
   `penalties_cent`, `overtime_deduction_cent`, `advances_cent`, `net_cent` — every
-  line `net_cent` is built from, so the table reconciles.
+  line `net_cent` is built from, so the table reconciles. Each row also carries
+  `expected_salary_cent` (nullable) — the owner's reference figure; deliberately absent
+  from `totals`, since it is never summed or built into `net_cent`.
 - **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
   scoped to the branch filter.
 - **POST /api/admin/adjustments** *(CSRF, Idempotent)* `{ userId, kind:

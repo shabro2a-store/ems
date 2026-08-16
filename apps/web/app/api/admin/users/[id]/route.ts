@@ -12,6 +12,8 @@ const Patch = z.object({
   role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN', 'CALLER']).optional(),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative().optional(),
+  // Reference only (see schema.prisma). null clears it back to unset.
+  expectedMonthlySalaryCent: z.number().int().nonnegative().nullable().optional(),
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -76,6 +78,9 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         ...(body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent
           ? { hourly_rate_cent: body.hourlyRateCent }
           : {}),
+        ...(body.expectedMonthlySalaryCent !== undefined
+          ? { expected_monthly_salary_cent: body.expectedMonthlySalaryCent }
+          : {}),
       },
     });
     if (body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent) {
@@ -95,8 +100,20 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     action: 'user.update',
     entity: 'User',
     entityId: user.id,
-    before: { username: before.username, role: before.role, branch_id: before.branch_id, hourly_rate_cent: before.hourly_rate_cent },
-    after: { username: user.username, role: user.role, branch_id: user.branch_id, hourly_rate_cent: user.hourly_rate_cent },
+    before: {
+      username: before.username,
+      role: before.role,
+      branch_id: before.branch_id,
+      hourly_rate_cent: before.hourly_rate_cent,
+      expected_monthly_salary_cent: before.expected_monthly_salary_cent,
+    },
+    after: {
+      username: user.username,
+      role: user.role,
+      branch_id: user.branch_id,
+      hourly_rate_cent: user.hourly_rate_cent,
+      expected_monthly_salary_cent: user.expected_monthly_salary_cent,
+    },
   });
 
   const { password_hash: _pwh, ...safeUser } = user;

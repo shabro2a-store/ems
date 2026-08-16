@@ -11,6 +11,9 @@ interface Row {
   branch_id: string | null;
   branch_name: string | null;
   rate_cent: number;
+  // Reference only — what the owner expects to pay this person monthly. Never
+  // part of any total; shown next to net pay so he can eyeball the gap himself.
+  expected_salary_cent: number | null;
   hours: number;
   gross_cent: number;
   adjustments_cent: number;
@@ -49,6 +52,7 @@ export default function AdminPayrollPage() {
   const [rateFor, setRateFor] = useState<Row | null>(null);
   const [penaltiesFor, setPenaltiesFor] = useState<Row | null>(null);
   const [overtimeFor, setOvertimeFor] = useState<Row | null>(null);
+  const [salaryFor, setSalaryFor] = useState<Row | null>(null);
 
   async function load() {
     setLoading(true);
@@ -153,6 +157,7 @@ export default function AdminPayrollPage() {
                   <th className="px-4 py-2.5 text-right">OT revoked</th>
                   <th className="px-4 py-2.5 text-right">Advances</th>
                   <th className="px-4 py-2.5 text-right">Net</th>
+                  <th className="px-4 py-2.5 text-right">Expected</th>
                   <th className="px-4 py-2.5 text-right"></th>
                 </tr>
               </thead>
@@ -202,6 +207,15 @@ export default function AdminPayrollPage() {
                         </td>
                         <td className="tabular px-4 py-2.5 text-right font-semibold">{centsToUsd(r.net_cent)}</td>
                         <td className="px-4 py-2.5 text-right">
+                          <button
+                            onClick={() => setSalaryFor(r)}
+                            className="tabular border-b border-dashed border-border font-medium hover:text-primary"
+                            title="Set expected monthly salary (reference only — never affects pay)"
+                          >
+                            {r.expected_salary_cent == null ? <span className="text-muted">—</span> : centsToUsd(r.expected_salary_cent)}
+                          </button>
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
                           <Button size="sm" variant="ghost" onClick={() => setAdjust(r)}>＋ Adjust</Button>
                         </td>
                       </tr>
@@ -221,6 +235,8 @@ export default function AdminPayrollPage() {
                     <td className="tabular px-4 py-3 text-right text-danger">{totals.overtime_deduction_cent === 0 ? '—' : `−${centsToUsd(totals.overtime_deduction_cent, false)}`}</td>
                     <td className="tabular px-4 py-3 text-right">−{centsToUsd(totals.advances_cent, false)}</td>
                     <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.net_cent)}</td>
+                    {/* Reference-only figures are never summed — left blank rather than implying a total. */}
+                    <td></td>
                     <td></td>
                   </tr>
                 </tfoot>
@@ -242,6 +258,9 @@ export default function AdminPayrollPage() {
       {overtimeFor && (
         <OvertimeModal row={overtimeFor} month={month} onClose={() => setOvertimeFor(null)} onChanged={() => { setMsg('Overtime updated.'); load(); }} />
       )}
+      {salaryFor && (
+        <SalaryModal row={salaryFor} onClose={() => setSalaryFor(null)} onSaved={() => { setSalaryFor(null); setMsg('Expected salary updated.'); load(); }} />
+      )}
     </>
   );
 }
@@ -249,7 +268,7 @@ export default function AdminPayrollPage() {
 function GroupBody({ group, show, children }: { group: string; show: boolean; children: React.ReactNode }) {
   return (
     <>
-      {show && <tr><td colSpan={10} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>}
+      {show && <tr><td colSpan={11} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>}
       {children}
     </>
   );
@@ -475,6 +494,39 @@ function RateModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; o
       <form id="rate" onSubmit={submit} className="space-y-4">
         <Field label="New hourly rate (USD)" htmlFor="rr" hint="Applies from now on; hours already worked this month keep the old rate.">
           <Input id="rr" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} required />
+        </Field>
+        {err && <Alert tone="danger">{err}</Alert>}
+      </form>
+    </Modal>
+  );
+}
+
+function SalaryModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void }) {
+  const [salary, setSalary] = useState(row.expected_salary_cent != null ? (row.expected_salary_cent / 100).toFixed(2) : '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    const trimmed = salary.trim();
+    const res = await apiSend(`/api/admin/users/${row.user_id}`, {
+      method: 'PATCH',
+      body: { expectedMonthlySalaryCent: trimmed === '' ? null : Math.round(parseFloat(trimmed) * 100) },
+    });
+    setBusy(false);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    onSaved();
+  }
+  return (
+    <Modal title={`Expected monthly salary · ${row.username}`} onClose={onClose}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="salary" type="submit" loading={busy}>Save</Button></>}>
+      <form id="salary" onSubmit={submit} className="space-y-4">
+        <Field
+          label="Expected monthly salary (USD)"
+          htmlFor="es"
+          hint="Reference only — for comparing against actual pay. Never affects payroll. Leave blank to clear."
+        >
+          <Input id="es" type="number" step="0.01" min="0" value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="Not set" />
         </Field>
         {err && <Alert tone="danger">{err}</Alert>}
       </form>

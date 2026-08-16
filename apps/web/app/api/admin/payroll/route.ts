@@ -24,7 +24,15 @@ export async function GET(req: Request) {
   const [users, branches] = await Promise.all([
     prisma.user.findMany({
       where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] }, ...(branchId ? { branch_id: branchId } : {}) },
-      select: { id: true, username: true, role: true, branch_id: true, hourly_rate_cent: true, branch: { select: { name: true } } },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        branch_id: true,
+        hourly_rate_cent: true,
+        expected_monthly_salary_cent: true,
+        branch: { select: { name: true } },
+      },
       orderBy: [{ branch: { name: 'asc' } }, { username: 'asc' }],
     }),
     prisma.branch.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
@@ -40,6 +48,10 @@ export async function GET(req: Request) {
         branch_id: u.branch_id,
         branch_name: u.branch?.name ?? null,
         rate_cent: u.hourly_rate_cent,
+        // Reference only — what the owner expects to pay this person. Deliberately
+        // excluded from `totals` below: it must never be summed or compared, only
+        // displayed next to what they actually earned.
+        expected_salary_cent: u.expected_monthly_salary_cent,
         hours: r.hours,
         gross_cent: r.grossCent,
         adjustments_cent: r.adjustmentsCent,
