@@ -373,8 +373,8 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
   );
 }
 
-interface DayState { wd: number; name: string; working: boolean; start: string; end: string }
-interface OverrideRow { id: string; date: string; kind: 'DAY_OFF' | 'TIME_CHANGE'; start_time: string | null; end_time: string | null; note: string | null }
+interface DayState { wd: number; name: string; working: boolean; hours: number }
+interface OverrideRow { id: string; date: string; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min: number | null; note: string | null }
 function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => void; onSaved: () => void }) {
   const [days, setDays] = useState<DayState[] | null>(null);
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
@@ -383,11 +383,11 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
 
   useEffect(() => {
     (async () => {
-      const r = await apiGet<{ weeklySchedule: { weekday: number; start_time: string; end_time: string }[]; overrides: { id: string; date: string; kind: 'DAY_OFF' | 'TIME_CHANGE'; start_time: string | null; end_time: string | null; note: string | null }[] }>(`/api/admin/schedules/${user.id}`);
+      const r = await apiGet<{ weeklySchedule: { weekday: number; shift_min: number | null }[]; overrides: { id: string; date: string; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min: number | null; note: string | null }[] }>(`/api/admin/schedules/${user.id}`);
       const byWd = new Map((r.ok ? r.data.weeklySchedule : []).map((s) => [s.weekday, s]));
       setDays(DAYS.map((d) => {
         const s = byWd.get(d.wd);
-        return { wd: d.wd, name: d.name, working: !!s, start: s?.start_time ?? '09:00', end: s?.end_time ?? '18:00' };
+        return { wd: d.wd, name: d.name, working: !!s, hours: s?.shift_min != null ? s.shift_min / 60 : 8 };
       }));
       const todayStr = new Date().toISOString().slice(0, 10);
       setOverrides(
@@ -402,7 +402,7 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
   async function save() {
     if (!days) return;
     setBusy(true); setErr(null);
-    const weeklySchedule = days.filter((d) => d.working).map((d) => ({ weekday: d.wd, start_time: d.start, end_time: d.end }));
+    const weeklySchedule = days.filter((d) => d.working).map((d) => ({ weekday: d.wd, shift_hours: d.hours }));
     const res = await apiSend(`/api/admin/schedules/${user.id}`, { method: 'PUT', body: { weeklySchedule } });
     setBusy(false);
     if (!res.ok) { setErr(errorMessage(res)); return; }
@@ -420,15 +420,11 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
         <div className="grid place-items-center py-8"><Spinner /></div>
       ) : (
         <div className="space-y-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Shift hours</div>
           {days.map((d) => (
             <div key={d.wd} className="rounded-lg border border-border p-2.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">
-                  {d.name}
-                  {d.working && d.end <= d.start && (
-                    <span className="ml-2 text-xs font-normal text-primary">· ends next day</span>
-                  )}
-                </span>
+                <span className="text-sm font-medium">{d.name}</span>
                 <button
                   type="button"
                   onClick={() => set(d.wd, { working: !d.working })}
@@ -439,17 +435,24 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
               </div>
               {d.working && (
                 <div className="mt-2 flex items-center gap-2">
-                  <Input type="time" value={d.start} onChange={(e) => set(d.wd, { start: e.target.value })} className="flex-1" />
-                  <span className="flex-none text-xs text-muted">to</span>
-                  <Input type="time" value={d.end} onChange={(e) => set(d.wd, { end: e.target.value })} className="flex-1" />
+                  <Input
+                    type="number"
+                    min={0}
+                    max={24}
+                    step={0.5}
+                    value={d.hours}
+                    onChange={(e) => set(d.wd, { hours: Number(e.target.value) })}
+                    className="w-20 text-right"
+                    aria-label={`Shift hours on ${d.name}`}
+                  />
+                  <span className="text-sm text-muted">hours</span>
                 </div>
               )}
             </div>
           ))}
 
-          <p className="pt-1 text-xs text-muted">
-            Tip: for an overnight shift (e.g. 20:00 → 05:00), just set the end time earlier than the
-            start — it&apos;s treated as ending the next morning.
+          <p className="pt-1 text-sm text-muted">
+            Weekly total: {days.filter((d) => d.working).reduce((s, d) => s + d.hours, 0)}h
           </p>
 
           {overrides.length > 0 && (
@@ -460,7 +463,7 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
                   <li key={o.id} className="flex items-center justify-between gap-2 text-sm">
                     <span className="tabular">{o.date}</span>
                     <span className={o.kind === 'DAY_OFF' ? 'font-medium text-warning' : 'text-content'}>
-                      {o.kind === 'DAY_OFF' ? 'Day off' : `Shift change ${o.start_time ?? '—'}–${o.end_time ?? '—'}`}
+                      {o.kind === 'DAY_OFF' ? 'Day off' : `Shift change → ${o.shift_min != null ? `${o.shift_min / 60}h` : '—'}`}
                     </span>
                   </li>
                 ))}

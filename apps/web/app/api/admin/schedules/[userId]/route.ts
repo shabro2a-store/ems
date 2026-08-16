@@ -9,8 +9,7 @@ const Body = z.object({
   weeklySchedule: z.array(
     z.object({
       weekday: z.number().int().min(0).max(6),
-      start_time: z.string().regex(/^\d{2}:\d{2}$/),
-      end_time: z.string().regex(/^\d{2}:\d{2}$/),
+      shift_hours: z.number().min(0).max(24),
     }),
   ),
 });
@@ -67,8 +66,7 @@ export async function PUT(req: Request, ctx: { params: { userId: string } }) {
         data: body.weeklySchedule.map((s) => ({
           user_id: ctx.params.userId,
           weekday: s.weekday,
-          start_time: s.start_time,
-          end_time: s.end_time,
+          shift_min: Math.round(s.shift_hours * 60),
         })),
       });
     }
@@ -79,7 +77,7 @@ export async function PUT(req: Request, ctx: { params: { userId: string } }) {
     action: 'schedule.update',
     entity: 'User',
     entityId: ctx.params.userId,
-    before: { schedule: before.map((s) => ({ weekday: s.weekday, start_time: s.start_time, end_time: s.end_time })) },
+    before: { schedule: before.map((s) => ({ weekday: s.weekday, shift_min: s.shift_min })) },
     after: { schedule: body.weeklySchedule },
   });
 
