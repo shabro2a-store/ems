@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { apiGet, apiSend, errorMessage } from '@/lib/api';
 import { Card, CardBody, CardHeader, StatTile, Field, Input, Select, Textarea, Button, Badge, Alert, EmptyState } from '@/components/ui';
 
-interface Upcoming { date: string; kind: string; start_time?: string | null; end_time?: string | null; note: string | null }
+interface Upcoming { date: string; kind: string; shift_min: number | null; note: string | null }
 interface Summary { pending: number; upcoming: Upcoming[] }
 
 function todayStr(): string {
@@ -13,11 +13,10 @@ function todayStr(): string {
 
 export default function EmployeeLeavePage() {
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [kind, setKind] = useState<'DAY_OFF' | 'TIME_CHANGE'>('DAY_OFF');
+  const [kind, setKind] = useState<'DAY_OFF' | 'HOURS_CHANGE'>('DAY_OFF');
   const [start, setStart] = useState(todayStr());
   const [end, setEnd] = useState(todayStr());
-  const [startTime, setStartTime] = useState('09:00');
-  const [endTime, setEndTime] = useState('18:00');
+  const [hoursOff, setHoursOff] = useState(1);
   const [note, setNote] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -33,7 +32,7 @@ export default function EmployeeLeavePage() {
     e.preventDefault();
     setErr(null); setOk(null); setBusy(true);
     const body: Record<string, unknown> = { kind, start_date: start, end_date: end, note: note || undefined };
-    if (kind === 'TIME_CHANGE') { body.start_time = startTime; body.end_time = endTime; }
+    if (kind === 'HOURS_CHANGE') { body.hoursOff = hoursOff; }
     const r = await apiSend('/api/me/leave', { idempotent: true, idemPrefix: 'leave', body });
     setBusy(false);
     if (!r.ok) { setErr(errorMessage(r)); return; }
@@ -52,20 +51,19 @@ export default function EmployeeLeavePage() {
         <CardBody>
           <form onSubmit={submit} className="space-y-3">
             <Field label="Type" htmlFor="k">
-              <Select id="k" value={kind} onChange={(e) => setKind(e.target.value as 'DAY_OFF' | 'TIME_CHANGE')}>
+              <Select id="k" value={kind} onChange={(e) => setKind(e.target.value as 'DAY_OFF' | 'HOURS_CHANGE')}>
                 <option value="DAY_OFF">Day off</option>
-                <option value="TIME_CHANGE">Change hours</option>
+                <option value="HOURS_CHANGE">Time off</option>
               </Select>
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="From" htmlFor="sd"><Input id="sd" type="date" value={start} onChange={(e) => setStart(e.target.value)} required /></Field>
               <Field label="To" htmlFor="ed"><Input id="ed" type="date" value={end} onChange={(e) => setEnd(e.target.value)} required /></Field>
             </div>
-            {kind === 'TIME_CHANGE' && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Start" htmlFor="st"><Input id="st" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></Field>
-                <Field label="End" htmlFor="et"><Input id="et" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} /></Field>
-              </div>
+            {kind === 'HOURS_CHANGE' && (
+              <Field label="Hours off" htmlFor="ho" hint="Time off from that day's shift — your manager reviews it.">
+                <Input id="ho" type="number" min={0} max={24} step={0.5} value={hoursOff} onChange={(e) => setHoursOff(Number(e.target.value))} />
+              </Field>
             )}
             <Field label="Note (optional)" htmlFor="n"><Textarea id="n" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Family event" /></Field>
             {err && <Alert tone="danger">{err}</Alert>}
@@ -88,7 +86,7 @@ export default function EmployeeLeavePage() {
                     <div className="font-medium tabular">{u.date}</div>
                     {u.note && <div className="text-xs text-muted">{u.note}</div>}
                   </div>
-                  <Badge tone={u.kind === 'DAY_OFF' ? 'primary' : 'neutral'}>{u.kind === 'DAY_OFF' ? 'Day off' : 'Hours change'}</Badge>
+                  <Badge tone={u.kind === 'DAY_OFF' ? 'primary' : 'neutral'}>{u.kind === 'DAY_OFF' ? 'Day off' : 'Time off'}</Badge>
                 </li>
               ))}
             </ul>

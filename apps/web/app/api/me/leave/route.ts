@@ -6,12 +6,20 @@ import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { requestLeave, leaveSummary } from '@/lib/services/leave';
 
+// The regex only checks shape. Round-tripping through a UTC Date catches a
+// string that is shaped like a date but names no real calendar day (e.g.
+// 2026-02-30 silently rolls over to 2026-03-02; 2026-13-01 parses to
+// Invalid Date) - either would otherwise reach Prisma unguarded.
+function isValidCalendarDate(value: string): boolean {
+  const d = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
 const Body = z.object({
-  kind: z.enum(['DAY_OFF', 'TIME_CHANGE']),
-  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  start_time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-  end_time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  kind: z.enum(['DAY_OFF', 'HOURS_CHANGE']),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, 'date must be a real calendar day'),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, 'date must be a real calendar day'),
+  hoursOff: z.number().min(0).max(24).optional(),
   note: z.string().max(500).optional(),
 });
 
@@ -51,8 +59,7 @@ export async function POST(req: Request) {
     kind: body.kind,
     startDate: body.start_date,
     endDate: body.end_date,
-    startTime: body.start_time,
-    endTime: body.end_time,
+    hoursOff: body.hoursOff,
     note: body.note,
   });
 

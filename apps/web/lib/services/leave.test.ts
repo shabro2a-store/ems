@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const store = {
-  leaves: [] as Array<{ id: string; user_id: string; kind: 'DAY_OFF' | 'TIME_CHANGE'; start_date: Date; end_date: Date; start_time: string | null; end_time: string | null; note: string | null; status: 'PENDING' | 'APPROVED' | 'REJECTED'; decided_by: string | null; decided_at: Date | null; created_at: Date }>,
-  overrides: [] as Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE'; start_time: string | null; end_time: string | null; note: string | null; source: string }>,
+  leaves: [] as Array<{ id: string; user_id: string; kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_date: Date; end_date: Date; off_min: number | null; note: string | null; status: 'PENDING' | 'APPROVED' | 'REJECTED'; decided_by: string | null; decided_at: Date | null; created_at: Date }>,
+  overrides: [] as Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_time: string | null; end_time: string | null; shift_min: number | null; note: string | null; source: string }>,
+  schedules: [] as Array<{ user_id: string; weekday: number; shift_min: number | null }>,
   audits: [] as Array<{ action: string; entity: string; entity_id: string }>,
   leafSeq: 0,
   auditSeq: 0,
@@ -20,6 +21,9 @@ const mocks = vi.hoisted(() => ({
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
+  schedule: {
+    findMany: vi.fn(),
+  },
   auditLog: { create: vi.fn() },
   transaction: vi.fn(),
 }));
@@ -28,6 +32,7 @@ vi.mock('@/lib/db/prisma', () => ({
   prisma: {
     leaveRequest: mocks.leaveRequest,
     scheduleOverride: mocks.scheduleOverride,
+    schedule: mocks.schedule,
     auditLog: mocks.auditLog,
     $transaction: mocks.transaction,
   },
@@ -38,6 +43,7 @@ import { requestLeave, decideLeave, leaveSummary } from './leave';
 function resetStore() {
   store.leaves.length = 0;
   store.overrides.length = 0;
+  store.schedules.length = 0;
   store.audits.length = 0;
   store.leafSeq = 0;
   store.auditSeq = 0;
@@ -47,7 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetStore();
 
-  mocks.leaveRequest.create.mockImplementation(async ({ data }: { data: { user_id: string; kind: 'DAY_OFF' | 'TIME_CHANGE'; start_date: Date; end_date: Date; start_time?: string | null; end_time?: string | null; note?: string | null } }) => {
+  mocks.leaveRequest.create.mockImplementation(async ({ data }: { data: { user_id: string; kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_date: Date; end_date: Date; off_min?: number | null; note?: string | null } }) => {
     store.leafSeq += 1;
     const l = {
       id: `l${store.leafSeq}`,
@@ -55,8 +61,7 @@ beforeEach(() => {
       kind: data.kind,
       start_date: data.start_date,
       end_date: data.end_date,
-      start_time: data.start_time ?? null,
-      end_time: data.end_time ?? null,
+      off_min: data.off_min ?? null,
       note: data.note ?? null,
       status: 'PENDING' as const,
       decided_by: null,
@@ -86,7 +91,7 @@ beforeEach(() => {
     return l;
   });
 
-  mocks.scheduleOverride.upsert.mockImplementation(async ({ where, create, update }: { where: { user_id_date: { user_id: string; date: Date } }; create: { user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE'; start_time: string | null; end_time: string | null; note: string | null; source: string }; update: Partial<{ kind: 'DAY_OFF' | 'TIME_CHANGE'; start_time: string | null; end_time: string | null; note: string | null; source: string }> }) => {
+  mocks.scheduleOverride.upsert.mockImplementation(async ({ where, create, update }: { where: { user_id_date: { user_id: string; date: Date } }; create: { user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_time: string | null; end_time: string | null; shift_min: number | null; note: string | null; source: string }; update: Partial<{ kind: 'DAY_OFF' | 'HOURS_CHANGE'; start_time: string | null; end_time: string | null; shift_min: number | null; note: string | null; source: string }> }) => {
     let existing = store.overrides.find((o) => o.user_id === where.user_id_date.user_id && o.date.getTime() === where.user_id_date.date.getTime());
     if (existing) {
       Object.assign(existing, update);
@@ -99,6 +104,10 @@ beforeEach(() => {
 
   mocks.scheduleOverride.findMany.mockImplementation(async ({ where }: { where: { user_id: string; date?: { gte: Date } } }) => {
     return store.overrides.filter((o) => o.user_id === where.user_id && (!where.date?.gte || o.date >= where.date.gte));
+  });
+
+  mocks.schedule.findMany.mockImplementation(async ({ where }: { where: { user_id: string } }) => {
+    return store.schedules.filter((s) => s.user_id === where.user_id);
   });
 
   mocks.auditLog.create.mockImplementation(async ({ data }: { data: { actor_id: string; action: string; entity: string; entity_id: string } }) => {
@@ -132,10 +141,11 @@ describe('requestLeave', () => {
     if (!r.ok) expect(r.code).toBe('INVALID_INPUT');
   });
 
-  it('rejects invalid time format with INVALID_INPUT', async () => {
-    const r = await requestLeave({ userId: 'u1', kind: 'TIME_CHANGE', startDate: '2026-12-01', endDate: '2026-12-01', startTime: '9am' });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.code).toBe('INVALID_INPUT');
+  it('rejects more than 24 hours off', async () => {
+    const res = await requestLeave({
+      userId: 'u1', kind: 'HOURS_CHANGE', startDate: '2099-01-01', endDate: '2099-01-01', hoursOff: 25,
+    });
+    expect(res).toEqual({ ok: false, code: 'INVALID_INPUT' });
   });
 });
 
@@ -153,7 +163,7 @@ describe('decideLeave APPROVED', () => {
   });
 
   it('writes one ScheduleOverride for a single-day leave', async () => {
-    const cr = await requestLeave({ userId: 'u1', kind: 'TIME_CHANGE', startDate: '2026-12-01', endDate: '2026-12-01', startTime: '10:00', endTime: '14:00' });
+    const cr = await requestLeave({ userId: 'u1', kind: 'HOURS_CHANGE', startDate: '2026-12-01', endDate: '2026-12-01', hoursOff: 4 });
     if (!cr.ok) throw new Error('create failed');
     const r = await decideLeave({ adminId: 'admin', leaveId: cr.id, decision: 'APPROVED' });
     expect(r.ok).toBe(true);
@@ -164,6 +174,49 @@ describe('decideLeave APPROVED', () => {
     const r = await decideLeave({ adminId: 'admin', leaveId: 'nope', decision: 'APPROVED' });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('NOT_FOUND');
+  });
+
+  it('approving 2h off against an 8h weekday writes an override of 360 minutes', async () => {
+    // 2026-12-01 is a Tuesday in Beirut - beirutWeekday(2026-12-01) === 2.
+    store.schedules.push({ user_id: 'u1', weekday: 2, shift_min: 480 });
+    const cr = await requestLeave({ userId: 'u1', kind: 'HOURS_CHANGE', startDate: '2026-12-01', endDate: '2026-12-01', hoursOff: 2 });
+    if (!cr.ok) throw new Error('create failed');
+    const r = await decideLeave({ adminId: 'admin', leaveId: cr.id, decision: 'APPROVED' });
+    expect(r.ok).toBe(true);
+    expect(store.overrides[0]?.shift_min).toBe(360);
+  });
+
+  it('approving 10h off against an 8h weekday floors at 0, never negative', async () => {
+    store.schedules.push({ user_id: 'u1', weekday: 2, shift_min: 480 });
+    const cr = await requestLeave({ userId: 'u1', kind: 'HOURS_CHANGE', startDate: '2026-12-01', endDate: '2026-12-01', hoursOff: 10 });
+    if (!cr.ok) throw new Error('create failed');
+    const r = await decideLeave({ adminId: 'admin', leaveId: cr.id, decision: 'APPROVED' });
+    expect(r.ok).toBe(true);
+    expect(store.overrides[0]?.shift_min).toBe(0);
+  });
+
+  it('subtracts from each date\'s own weekday when a request spans different weekdays', async () => {
+    // 2026-12-01 is a Tuesday (weekday 2), 2026-12-02 a Wednesday (weekday 3).
+    store.schedules.push({ user_id: 'u1', weekday: 2, shift_min: 480 });
+    store.schedules.push({ user_id: 'u1', weekday: 3, shift_min: 360 });
+    const cr = await requestLeave({ userId: 'u1', kind: 'HOURS_CHANGE', startDate: '2026-12-01', endDate: '2026-12-02', hoursOff: 1 });
+    if (!cr.ok) throw new Error('create failed');
+    const r = await decideLeave({ adminId: 'admin', leaveId: cr.id, decision: 'APPROVED' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.overrides_created).toBe(2);
+    expect(mocks.schedule.findMany).toHaveBeenCalledTimes(1);
+    const tue = store.overrides.find((o) => o.date.toISOString().slice(0, 10) === '2026-12-01');
+    const wed = store.overrides.find((o) => o.date.toISOString().slice(0, 10) === '2026-12-02');
+    expect(tue?.shift_min).toBe(420);
+    expect(wed?.shift_min).toBe(300);
+  });
+
+  it('never queries the schedule for a DAY_OFF approval', async () => {
+    const cr = await requestLeave({ userId: 'u1', kind: 'DAY_OFF', startDate: '2026-12-01', endDate: '2026-12-01' });
+    if (!cr.ok) throw new Error('create failed');
+    await decideLeave({ adminId: 'admin', leaveId: cr.id, decision: 'APPROVED' });
+    expect(mocks.schedule.findMany).not.toHaveBeenCalled();
+    expect(store.overrides[0]?.shift_min).toBeNull();
   });
 });
 
@@ -181,7 +234,7 @@ describe('decideLeave REJECTED', () => {
 describe('leaveSummary', () => {
   it('returns pending count and upcoming overrides', async () => {
     store.overrides.push(
-      { user_id: 'u1', date: new Date('2026-12-01T00:00:00.000Z'), kind: 'DAY_OFF', start_time: null, end_time: null, note: null, source: 'ADMIN_DIRECT' },
+      { user_id: 'u1', date: new Date('2026-12-01T00:00:00.000Z'), kind: 'DAY_OFF', start_time: null, end_time: null, shift_min: null, note: null, source: 'ADMIN_DIRECT' },
     );
     const cr = await requestLeave({ userId: 'u1', kind: 'DAY_OFF', startDate: '2026-12-05', endDate: '2026-12-05' });
     if (!cr.ok) throw new Error('create failed');

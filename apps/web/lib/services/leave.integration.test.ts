@@ -105,7 +105,7 @@ describe('leave integration', () => {
     const start = plusDays(todayInBeirut(), 5);
     const end = plusDays(todayInBeirut(), 5);
     await postJson('/api/me/leave', {
-      cookies, csrf, body: { kind: 'TIME_CHANGE', start_date: start, end_date: end },
+      cookies, csrf, body: { kind: 'HOURS_CHANGE', start_date: start, end_date: end, hoursOff: 2 },
     });
 
     const aSession = await loginAs(admin.username, 'change-me');

@@ -1,17 +1,16 @@
 import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
-import { todayInBeirut } from 'time';
+import { todayInBeirut, beirutWeekday } from 'time';
 import { writeAuditLog } from './audit';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface RequestLeaveInput {
   userId: string;
-  kind: 'DAY_OFF' | 'TIME_CHANGE';
+  kind: 'DAY_OFF' | 'HOURS_CHANGE';
   startDate: string;
   endDate: string;
-  startTime?: string | null;
-  endTime?: string | null;
+  hoursOff?: number | null;
   note?: string | null;
 }
 
@@ -30,8 +29,9 @@ export async function requestLeave(
   const end = new Date(`${input.endDate}T00:00:00.000Z`);
   const today = new Date(`${todayInBeirut()}T00:00:00.000Z`);
   if (start < today) return { ok: false, code: 'PAST_DATE' };
-  if (input.startTime && !/^\d{2}:\d{2}$/.test(input.startTime)) return { ok: false, code: 'INVALID_INPUT' };
-  if (input.endTime && !/^\d{2}:\d{2}$/.test(input.endTime)) return { ok: false, code: 'INVALID_INPUT' };
+  if (input.hoursOff != null && (input.hoursOff < 0 || input.hoursOff > 24)) {
+    return { ok: false, code: 'INVALID_INPUT' };
+  }
 
   const leave = await db.leaveRequest.create({
     data: {
@@ -39,8 +39,7 @@ export async function requestLeave(
       kind: input.kind,
       start_date: start,
       end_date: end,
-      start_time: input.startTime ?? null,
-      end_time: input.endTime ?? null,
+      off_min: input.hoursOff != null ? Math.round(input.hoursOff * 60) : null,
       note: input.note ?? null,
       status: 'PENDING',
     },
@@ -92,23 +91,43 @@ export async function decideLeave(
         dates.push(cursor.toISOString().slice(0, 10));
         cursor.setUTCDate(cursor.getUTCDate() + 1);
       }
+
+      // DAY_OFF never looks at the schedule - it always resolves to zero
+      // required minutes. Only load it when there is a subtraction to do, and
+      // load it once: a request can span many dates, each landing on a
+      // different weekday.
+      const shiftMinByWeekday = new Map<number, number>();
+      if (leave.kind === 'HOURS_CHANGE') {
+        const schedules = await tx.schedule.findMany({
+          where: { user_id: leave.user_id },
+          select: { weekday: true, shift_min: true },
+        });
+        for (const s of schedules) shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
+      }
+
       for (const dateStr of dates) {
         const dateOnly = new Date(`${dateStr}T00:00:00.000Z`);
+        const shiftMin = leave.kind === 'HOURS_CHANGE'
+          ? Math.max(0, (shiftMinByWeekday.get(beirutWeekday(dateOnly)) ?? 0) - (leave.off_min ?? 0))
+          : null;
+
         await tx.scheduleOverride.upsert({
           where: { user_id_date: { user_id: leave.user_id, date: dateOnly } },
           create: {
             user_id: leave.user_id,
             date: dateOnly,
             kind: leave.kind,
-            start_time: leave.start_time,
-            end_time: leave.end_time,
+            start_time: null,
+            end_time: null,
+            shift_min: shiftMin,
             note: leave.note,
             source: 'EMPLOYEE_REQUEST',
           },
           update: {
             kind: leave.kind,
-            start_time: leave.start_time,
-            end_time: leave.end_time,
+            start_time: null,
+            end_time: null,
+            shift_min: shiftMin,
             note: leave.note,
             source: 'EMPLOYEE_REQUEST',
           },
@@ -139,9 +158,8 @@ export interface LeaveSummary {
   pending: number;
   upcoming: Array<{
     date: string;
-    kind: 'DAY_OFF' | 'TIME_CHANGE';
-    start_time: string | null;
-    end_time: string | null;
+    kind: 'DAY_OFF' | 'TIME_CHANGE' | 'HOURS_CHANGE';
+    shift_min: number | null;
     note: string | null;
   }>;
 }
@@ -166,11 +184,8 @@ export async function leaveSummary(
     pending,
     upcoming: upcoming.map((o) => ({
       date: o.date.toISOString().slice(0, 10),
-      // Provisional: no caller produces HOURS_CHANGE yet. Task 9 wires it through
-      // this function - drop the cast then, it will hide a real case at that point.
-      kind: o.kind as 'DAY_OFF' | 'TIME_CHANGE',
-      start_time: o.start_time,
-      end_time: o.end_time,
+      kind: o.kind,
+      shift_min: o.shift_min,
       note: o.note,
     })),
   };

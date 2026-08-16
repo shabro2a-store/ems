@@ -184,7 +184,7 @@ model LeaveRequest {
   end_date   DateTime      @db.Date
   start_time String?
   end_time   String?
-  shift_min  Int?
+  off_min    Int?
   note       String?
   status     RequestStatus
   decided_by String?
@@ -192,7 +192,7 @@ model LeaveRequest {
   created_at DateTime      @default(now())
   // Raw SQL CHECK in migration:
   //   ALTER TABLE "LeaveRequest" ADD CONSTRAINT leave_range_chk CHECK (end_date >= start_date);
-  //   ALTER TABLE "LeaveRequest" ADD CONSTRAINT leave_shift_min_chk CHECK ("shift_min" IS NULL OR ("shift_min" >= 0 AND "shift_min" <= 1440));
+  //   ALTER TABLE "LeaveRequest" ADD CONSTRAINT leave_off_min_chk CHECK ("off_min" IS NULL OR ("off_min" >= 0 AND "off_min" <= 1440));
 
   @@index([user_id, status])
 }
