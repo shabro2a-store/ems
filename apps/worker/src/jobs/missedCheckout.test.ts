@@ -9,7 +9,7 @@ type FlagRow = {
   created_at: Date;
   notified_at: Date | null;
 };
-type ScheduleRow = { id: string; user_id: string; weekday: number; start_time: string; end_time: string };
+type ScheduleRow = { id: string; user_id: string; weekday: number; start_time: string | null; end_time: string | null };
 type UserRow = {
   id: string;
   username: string;
@@ -161,5 +161,18 @@ describe('runMissedCheckout', () => {
     expect(r1.flags_created).toBe(1);
     const r2 = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T18:37:00+03:00'), notifier });
     expect(r2.flags_created).toBe(0);
+  });
+
+  it('does not fire for an hours-based schedule (no clock window yet)', async () => {
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: null, end_time: null });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-12T09:00:00+03:00') });
+
+    const db = makeDb();
+    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T18:36:00+03:00'), notifier });
+    expect(r.flags_created).toBe(0);
+    expect(r.notified).toBe(0);
   });
 });

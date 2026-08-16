@@ -142,12 +142,12 @@ model RateChange {
 }
 
 model Schedule {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   user_id    String
-  user       User   @relation(fields: [user_id], references: [id])
+  user       User    @relation(fields: [user_id], references: [id])
   weekday    Int
-  start_time String
-  end_time   String
+  start_time String?
+  end_time   String?
   shift_min  Int?
   // Raw SQL CHECK in migration:
   //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_weekday_chk CHECK (weekday BETWEEN 0 AND 6);

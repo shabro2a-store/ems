@@ -10,7 +10,7 @@ type FlagRow = {
   notified_at: Date | null;
   resolved_at: Date | null;
 };
-type ScheduleRow = { id: string; user_id: string; weekday: number; start_time: string; end_time: string };
+type ScheduleRow = { id: string; user_id: string; weekday: number; start_time: string | null; end_time: string | null };
 type UserRow = {
   id: string;
   username: string;
@@ -181,6 +181,17 @@ describe('runWatchedDetector', () => {
 
     const db = makeDb();
     const r = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T09:15:00+03:00') });
+    expect(r.flags_created).toBe(0);
+  });
+
+  it('does not fire for an hours-based schedule (no clock window yet)', async () => {
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: null, end_time: null });
+
+    const db = makeDb();
+    const r = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:00:00+03:00') });
     expect(r.flags_created).toBe(0);
   });
 });

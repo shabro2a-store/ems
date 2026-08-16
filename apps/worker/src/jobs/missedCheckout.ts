@@ -47,6 +47,10 @@ export async function runMissedCheckout(
   let notified = 0;
 
   for (const s of schedules) {
+    // An hours-based schedule (Task 8) carries no clock window to detect
+    // against - Task 10 migrates this job to shift_min. Until then, skip
+    // rather than let scheduledToUtc silently turn a null into Invalid Date.
+    if (s.start_time == null || s.end_time == null) continue;
     const overnight = s.end_time <= s.start_time;
     const endsToday =
       (s.weekday === wdToday && !overnight) || (s.weekday === wdYesterday && overnight);

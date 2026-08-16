@@ -43,6 +43,10 @@ export async function runWatchedDetector(
 
   for (const s of schedules) {
     if (!s.user.is_active) continue;
+    // An hours-based schedule (Task 8) carries no clock window to detect
+    // against - Task 10 migrates this job to shift_min. Until then, skip
+    // rather than let scheduledToUtc silently turn a null into Invalid Date.
+    if (s.start_time == null) continue;
     const override = overrideByUser.get(s.user_id);
     if (override?.kind === 'DAY_OFF') {
       skipped_day_off += 1;

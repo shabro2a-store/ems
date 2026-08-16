@@ -37,11 +37,12 @@ export async function POST(req: Request) {
   }
 
   const now = new Date();
-  const schedules: ScheduleEntry[] = user.schedules.map((s) => ({
-    weekday: s.weekday,
-    start_time: s.start_time,
-    end_time: s.end_time,
-  }));
+  // An hours-based schedule (Task 8) carries no clock window to extend a
+  // session against - Task 11 migrates sessionExpiryFor to shift_min. Until
+  // then, exclude rather than feed scheduledToUtc a null.
+  const schedules: ScheduleEntry[] = user.schedules
+    .filter((s) => s.start_time != null && s.end_time != null)
+    .map((s) => ({ weekday: s.weekday, start_time: s.start_time!, end_time: s.end_time! }));
   const exp = sessionExpiryFor({ role: user.role }, schedules, now);
   const newAccess = await signToken(
     { sub: user.id, role: user.role, branchId: user.branch_id ?? null },
