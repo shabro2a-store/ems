@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
+import { resolveRequiredMin } from './requiredMin';
 
 export interface MissedCheckoutOpts {
   db?: PrismaClient;
@@ -51,22 +52,36 @@ export async function runMissedCheckout(
     // against the schedule row for the weekday it actually started on.
     if (beirutWeekday(lastIn.at) !== s.weekday) continue;
 
+    // An override for that specific date beats the weekly pattern, exactly as
+    // it does for payroll - judging four hours of approved time off against
+    // the full eight would fire this alert halfway through the day that was
+    // actually owed. A date that ends up owing nothing is skipped rather than
+    // measured against zero, which would alert one grace period after arrival;
+    // the weekly query already skips unscheduled weekdays the same way.
+    const inDate = todayInBeirut(lastIn.at);
+    const override = await db.scheduleOverride.findUnique({
+      where: { user_id_date: { user_id: s.user_id, date: new Date(`${inDate}T00:00:00.000Z`) } },
+      select: { kind: true, shift_min: true },
+    });
+    const requiredMin = resolveRequiredMin(override, shiftMin);
+    if (requiredMin === 0) continue;
+
     const graceMin = s.user.branch?.overtime_grace_min ?? 15;
     const elapsedMin = Math.floor((now.getTime() - lastIn.at.getTime()) / 60_000);
-    if (elapsedMin <= shiftMin + graceMin) continue;
+    if (elapsedMin <= requiredMin + graceMin) continue;
 
     const existing = await db.flag.findFirst({
       where: { kind: 'MISSED_CHECKOUT', user_id: s.user_id, created_at: { gte: todayStart } },
     });
     if (existing) continue;
 
-    const overMin = Math.max(0, elapsedMin - shiftMin);
+    const overMin = Math.max(0, elapsedMin - requiredMin);
     const flag = await db.flag.create({
       data: {
         kind: 'MISSED_CHECKOUT',
         user_id: s.user_id,
         branch_id: s.user.branch_id,
-        context_json: { shift_min: shiftMin, over_min: overMin },
+        context_json: { shift_min: requiredMin, over_min: overMin },
       },
     });
     flags_created += 1;
@@ -78,7 +93,7 @@ export async function runMissedCheckout(
       context: {
         user: { id: s.user_id, username: s.user.username },
         branch: s.user.branch ? { id: s.user.branch.id, name: s.user.branch.name } : null,
-        message: `Employee ${s.user.username}${s.user.branch ? `, ${s.user.branch.name}` : ''} is still clocked in past their ${Math.round(shiftMin / 60)}h shift. Overtime, or forgot to punch out?`,
+        message: `Employee ${s.user.username}${s.user.branch ? `, ${s.user.branch.name}` : ''} is still clocked in past their ${Math.round(requiredMin / 60)}h shift. Overtime, or forgot to punch out?`,
         flag_id: flag.id,
       },
     });

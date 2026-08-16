@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
-import { todayInBeirut, todayInBeirutDateRange } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
 import { pendingOvertimeNotices } from '@/lib/services/overtime';
+import { requiredMinFor } from '@/lib/services/coverage';
 
 // How far back the penalty review queue looks. Older ones are a payroll matter.
 const PENALTY_LOOKBACK_DAYS = 7;
@@ -70,10 +71,21 @@ export async function GET(req: Request) {
   const todayStr = todayInBeirut();
   const { startUtc, endUtc } = todayInBeirutDateRange(todayStr);
   const dateOnly = new Date(`${todayStr}T00:00:00.000Z`);
+  const todayWeekday = beirutWeekday(new Date());
   const now = Date.now();
 
-  const [branches, users, todayPunches, openTrips, dayOffs, todayFlags, pendingAdv, pendingLeave, tripsTodayAgg] =
-    await Promise.all([
+  const [
+    branches,
+    users,
+    todayPunches,
+    openTrips,
+    todayOverrides,
+    todaySchedules,
+    todayFlags,
+    pendingAdv,
+    pendingLeave,
+    tripsTodayAgg,
+  ] = await Promise.all([
       prisma.branch.findMany({
         where: { is_active: true },
         orderBy: { name: 'asc' },
@@ -99,9 +111,18 @@ export async function GET(req: Request) {
           branch: { select: { name: true, trip_threshold_min: true } },
         },
       }),
+      // Every override for today, plus today's weekly hours: whether someone is
+      // off is the same question payroll answers, and it is not answered by the
+      // override's kind alone - a full shift of approved time off is an
+      // HOURS_CHANGE resolving to zero, and a weekday nobody is scheduled for
+      // owes nothing either. Both used to render as ABSENT.
       prisma.scheduleOverride.findMany({
-        where: { date: dateOnly, kind: 'DAY_OFF' },
-        select: { user_id: true },
+        where: { date: dateOnly },
+        select: { user_id: true, kind: true, shift_min: true },
+      }),
+      prisma.schedule.findMany({
+        where: { weekday: todayWeekday },
+        select: { user_id: true, shift_min: true },
       }),
       prisma.flag.findMany({
         where: { created_at: { gte: startUtc, lt: endUtc }, resolved_at: null },
@@ -136,7 +157,10 @@ export async function GET(req: Request) {
     punchesByUser.set(p.user_id, list);
   }
   const openTripByDriver = new Map(openTrips.map((t) => [t.driver_id, t]));
-  const dayOffSet = new Set(dayOffs.map((d) => d.user_id));
+  const overrideByUser = new Map(todayOverrides.map((o) => [o.user_id, o]));
+  const shiftMinByUser = new Map(todaySchedules.map((s) => [s.user_id, s.shift_min]));
+  const requiredMinToday = (userId: string): number =>
+    requiredMinFor(overrideByUser.get(userId), shiftMinByUser.get(userId));
 
   let present = 0;
   let absent = 0;
@@ -162,7 +186,7 @@ export async function GET(req: Request) {
         status = 'IN';
         sinceMin = Math.max(0, Math.floor((now - openInAt.getTime()) / 60_000));
         present += 1;
-      } else if (dayOffSet.has(u.id)) {
+      } else if (requiredMinToday(u.id) === 0) {
         status = 'DAY_OFF';
       } else {
         status = 'ABSENT';

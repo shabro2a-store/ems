@@ -26,7 +26,7 @@ const store: {
   schedules: ScheduleRow[];
   users: Map<string, UserRow>;
   punches: PunchRow[];
-  overrides: Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE' }>;
+  overrides: Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min: number | null }>;
   flagSeq: number;
 } = {
   flags: [],
@@ -138,12 +138,46 @@ describe('runWatchedDetector', () => {
       id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
     });
     store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
-    store.overrides.push({ user_id: 'u1', date: new Date('2026-07-12T00:00:00.000Z'), kind: 'DAY_OFF' });
+    store.overrides.push({ user_id: 'u1', date: new Date('2026-07-12T00:00:00.000Z'), kind: 'DAY_OFF', shift_min: null });
 
     const db = makeDb();
     const r = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
     expect(r.flags_created).toBe(0);
-    expect(r.skipped_day_off).toBe(1);
+    expect(r.skipped_off).toBe(1);
+  });
+
+  it('skips a user whose whole shift was approved as time off (HOURS_CHANGE resolving to zero)', async () => {
+    // decideLeave writes HOURS_CHANGE with shift_min = max(0, weekday - off_min),
+    // which is 0 when the employee asked for their whole shift off. Filtering on
+    // kind DAY_OFF alone missed that and raised an absence flag - plus a Telegram
+    // alert - for leave the owner had just approved.
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.overrides.push({ user_id: 'u1', date: new Date('2026-07-12T00:00:00.000Z'), kind: 'HOURS_CHANGE', shift_min: 0 });
+
+    const db = makeDb();
+    const r = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
+    expect(r.flags_created).toBe(0);
+    expect(r.skipped_off).toBe(1);
+    expect(store.flags).toHaveLength(0);
+  });
+
+  it('still flags a partial time-off day, and reports the hours actually owed', async () => {
+    // Half the shift off still leaves half a shift to turn up for. The notice
+    // must quote the 4h that were owed, not the 8h weekly value.
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.overrides.push({ user_id: 'u1', date: new Date('2026-07-12T00:00:00.000Z'), kind: 'HOURS_CHANGE', shift_min: 240 });
+
+    const db = makeDb();
+    const r = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
+    expect(r.flags_created).toBe(1);
+    expect(r.skipped_off).toBe(0);
+    expect(store.flags[0]!.context_json).toEqual({ shift_min: 240, date: '2026-07-12' });
   });
 
   it('does not flag when shift_min is zero', async () => {

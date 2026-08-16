@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
+import { resolveRequiredMin } from './requiredMin';
 
 export interface WatchedDetectorOpts {
   db?: PrismaClient;
@@ -12,7 +13,7 @@ export interface WatchedDetectorOpts {
 export interface WatchedDetectorResult {
   flags_created: number;
   users_scanned: number;
-  skipped_day_off: number;
+  skipped_off: number;
 }
 
 // There is no scheduled clock time to be "late" against anymore, only a
@@ -36,21 +37,25 @@ export async function runWatchedDetector(
     include: { user: { include: { branch: true } } },
   });
 
-  // Approved DAY_OFF overrides for the day being judged.
+  // Every override for the day being judged, not just DAY_OFF: approving a
+  // full shift of time off writes an HOURS_CHANGE with shift_min 0, which owes
+  // exactly as little as a day off. Filtering on kind alone flagged those
+  // people absent on leave the owner had just granted.
   const overrides = await db.scheduleOverride.findMany({
-    where: { date: overrideDate, kind: 'DAY_OFF' },
-    select: { user_id: true },
+    where: { date: overrideDate },
+    select: { user_id: true, kind: true, shift_min: true },
   });
-  const dayOffUsers = new Set(overrides.map((o) => o.user_id));
+  const overrideByUser = new Map(overrides.map((o) => [o.user_id, o]));
 
   let flags_created = 0;
-  let skipped_day_off = 0;
+  let skipped_off = 0;
   const users_scanned = schedules.length;
 
   for (const s of schedules) {
     if (!s.user.is_active) continue;
-    if (dayOffUsers.has(s.user_id)) {
-      skipped_day_off += 1;
+    const requiredMin = resolveRequiredMin(overrideByUser.get(s.user_id), s.shift_min);
+    if (requiredMin === 0) {
+      skipped_off += 1;
       continue;
     }
 
@@ -77,11 +82,11 @@ export async function runWatchedDetector(
         kind: 'WATCHED',
         user_id: s.user_id,
         branch_id: s.user.branch_id,
-        context_json: { shift_min: s.shift_min, date: yesterday },
+        context_json: { shift_min: requiredMin, date: yesterday },
       },
     });
     flags_created += 1;
   }
 
-  return { flags_created, users_scanned, skipped_day_off };
+  return { flags_created, users_scanned, skipped_off };
 }

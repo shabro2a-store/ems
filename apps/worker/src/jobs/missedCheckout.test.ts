@@ -20,11 +20,14 @@ type UserRow = {
 };
 type PunchRow = { id: string; user_id: string; kind: 'IN' | 'OUT'; at: Date };
 
+type OverrideRow = { user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min: number | null };
+
 const store: {
   flags: FlagRow[];
   schedules: ScheduleRow[];
   users: Map<string, UserRow>;
   punches: PunchRow[];
+  overrides: OverrideRow[];
   flagSeq: number;
   notifications: Array<{ channel: string; recipient: string; template: string; context: unknown }>;
 } = {
@@ -32,6 +35,7 @@ const store: {
   schedules: [],
   users: new Map(),
   punches: [],
+  overrides: [],
   flagSeq: 0,
   notifications: [],
 };
@@ -43,6 +47,7 @@ function resetStore() {
   store.schedules.length = 0;
   store.users.clear();
   store.punches.length = 0;
+  store.overrides.length = 0;
   store.flagSeq = 0;
   store.notifications.length = 0;
 }
@@ -66,6 +71,15 @@ function makeDb() {
           return candidates.sort((a, b) => b.at.getTime() - a.at.getTime())[0] ?? null;
         }
         return candidates[0] ?? null;
+      },
+    },
+    scheduleOverride: {
+      findUnique: async ({ where }: { where: { user_id_date: { user_id: string; date: Date } } }) => {
+        return store.overrides.find(
+          (o) =>
+            o.user_id === where.user_id_date.user_id &&
+            o.date.getTime() === where.user_id_date.date.getTime(),
+        ) ?? null;
       },
     },
     flag: {
@@ -182,6 +196,43 @@ describe('runMissedCheckout', () => {
     const after = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T17:16:00+03:00'), notifier });
     expect(after.flags_created).toBe(1);
     expect(store.notifications[0]!.context).toHaveProperty('branch', null);
+  });
+
+  it('judges elapsed against an approved partial time-off, not the weekly hours', async () => {
+    // 4h of the 8h shift approved off leaves 240 required, so with the branch's
+    // 15 min grace the alert is due strictly after 255 minutes. Measuring the
+    // weekly 480 instead would stay silent until 495 - the employee is nearly
+    // four hours past the day they were actually owed before anyone is told.
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
+    store.overrides.push({ user_id: 'u1', date: new Date('2026-07-12T00:00:00.000Z'), kind: 'HOURS_CHANGE', shift_min: 240 });
+
+    const db = makeDb();
+    // 260 minutes elapsed: past 240 + 15, nowhere near 480 + 15.
+    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T13:20:00+03:00'), notifier });
+    expect(r.flags_created).toBe(1);
+    expect(store.flags[0]!.context_json).toEqual({ shift_min: 240, over_min: 20 });
+    expect((store.notifications[0]!.context as { message: string }).message).toContain('4h shift');
+  });
+
+  it('does not fire on a day the employee has entirely off', async () => {
+    // Nothing was owed, so there is no shift length to be past. Measuring
+    // against zero would alert one grace period after they walked in - staff
+    // are explicitly allowed to come in on a day off to help during a rush.
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
+    store.overrides.push({ user_id: 'u1', date: new Date('2026-07-12T00:00:00.000Z'), kind: 'DAY_OFF', shift_min: null });
+
+    const db = makeDb();
+    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T23:00:00+03:00'), notifier });
+    expect(r.flags_created).toBe(0);
+    expect(r.notified).toBe(0);
   });
 
   it('judges elapsed against the schedule for the weekday the check-in started, not a different weekday row', async () => {

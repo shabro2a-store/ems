@@ -45,7 +45,32 @@ describe('cron: watchedDetector integration', () => {
 
     const r = await runWatchedDetector({ now: AFTER_MIDNIGHT });
     expect(r.flags_created).toBe(0);
-    expect(r.skipped_day_off).toBe(1);
+    expect(r.skipped_off).toBe(1);
+  });
+
+  it('skips a user whose whole shift was approved off, against a real decideLeave override', async () => {
+    // The row shape here is exactly what decideLeave writes for "8 hours off on
+    // a day I am scheduled 8 hours": kind HOURS_CHANGE, shift_min 0. Judging
+    // the weekly Schedule.shift_min instead raised an absence flag on approved
+    // leave, and the Telegram alert with it.
+    const branch = await seedTestBranch();
+    const user = await seedTestUser({ username: 'wd-emp4', branch_id: branch.id });
+    await seedTestSchedule({ user_id: user.id, weekday: 0, shift_min: 540 });
+    await getTestPrisma().scheduleOverride.create({
+      data: {
+        user_id: user.id,
+        date: new Date('2026-07-12T00:00:00.000Z'),
+        kind: 'HOURS_CHANGE',
+        shift_min: 0,
+        source: 'EMPLOYEE_REQUEST',
+      },
+    });
+
+    const r = await runWatchedDetector({ now: AFTER_MIDNIGHT });
+    expect(r.flags_created).toBe(0);
+    expect(r.skipped_off).toBe(1);
+    const flags = await getTestPrisma().flag.findMany({ where: { user_id: user.id, kind: 'WATCHED' } });
+    expect(flags).toHaveLength(0);
   });
 
   it('does not duplicate a flag on second run', async () => {

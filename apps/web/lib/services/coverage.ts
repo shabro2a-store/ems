@@ -10,6 +10,26 @@ export interface OverrideLite {
   shift_min: number | null;
 }
 
+/**
+ * How many minutes one date required. A DAY_OFF override is always zero, an
+ * HOURS_CHANGE override carrying an explicit shift_min beats the weekly
+ * pattern, and everything else falls back to that weekday's Schedule.shift_min
+ * - zero when the weekday is unscheduled.
+ *
+ * Exported because payroll is not the only reader: absence detection, the
+ * missed-checkout job and the admin dashboard all have to agree with it. A day
+ * that resolves to zero required minutes is a day off, never a no-show, and
+ * each consumer re-deriving that produced a different answer.
+ */
+export function requiredMinFor(
+  override: OverrideLite | null | undefined,
+  weekdayShiftMin: number | null | undefined,
+): number {
+  if (override?.kind === 'DAY_OFF') return 0;
+  if (override?.kind === 'HOURS_CHANGE' && override.shift_min !== null) return override.shift_min;
+  return weekdayShiftMin ?? 0;
+}
+
 export interface DayCoverage {
   date: string; // YYYY-MM-DD (Beirut)
   requiredMin: number;
@@ -63,16 +83,10 @@ export function computeCoverage(args: {
   const days: DayCoverage[] = [];
   for (const [date, workedMin] of workedByDate) {
     const lastPunchAt = lastPunchByDate.get(date)!;
-    const override = args.overridesByDate.get(date);
-
-    let requiredMin: number;
-    if (override?.kind === 'DAY_OFF') {
-      requiredMin = 0;
-    } else if (override?.kind === 'HOURS_CHANGE' && override.shift_min !== null) {
-      requiredMin = override.shift_min;
-    } else {
-      requiredMin = args.shiftMinByWeekday.get(beirutWeekday(arrivalByDate.get(date)!)) ?? 0;
-    }
+    const requiredMin = requiredMinFor(
+      args.overridesByDate.get(date),
+      args.shiftMinByWeekday.get(beirutWeekday(arrivalByDate.get(date)!)),
+    );
 
     days.push({
       date,
