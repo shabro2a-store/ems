@@ -263,6 +263,9 @@ export interface ScheduleOverrides {
   weekday: number;
   start_time: string;
   end_time: string;
+  // Production schedule queries now filter on this (Task 10); without a
+  // default here, every row this helper seeds would be invisible to them.
+  shift_min?: number;
 }
 
 export async function seedTestSchedule(overrides: ScheduleOverrides) {
@@ -273,6 +276,7 @@ export async function seedTestSchedule(overrides: ScheduleOverrides) {
       weekday: overrides.weekday,
       start_time: overrides.start_time,
       end_time: overrides.end_time,
+      shift_min: overrides.shift_min ?? 480,
     },
   });
 }

@@ -18,14 +18,16 @@ describe('cron: watchedDetector integration', () => {
     await getTestPrisma().$disconnect();
   });
 
-  it('creates a Flag row for an active user without a punch past start+30min', async () => {
+  // All three fixtures judge Sunday 2026-07-12 (Beirut weekday 0) as the day
+  // that just closed, by running the job just after midnight on Monday.
+  const AFTER_MIDNIGHT = new Date('2026-07-13T00:10:00+03:00');
+
+  it('creates a Flag row for an active user with zero punches on the closed day', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'wd-emp1', branch_id: branch.id });
-    const now = new Date('2026-07-12T10:00:00+03:00');
-    const wd = 0;
-    await seedTestSchedule({ user_id: user.id, weekday: wd, start_time: '09:00', end_time: '18:00' });
+    await seedTestSchedule({ user_id: user.id, weekday: 0, start_time: '09:00', end_time: '18:00' });
 
-    const r = await runWatchedDetector({ now });
+    const r = await runWatchedDetector({ now: AFTER_MIDNIGHT });
     expect(r.flags_created).toBe(1);
     const flag = await getTestPrisma().flag.findFirst({ where: { user_id: user.id, kind: 'WATCHED' } });
     expect(flag).not.toBeNull();
@@ -35,14 +37,13 @@ describe('cron: watchedDetector integration', () => {
   it('skips user with approved DAY_OFF override', async () => {
     const branch = await seedTestBranch();
     const user = await seedTestUser({ username: 'wd-emp2', branch_id: branch.id });
-    const now = new Date('2026-07-12T10:00:00+03:00');
     await seedTestSchedule({ user_id: user.id, weekday: 0, start_time: '09:00', end_time: '18:00' });
-    const today = new Date('2026-07-12T00:00:00.000Z');
+    const dayOffDate = new Date('2026-07-12T00:00:00.000Z');
     await getTestPrisma().scheduleOverride.create({
-      data: { user_id: user.id, date: today, kind: 'DAY_OFF', source: 'ADMIN_DIRECT' },
+      data: { user_id: user.id, date: dayOffDate, kind: 'DAY_OFF', source: 'ADMIN_DIRECT' },
     });
 
-    const r = await runWatchedDetector({ now });
+    const r = await runWatchedDetector({ now: AFTER_MIDNIGHT });
     expect(r.flags_created).toBe(0);
     expect(r.skipped_day_off).toBe(1);
   });
@@ -51,10 +52,16 @@ describe('cron: watchedDetector integration', () => {
     const branch = await seedTestBranch();
     const user = await seedTestUser({ username: 'wd-emp3', branch_id: branch.id });
     await seedTestSchedule({ user_id: user.id, weekday: 0, start_time: '09:00', end_time: '18:00' });
-    const now = new Date('2026-07-12T10:00:00+03:00');
-    await seedTestFlag({ kind: 'WATCHED', user_id: user.id, created_at: now, context_json: { scheduled_start: '09:00' } });
+    // Within the closed day itself (2026-07-12), matching the dedup guard's
+    // own window - distinct from AFTER_MIDNIGHT, which is when the job runs.
+    await seedTestFlag({
+      kind: 'WATCHED',
+      user_id: user.id,
+      created_at: new Date('2026-07-12T10:00:00+03:00'),
+      context_json: { shift_min: 480, date: '2026-07-12' },
+    });
 
-    const r = await runWatchedDetector({ now });
+    const r = await runWatchedDetector({ now: AFTER_MIDNIGHT });
     expect(r.flags_created).toBe(0);
   });
 });
