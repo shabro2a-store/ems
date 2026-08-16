@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { todayInBeirut, scheduledToUtc, beirutWeekday } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 
@@ -19,50 +19,23 @@ export async function runMissedCheckout(
 ): Promise<MissedCheckoutResult> {
   const db = opts.db ?? defaultPrisma;
   const now = opts.now ?? new Date();
-  const today = todayInBeirut(now);
-  const todayDate = new Date(`${today}T00:00:00.000Z`);
-  const yesterday = todayInBeirut(new Date(now.getTime() - 24 * 60 * 60 * 1000));
-  const yesterdayDate = new Date(`${yesterday}T00:00:00.000Z`);
-  const wdToday = beirutWeekday(now);
-  const wdYesterday = beirutWeekday(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+  const { startUtc: todayStart } = todayInBeirutDateRange(todayInBeirut(now));
 
-  // A shift's END falls "today" if it's a today shift that ends the same day, OR
-  // a yesterday shift that runs overnight (end_time <= start_time) into today.
+  // Not bounded to today/yesterday: an hours-based shift has no fixed end
+  // time, so a check-in can still be open from further back. Scanning every
+  // weekday's shift_min is the only way a still-open check-in keeps getting
+  // re-flagged (once per day, via the guard below) for as long as it stays open.
   const schedules = await db.schedule.findMany({
-    where: { weekday: { in: [wdToday, wdYesterday] } },
+    where: { shift_min: { gt: 0 } },
     include: { user: { include: { branch: true } } },
   });
-
-  // Approved exceptions for the shift's start day (today or yesterday): DAY_OFF
-  // skips the check; TIME_CHANGE shifts the effective end.
-  const overrides = await db.scheduleOverride.findMany({
-    where: { date: { in: [todayDate, yesterdayDate] } },
-    select: { user_id: true, date: true, kind: true, end_time: true },
-  });
-  const overrideByKey = new Map(
-    overrides.map((o) => [`${o.user_id}|${o.date.toISOString().slice(0, 10)}`, o]),
-  );
 
   let flags_created = 0;
   let notified = 0;
 
   for (const s of schedules) {
-    // An hours-based schedule (Task 8) carries no clock window to detect
-    // against - Task 10 migrates this job to shift_min. Until then, skip
-    // rather than let scheduledToUtc silently turn a null into Invalid Date.
-    if (s.start_time == null || s.end_time == null) continue;
-    const overnight = s.end_time <= s.start_time;
-    const endsToday =
-      (s.weekday === wdToday && !overnight) || (s.weekday === wdYesterday && overnight);
-    if (!endsToday) continue;
-    // The shift started today (same-day) or yesterday (overnight).
-    const shiftStartDay = s.weekday === wdToday ? today : yesterday;
-    const override = overrideByKey.get(`${s.user_id}|${shiftStartDay}`);
-    if (override?.kind === 'DAY_OFF') continue;
-    const effEnd = override?.kind === 'TIME_CHANGE' && override.end_time ? override.end_time : s.end_time;
-    const endUtc = scheduledToUtc(today, effEnd);
-    const triggerAt = new Date(endUtc.getTime() + 35 * 60_000);
-    if (now.getTime() < triggerAt.getTime()) continue;
+    if (s.shift_min == null) continue;
+    const shiftMin = s.shift_min;
 
     const lastIn = await db.punch.findFirst({
       where: { user_id: s.user_id, kind: 'IN' },
@@ -74,17 +47,26 @@ export async function runMissedCheckout(
     });
     if (laterOut) continue;
 
+    // shift_min is keyed by weekday, so an open check-in is only judged
+    // against the schedule row for the weekday it actually started on.
+    if (beirutWeekday(lastIn.at) !== s.weekday) continue;
+
+    const graceMin = s.user.branch?.overtime_grace_min ?? 15;
+    const elapsedMin = Math.floor((now.getTime() - lastIn.at.getTime()) / 60_000);
+    if (elapsedMin <= shiftMin + graceMin) continue;
+
     const existing = await db.flag.findFirst({
-      where: { kind: 'MISSED_CHECKOUT', user_id: s.user_id, created_at: { gte: todayDate } },
+      where: { kind: 'MISSED_CHECKOUT', user_id: s.user_id, created_at: { gte: todayStart } },
     });
     if (existing) continue;
 
+    const overMin = Math.max(0, elapsedMin - shiftMin);
     const flag = await db.flag.create({
       data: {
         kind: 'MISSED_CHECKOUT',
         user_id: s.user_id,
         branch_id: s.user.branch_id,
-        context_json: { scheduled_end: effEnd, since_min: Math.floor((now.getTime() - endUtc.getTime()) / 60_000) },
+        context_json: { shift_min: shiftMin, over_min: overMin },
       },
     });
     flags_created += 1;
@@ -96,7 +78,7 @@ export async function runMissedCheckout(
       context: {
         user: { id: s.user_id, username: s.user.username },
         branch: s.user.branch ? { id: s.user.branch.id, name: s.user.branch.name } : null,
-        message: `Employee ${s.user.username}${s.user.branch ? `, ${s.user.branch.name}` : ''} is still clocked in 35 min past shift end (8h+ into shift). Overtime, or forgot to punch out?`,
+        message: `Employee ${s.user.username}${s.user.branch ? `, ${s.user.branch.name}` : ''} is still clocked in past their ${Math.round(shiftMin / 60)}h shift. Overtime, or forgot to punch out?`,
         flag_id: flag.id,
       },
     });

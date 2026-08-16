@@ -12,12 +12,8 @@ const PENALTY_LOOKBACK_DAYS = 7;
 // why the system raised it. The detail is already in context_json — this turns it
 // into the sentence the admin actually needs.
 function flagReason(kind: string, ctx: unknown): string {
-  // watchedDetector/missedCheckout still populate this from the clock-window
-  // schedule (scheduled_start/scheduled_end); shift_min lands here once those
-  // jobs are migrated to hours-based shifts. Until then both cases fall back
-  // to their generic text below.
-  const c = (ctx ?? {}) as { shift_min?: number; since_min?: number };
-  const mins = typeof c.since_min === 'number' ? c.since_min : null;
+  const c = (ctx ?? {}) as { shift_min?: number; over_min?: number };
+  const mins = typeof c.over_min === 'number' ? c.over_min : null;
   const late = mins === null ? '' : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
   switch (kind) {
     case 'WATCHED':

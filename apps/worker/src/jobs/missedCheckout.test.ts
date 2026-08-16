@@ -9,14 +9,14 @@ type FlagRow = {
   created_at: Date;
   notified_at: Date | null;
 };
-type ScheduleRow = { id: string; user_id: string; weekday: number; start_time: string | null; end_time: string | null };
+type ScheduleRow = { id: string; user_id: string; weekday: number; shift_min: number | null };
 type UserRow = {
   id: string;
   username: string;
   is_active: boolean;
   role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
   branch_id: string | null;
-  branch: { id: string; name: string } | null;
+  branch: { id: string; name: string; overtime_grace_min: number } | null;
 };
 type PunchRow = { id: string; user_id: string; kind: 'IN' | 'OUT'; at: Date };
 
@@ -50,23 +50,22 @@ function resetStore() {
 function makeDb() {
   return {
     schedule: {
-      findMany: async ({ where }: { where: { weekday: number | { in: number[] } } }) => {
-        const wds = typeof where.weekday === 'number' ? [where.weekday] : where.weekday.in;
+      findMany: async ({ where }: { where: { shift_min?: { gt: number } } }) => {
         return store.schedules
-          .filter((s) => wds.includes(s.weekday))
+          .filter((s) => !where.shift_min || (s.shift_min != null && s.shift_min > where.shift_min.gt))
           .map((s) => ({ ...s, user: store.users.get(s.user_id)! }));
       },
     },
-    scheduleOverride: {
-      findMany: async () => [] as unknown[],
-    },
     punch: {
-      findFirst: async ({ where }: { where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt?: Date } } }) => {
+      findFirst: async ({ where, orderBy }: { where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt?: Date } }; orderBy?: { at: 'desc' } }) => {
         const candidates = store.punches.filter((p) => p.user_id === where.user_id && p.kind === where.kind);
         if (where.at?.gt) {
           return candidates.filter((p) => p.at > (where.at?.gt as Date)).sort((a, b) => b.at.getTime() - a.at.getTime())[0] ?? null;
         }
-        return candidates.sort((a, b) => b.at.getTime() - a.at.getTime())[0] ?? null;
+        if (orderBy) {
+          return candidates.sort((a, b) => b.at.getTime() - a.at.getTime())[0] ?? null;
+        }
+        return candidates[0] ?? null;
       },
     },
     flag: {
@@ -103,82 +102,103 @@ const notifier = {
   },
 };
 
+// A Sunday (Beirut weekday 0) check-in at 09:00, 8h shift_min (480) and the
+// branch's default 15 min grace put the trigger point at elapsed > 495 min,
+// i.e. strictly after 17:15.
+const CHECK_IN = new Date('2026-07-12T09:00:00+03:00');
+
 describe('runMissedCheckout', () => {
-  it('creates Flag and sends neutral message when still clocked in past end+35', async () => {
+  it('fires once elapsed exceeds shift_min plus branch grace', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
-    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-12T09:00:00+03:00') });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
 
     const db = makeDb();
-    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T18:36:00+03:00'), notifier });
+    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T17:16:00+03:00'), notifier });
     expect(r.flags_created).toBe(1);
     expect(r.notified).toBe(1);
+    expect(store.flags[0]!.context_json).toEqual({ shift_min: 480, over_min: 16 });
     expect(store.notifications[0]!.template).toBe('missed_checkout');
-    expect(store.notifications[0]!.context).toHaveProperty('message');
+    expect((store.notifications[0]!.context as { message: string }).message).toContain('8h shift');
   });
 
-  it('handles an overnight shift ending this morning (yesterday 20:00 → today 05:00)', async () => {
+  it('does not fire at or before shift_min plus grace', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'drv1', is_active: true, role: 'DRIVER', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
     });
-    // Saturday (weekday 6) overnight shift into Sunday.
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 6, start_time: '20:00', end_time: '05:00' });
-    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-11T20:00:00+03:00') });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
 
     const db = makeDb();
-    // Sunday 05:40 — 40 min past the 05:00 end, still clocked in.
-    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T05:40:00+03:00'), notifier });
-    expect(r.flags_created).toBe(1);
-    expect(r.notified).toBe(1);
+    // Exactly 495 minutes elapsed (480 + 15) - the boundary must not fire.
+    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T17:15:00+03:00'), notifier });
+    expect(r.flags_created).toBe(0);
   });
 
-  it('does not fire if user punched OUT', async () => {
+  it('does not fire once the employee has punched OUT', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
     store.punches.push(
-      { id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-12T09:00:00+03:00') },
+      { id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN },
       { id: 'p2', user_id: 'u1', kind: 'OUT', at: new Date('2026-07-12T18:00:00+03:00') },
     );
 
     const db = makeDb();
-    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T18:36:00+03:00'), notifier });
+    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T20:00:00+03:00'), notifier });
     expect(r.flags_created).toBe(0);
   });
 
-  it('does not duplicate flag on second run', async () => {
+  it('does not duplicate a flag on second run the same day', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
-    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-12T09:00:00+03:00') });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
 
     const db = makeDb();
-    const r1 = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T18:36:00+03:00'), notifier });
+    const r1 = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T17:16:00+03:00'), notifier });
     expect(r1.flags_created).toBe(1);
-    const r2 = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T18:37:00+03:00'), notifier });
+    const r2 = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T17:20:00+03:00'), notifier });
     expect(r2.flags_created).toBe(0);
   });
 
-  it('does not fire for an hours-based schedule (no clock window yet)', async () => {
+  it('falls back to 15 minutes of grace when the user has no branch', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: null, branch: null,
     });
-    // weekday must be wdYesterday (6, not wdToday's 0) for this fixture's date.
-    // At wdToday, the null-coerced `overnight = (null <= null) -> true` already
-    // makes endsToday false on its own ((wdToday && !overnight) is false, and
-    // weekday !== wdYesterday), so the guard being tested is never reached. At
-    // wdYesterday, overnight=true instead SATISFIES endsToday and the row would
-    // reach scheduledToUtc(today, null) without the guard.
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 6, start_time: null, end_time: null });
-    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-12T09:00:00+03:00') });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
 
     const db = makeDb();
-    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T18:36:00+03:00'), notifier });
+    // 481 elapsed: over the 480 shift but still inside a 15 min default grace.
+    const before = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T17:01:00+03:00'), notifier });
+    expect(before.flags_created).toBe(0);
+
+    // 496 elapsed: past shift + default grace.
+    const after = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T17:16:00+03:00'), notifier });
+    expect(after.flags_created).toBe(1);
+    expect(store.notifications[0]!.context).toHaveProperty('branch', null);
+  });
+
+  it('judges elapsed against the schedule for the weekday the check-in started, not a different weekday row', async () => {
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+    });
+    // Sunday shift_min is generous (480); Monday's is short (60). The check-in
+    // is Sunday, so only Sunday's threshold (495) should ever apply to it.
+    store.schedules.push(
+      { id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 },
+      { id: 's2', user_id: 'u1', weekday: 1, shift_min: 60 },
+    );
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
+
+    const db = makeDb();
+    // 90 min elapsed: past Monday's 60+15 threshold but nowhere near Sunday's.
+    const r = await runMissedCheckout({ db: db as never, now: new Date('2026-07-12T10:30:00+03:00'), notifier });
     expect(r.flags_created).toBe(0);
-    expect(r.notified).toBe(0);
   });
 });

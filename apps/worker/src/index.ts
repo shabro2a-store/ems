@@ -21,7 +21,7 @@ function safe(name: string, fn: () => Promise<unknown>) {
   };
 }
 
-cron.schedule('*/1 * * * *', safe('watchedDetector', () => runWatchedDetector()));
+cron.schedule('10 0 * * *', safe('watchedDetector', () => runWatchedDetector()));
 cron.schedule('*/1 * * * *', safe('missedCheckout', () => runMissedCheckout({ notifier })));
 cron.schedule('*/1 * * * *', safe('tripThreshold', () => runTripThreshold({ notifier })));
 cron.schedule('*/30 * * * *', safe('driverStale', () => runDriverStale({ notifier })));
@@ -29,7 +29,8 @@ cron.schedule('30 23 * * *', safe('endOfDayWatcher', () => runEndOfDayWatcher({ 
 cron.schedule('0 23 * * *', safe('dailySummary', () => runDailySummary({ notifier })));
 
 console.log('cron schedule registered:');
-console.log('  */1     watchedDetector, missedCheckout, tripThreshold');
+console.log('  10 0    watchedDetector');
+console.log('  */1     missedCheckout, tripThreshold');
 console.log('  */30    driverStale');
 console.log('  30 23   endOfDayWatcher');
 console.log('  0 23    dailySummary');

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 type FlagRow = {
   id: string;
@@ -10,7 +10,7 @@ type FlagRow = {
   notified_at: Date | null;
   resolved_at: Date | null;
 };
-type ScheduleRow = { id: string; user_id: string; weekday: number; start_time: string | null; end_time: string | null };
+type ScheduleRow = { id: string; user_id: string; weekday: number; shift_min: number | null };
 type UserRow = {
   id: string;
   username: string;
@@ -26,7 +26,7 @@ const store: {
   schedules: ScheduleRow[];
   users: Map<string, UserRow>;
   punches: PunchRow[];
-  overrides: Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'TIME_CHANGE' }>;
+  overrides: Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE' }>;
   flagSeq: number;
 } = {
   flags: [],
@@ -51,14 +51,15 @@ function resetStore() {
 function makeDb() {
   return {
     schedule: {
-      findMany: async ({ where }: { where: { weekday: number } }) => {
+      findMany: async ({ where }: { where: { weekday: number; shift_min?: { gt: number } } }) => {
         return store.schedules
           .filter((s) => s.weekday === where.weekday)
+          .filter((s) => !where.shift_min || (s.shift_min != null && s.shift_min > where.shift_min.gt))
           .map((s) => ({ ...s, user: store.users.get(s.user_id)! }));
       },
     },
     scheduleOverride: {
-      findMany: async ({ where }: { where: { date: Date; kind?: 'DAY_OFF' | 'TIME_CHANGE' } }) => {
+      findMany: async ({ where }: { where: { date: Date; kind?: 'DAY_OFF' | 'HOURS_CHANGE' } }) => {
         return store.overrides.filter(
           (o) => o.date.getTime() === where.date.getTime() && (!where.kind || o.kind === where.kind),
         );
@@ -86,7 +87,7 @@ function makeDb() {
           user_id: data.user_id,
           branch_id: data.branch_id,
           context_json: data.context_json,
-          created_at: new Date('2026-07-12T08:00:00Z'),
+          created_at: new Date('2026-07-12T10:00:00Z'),
           notified_at: null,
           resolved_at: null,
         };
@@ -101,97 +102,104 @@ beforeEach(() => {
   resetStore();
 });
 
+// All fixtures judge Sunday 2026-07-12 (Beirut weekday 0) as "yesterday" by
+// running the job just after midnight on Monday 2026-07-13.
+const AFTER_MIDNIGHT = new Date('2026-07-13T00:10:00+03:00');
+
 describe('runWatchedDetector', () => {
-  it('creates a Flag row for active user without punch and past start+30min', async () => {
+  it('flags an active user scheduled yesterday with zero punches that day', async () => {
     store.users.set('u1', {
       id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
 
     const db = makeDb();
-    const r = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:00:00+03:00') });
+    const r = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
     expect(r.flags_created).toBe(1);
-    expect(store.flags.length).toBe(1);
+    expect(r.users_scanned).toBe(1);
     expect(store.flags[0]!.kind).toBe('WATCHED');
+    expect(store.flags[0]!.context_json).toEqual({ shift_min: 480, date: '2026-07-12' });
   });
 
-  it('does not create a flag if a punch exists for today', async () => {
+  it('does not flag when a punch exists in that Beirut day', async () => {
     store.users.set('u1', {
       id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
-    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-12T08:30:00Z') });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-12T09:00:00+03:00') });
 
     const db = makeDb();
-    const r = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:00:00+03:00') });
+    const r = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
     expect(r.flags_created).toBe(0);
   });
 
-  it('skips user with approved DAY_OFF override', async () => {
+  it('skips a user with an approved DAY_OFF override for that date', async () => {
     store.users.set('u1', {
       id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
     store.overrides.push({ user_id: 'u1', date: new Date('2026-07-12T00:00:00.000Z'), kind: 'DAY_OFF' });
 
     const db = makeDb();
-    const r = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:00:00+03:00') });
+    const r = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
     expect(r.flags_created).toBe(0);
     expect(r.skipped_day_off).toBe(1);
+  });
+
+  it('does not flag when shift_min is zero', async () => {
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 0 });
+
+    const db = makeDb();
+    const r = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
+    expect(r.users_scanned).toBe(0);
+    expect(r.flags_created).toBe(0);
+  });
+
+  it('does not flag when shift_min is absent (null)', async () => {
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: null });
+
+    const db = makeDb();
+    const r = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
+    expect(r.users_scanned).toBe(0);
+    expect(r.flags_created).toBe(0);
   });
 
   it('does not duplicate a flag on second run', async () => {
     store.users.set('u1', {
       id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
 
     const db = makeDb();
-    const r1 = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:00:00+03:00') });
+    const r1 = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
     expect(r1.flags_created).toBe(1);
-    const r2 = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:01:00+03:00') });
+    const r2 = await runWatchedDetector({ db: db as never, now: new Date('2026-07-13T00:11:00+03:00') });
     expect(r2.flags_created).toBe(0);
   });
 
   it('does not re-raise a flag the admin already dismissed', async () => {
     // Regression: the dedup guard used to require an unresolved flag, so
-    // dismissing one made it stop matching and the next run — a minute later —
-    // created a duplicate. From the admin's side the notice came back by itself.
+    // dismissing one made it stop matching and the next run created a
+    // duplicate. From the admin's side the notice came back by itself.
     store.users.set('u1', {
       id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
 
     const db = makeDb();
-    const first = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:00:00+03:00') });
+    const first = await runWatchedDetector({ db: db as never, now: AFTER_MIDNIGHT });
     expect(first.flags_created).toBe(1);
 
-    store.flags[0]!.resolved_at = new Date('2026-07-12T10:00:30+03:00');
+    store.flags[0]!.resolved_at = new Date('2026-07-13T00:10:30+03:00');
 
-    const after = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:01:00+03:00') });
+    const after = await runWatchedDetector({ db: db as never, now: new Date('2026-07-13T00:11:00+03:00') });
     expect(after.flags_created).toBe(0);
     expect(store.flags.length).toBe(1);
-  });
-
-  it('does not fire before scheduled start + 30 min', async () => {
-    store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
-    });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: '09:00', end_time: '18:00' });
-
-    const db = makeDb();
-    const r = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T09:15:00+03:00') });
-    expect(r.flags_created).toBe(0);
-  });
-
-  it('does not fire for an hours-based schedule (no clock window yet)', async () => {
-    store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
-    });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: null, end_time: null });
-
-    const db = makeDb();
-    const r = await runWatchedDetector({ db: db as never, now: new Date('2026-07-12T10:00:00+03:00') });
-    expect(r.flags_created).toBe(0);
   });
 });
