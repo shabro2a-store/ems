@@ -5,6 +5,7 @@ import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
 import { pendingOvertimeNotices } from '@/lib/services/overtime';
 import { requiredMinFor } from '@/lib/services/coverage';
+import { lookbackMonths, mergeNotices } from '@/lib/services/noticeWindow';
 
 // How far back the penalty review queue looks. Older ones are a payroll matter.
 const PENALTY_LOOKBACK_DAYS = 7;
@@ -239,9 +240,16 @@ export async function GET(req: Request) {
   // payroll matter, not something needing attention today.
   const penaltyUsers = users.filter((u) => inScope(u.branch_id)).map((u) => ({ id: u.id, username: u.name || u.username }));
   const since = new Date(startUtc.getTime() - PENALTY_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
-  const penalties = (
-    await pendingPenaltyNotices(penaltyUsers, todayStr.slice(0, 7), prisma, { since })
-  ).map((p) => ({
+  // Both loaders window their punch queries by a single month, so the lookback
+  // has to be asked for month by month or it stops at the 1st.
+  const months = lookbackMonths(since, todayStr);
+
+  const [penaltyBatches, overtimeBatches] = await Promise.all([
+    Promise.all(months.map((m) => pendingPenaltyNotices(penaltyUsers, m, prisma, { since }))),
+    Promise.all(months.map((m) => pendingOvertimeNotices(penaltyUsers, m, prisma, { since }))),
+  ]);
+
+  const penalties = mergeNotices(penaltyBatches).map((p) => ({
     user_id: p.user_id,
     username: p.username,
     date: p.date,
@@ -251,9 +259,7 @@ export async function GET(req: Request) {
     amount_cent: p.amount_cent,
   }));
 
-  const overtime = (
-    await pendingOvertimeNotices(penaltyUsers, todayStr.slice(0, 7), prisma, { since })
-  ).map((o) => ({
+  const overtime = mergeNotices(overtimeBatches).map((o) => ({
     user_id: o.user_id,
     username: o.username,
     date: o.date,
