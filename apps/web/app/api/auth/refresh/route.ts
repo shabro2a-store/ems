@@ -53,7 +53,7 @@ export async function POST(req: Request) {
     refreshExp,
   );
   const csrf = generateCsrfToken();
-  setAuthCookies(newAccess, newRefresh, csrf);
+  setAuthCookies(newAccess, newRefresh, csrf, exp);
 
   return NextResponse.json({ ok: true, data: { refreshed: true } });
 }

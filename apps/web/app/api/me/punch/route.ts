@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
-import { getClientIp } from '@/lib/auth/cookies';
+import { getClientIp, setAccessCookie } from '@/lib/auth/cookies';
+import { signToken } from '@/lib/auth/jwt';
+import { sessionExpiryFor } from '@/lib/auth/session';
 import { consumePunchRateLimit } from '@/lib/services/rateLimit';
 import {
   readIdempotentResponse,
@@ -31,6 +33,24 @@ const ERROR_MAP: Record<string, { code: string; status: number }> = {
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
+}
+
+// A driver has to be signed in before they can punch, so "is this driver
+// checked in" is always false at login - the only place the session length used
+// to be decided. The punch is the moment that answer changes, so the access
+// cookie is re-issued here: the checked-in TTL on the way in, the standard one
+// on the way out. DRIVER only, and only after the punch actually succeeded.
+async function reissueDriverSession(
+  role: string | null,
+  userId: string,
+  branchId: string | null,
+  kind: 'IN' | 'OUT',
+): Promise<void> {
+  if (role !== 'DRIVER') return;
+  const now = new Date();
+  const exp = sessionExpiryFor({ role: 'DRIVER' }, kind === 'IN', now);
+  const token = await signToken({ sub: userId, role: 'DRIVER', branchId }, exp);
+  setAccessCookie(token, exp);
 }
 
 export async function POST(req: Request) {
@@ -101,6 +121,8 @@ export async function POST(req: Request) {
     };
     return NextResponse.json(response, { status: mapped.status });
   }
+
+  await reissueDriverSession(h.get('x-user-role'), userId, h.get('x-user-branch-id'), body.kind);
 
   const response = {
     ok: true,

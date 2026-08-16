@@ -93,7 +93,7 @@ export async function POST(req: Request) {
   );
 
   const csrf = generateCsrfToken();
-  setAuthCookies(accessToken, refreshToken, csrf);
+  setAuthCookies(accessToken, refreshToken, csrf, exp);
 
   const mustChangePassword = body.password === SEED_DEFAULT_PASSWORD;
 
