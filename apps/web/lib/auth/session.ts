@@ -1,7 +1,7 @@
 import { formatInTimeZone } from 'date-fns-tz';
 import {
   SESSION_TTL_EMPLOYEE_MIN,
-  SESSION_TTL_DRIVER_AFTER_CHECKOUT_MIN,
+  SESSION_TTL_DRIVER_CHECKED_IN_MIN,
   SHOP_TZ,
 } from './constants';
 
@@ -25,7 +25,7 @@ export function sessionExpiryFor(
   now: Date,
 ): Date {
   if (user.role === 'DRIVER' && hasOpenPunch) {
-    return addMinutes(now, SESSION_TTL_DRIVER_AFTER_CHECKOUT_MIN);
+    return addMinutes(now, SESSION_TTL_DRIVER_CHECKED_IN_MIN);
   }
   return addMinutes(now, SESSION_TTL_EMPLOYEE_MIN);
 }

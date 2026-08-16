@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { sessionExpiryFor, addMinutes, todayInBeirut } from './session';
 import {
   SESSION_TTL_EMPLOYEE_MIN,
-  SESSION_TTL_DRIVER_AFTER_CHECKOUT_MIN,
+  SESSION_TTL_DRIVER_CHECKED_IN_MIN,
 } from './constants';
 
 const EMP_MIN = SESSION_TTL_EMPLOYEE_MIN;
-const DRV_AFTER = SESSION_TTL_DRIVER_AFTER_CHECKOUT_MIN;
+const DRV_CHECKED_IN = SESSION_TTL_DRIVER_CHECKED_IN_MIN;
 
 describe('session', () => {
   describe('employee path', () => {
@@ -16,7 +16,7 @@ describe('session', () => {
       expect(exp.getTime()).toBe(addMinutes(now, EMP_MIN).getTime());
     });
 
-    it('still gets the standard TTL even with an open punch - shortened rule is DRIVER-only', () => {
+    it('still gets the standard TTL even with an open punch - the open-punch override is DRIVER-only', () => {
       const now = new Date('2026-07-09T12:00:00.000Z');
       const exp = sessionExpiryFor({ role: 'EMPLOYEE' }, true, now);
       expect(exp.getTime()).toBe(addMinutes(now, EMP_MIN).getTime());
@@ -30,10 +30,10 @@ describe('session', () => {
       expect(exp.getTime()).toBe(addMinutes(now, EMP_MIN).getTime());
     });
 
-    it('gets 30 minutes after now while checked in', () => {
+    it('gets a 12h session while checked in - long enough to cover a full shift, since nothing ever refreshes it', () => {
       const now = new Date('2026-07-09T12:00:00.000Z');
       const exp = sessionExpiryFor({ role: 'DRIVER' }, true, now);
-      expect(exp.getTime()).toBe(addMinutes(now, DRV_AFTER).getTime());
+      expect(exp.getTime()).toBe(addMinutes(now, DRV_CHECKED_IN).getTime());
     });
   });
 
