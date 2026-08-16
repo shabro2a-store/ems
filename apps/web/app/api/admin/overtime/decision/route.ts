@@ -15,16 +15,26 @@ function isValidCalendarDate(value: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
+// PENDING is not an OvertimeDecisionKind - the schema has no such value, and
+// deliberately so: the absence of a row IS pending. Accepting it here as a
+// decision means "put this day back the way it was", which is the undo the
+// owner needs after a mis-clicked Revoke, and it deletes the row.
 const Body = z.object({
   userId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, 'date must be a real calendar day'),
-  decision: z.enum(['ACCEPTED', 'REVOKED']),
+  decision: z.enum(['ACCEPTED', 'REVOKED', 'PENDING']),
   reason: z.string().max(500).optional(),
 });
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
+
+const AUDIT_ACTION = {
+  ACCEPTED: 'overtime.accepted',
+  REVOKED: 'overtime.revoked',
+  PENDING: 'overtime.undecided',
+} as const;
 
 // Record the owner's call on one day's overtime. A pending day (no row) is
 // already paid - pairHours pays every worked minute - so ACCEPTED changes no
@@ -52,25 +62,43 @@ export async function POST(req: Request) {
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
 
   const dateOnly = new Date(`${body.date}T00:00:00.000Z`);
-  await prisma.overtimeDecision.upsert({
-    where: { user_id_date: { user_id: body.userId, date: dateOnly } },
-    create: {
-      user_id: body.userId,
-      date: dateOnly,
-      decision: body.decision,
-      reason: body.reason ?? null,
-      decided_by: adminId,
-    },
-    update: { decision: body.decision, reason: body.reason ?? null, decided_by: adminId },
-  });
 
-  await writeAuditLog({
-    actorId: adminId,
-    action: body.decision === 'ACCEPTED' ? 'overtime.accepted' : 'overtime.revoked',
-    entity: 'OvertimeDecision',
-    entityId: `${body.userId}:${body.date}`,
-    after: { user_id: body.userId, date: body.date, decision: body.decision, reason: body.reason ?? null },
-  });
+  if (body.decision === 'PENDING') {
+    const existing = await prisma.overtimeDecision.findUnique({
+      where: { user_id_date: { user_id: body.userId, date: dateOnly } },
+    });
+    await prisma.overtimeDecision.deleteMany({ where: { user_id: body.userId, date: dateOnly } });
+    await writeAuditLog({
+      actorId: adminId,
+      action: AUDIT_ACTION.PENDING,
+      entity: 'OvertimeDecision',
+      entityId: `${body.userId}:${body.date}`,
+      before: existing
+        ? { user_id: body.userId, date: body.date, decision: existing.decision, reason: existing.reason }
+        : null,
+      after: { user_id: body.userId, date: body.date, decision: null, reason: body.reason ?? null },
+    });
+  } else {
+    await prisma.overtimeDecision.upsert({
+      where: { user_id_date: { user_id: body.userId, date: dateOnly } },
+      create: {
+        user_id: body.userId,
+        date: dateOnly,
+        decision: body.decision,
+        reason: body.reason ?? null,
+        decided_by: adminId,
+      },
+      update: { decision: body.decision, reason: body.reason ?? null, decided_by: adminId },
+    });
+
+    await writeAuditLog({
+      actorId: adminId,
+      action: AUDIT_ACTION[body.decision],
+      entity: 'OvertimeDecision',
+      entityId: `${body.userId}:${body.date}`,
+      after: { user_id: body.userId, date: body.date, decision: body.decision, reason: body.reason ?? null },
+    });
+  }
 
   const response = { ok: true, data: { decision: body.decision } };
   await storeIdempotentResponse({ userId: adminId, key: idemKey, status_code: 200, response_json: response });

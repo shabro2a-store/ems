@@ -45,6 +45,9 @@ export async function GET(req: Request) {
         adjustments_cent: r.adjustmentsCent,
         advances_cent: r.advancesCent,
         penalties_cent: r.penaltiesCent,
+        // netCent subtracts this too. Leaving it out of the response made the
+        // table stop adding up, with nothing on screen to explain the gap.
+        overtime_deduction_cent: r.overtimeDeductionCent,
         net_cent: r.netCent,
       };
     }),
@@ -57,9 +60,18 @@ export async function GET(req: Request) {
       adjustments_cent: s.adjustments_cent + r.adjustments_cent,
       advances_cent: s.advances_cent + r.advances_cent,
       penalties_cent: s.penalties_cent + r.penalties_cent,
+      overtime_deduction_cent: s.overtime_deduction_cent + r.overtime_deduction_cent,
       net_cent: s.net_cent + r.net_cent,
     }),
-    { hours: 0, gross_cent: 0, adjustments_cent: 0, advances_cent: 0, penalties_cent: 0, net_cent: 0 },
+    {
+      hours: 0,
+      gross_cent: 0,
+      adjustments_cent: 0,
+      advances_cent: 0,
+      penalties_cent: 0,
+      overtime_deduction_cent: 0,
+      net_cent: 0,
+    },
   );
 
   return NextResponse.json({ ok: true, data: { rows, totals, month, branchId: branchId ?? 'all', branches } });

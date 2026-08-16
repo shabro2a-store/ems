@@ -29,6 +29,9 @@ export async function GET(req: Request) {
       adjustments_cent: result.adjustmentsCent,
       advances_cent: result.advancesCent,
       penalties_cent: result.penaltiesCent,
+      // Part of net_cent, so it needs a line of its own - otherwise take-home
+      // drops with nothing on the payslip accounting for it.
+      overtime_deduction_cent: result.overtimeDeductionCent,
       net_cent: result.netCent,
     },
   });

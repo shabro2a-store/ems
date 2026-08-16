@@ -16,9 +16,18 @@ interface Row {
   adjustments_cent: number;
   advances_cent: number;
   penalties_cent: number;
+  overtime_deduction_cent: number;
   net_cent: number;
 }
-interface Totals { hours: number; gross_cent: number; adjustments_cent: number; advances_cent: number; penalties_cent: number; net_cent: number }
+interface Totals {
+  hours: number;
+  gross_cent: number;
+  adjustments_cent: number;
+  advances_cent: number;
+  penalties_cent: number;
+  overtime_deduction_cent: number;
+  net_cent: number;
+}
 interface Branch { id: string; name: string }
 
 function currentMonth(): string {
@@ -39,6 +48,7 @@ export default function AdminPayrollPage() {
   const [adjust, setAdjust] = useState<Row | null>(null);
   const [rateFor, setRateFor] = useState<Row | null>(null);
   const [penaltiesFor, setPenaltiesFor] = useState<Row | null>(null);
+  const [overtimeFor, setOvertimeFor] = useState<Row | null>(null);
 
   async function load() {
     setLoading(true);
@@ -105,8 +115,8 @@ export default function AdminPayrollPage() {
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
 
       {totals && (
-        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + bonuses − deductions − advances − penalties" />
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + bonuses − deductions − advances − penalties − revoked overtime" />
           <StatTile label="Gross wages" value={centsToUsd(totals.gross_cent)} />
           <StatTile
             label="Adjustments"
@@ -114,6 +124,11 @@ export default function AdminPayrollPage() {
             tone={totals.adjustments_cent > 0 ? 'success' : totals.adjustments_cent < 0 ? 'danger' : 'neutral'}
           />
           <StatTile label="Penalties" value={totals.penalties_cent === 0 ? '$0.00' : `−${centsToUsd(totals.penalties_cent)}`} tone={totals.penalties_cent > 0 ? 'danger' : 'neutral'} />
+          <StatTile
+            label="Overtime revoked"
+            value={totals.overtime_deduction_cent === 0 ? '$0.00' : `−${centsToUsd(totals.overtime_deduction_cent)}`}
+            tone={totals.overtime_deduction_cent > 0 ? 'danger' : 'neutral'}
+          />
           <StatTile label="Advances" value={centsToUsd(totals.advances_cent)} tone={totals.advances_cent > 0 ? 'danger' : 'neutral'} />
           <StatTile label="Hours" value={totals.hours.toFixed(1)} />
         </div>
@@ -135,6 +150,7 @@ export default function AdminPayrollPage() {
                   <th className="px-4 py-2.5 text-right">Gross</th>
                   <th className="px-4 py-2.5 text-right">Adjust.</th>
                   <th className="px-4 py-2.5 text-right">Penalty</th>
+                  <th className="px-4 py-2.5 text-right">OT revoked</th>
                   <th className="px-4 py-2.5 text-right">Advances</th>
                   <th className="px-4 py-2.5 text-right">Net</th>
                   <th className="px-4 py-2.5 text-right"></th>
@@ -172,6 +188,15 @@ export default function AdminPayrollPage() {
                             {r.penalties_cent === 0 ? '—' : `−${centsToUsd(r.penalties_cent, false)}`}
                           </button>
                         </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            onClick={() => setOvertimeFor(r)}
+                            className={`tabular border-b border-dashed border-warning/40 font-medium hover:text-warning ${r.overtime_deduction_cent > 0 ? 'text-danger' : 'text-muted'}`}
+                            title="View overtime / undo a decision"
+                          >
+                            {r.overtime_deduction_cent === 0 ? '—' : `−${centsToUsd(r.overtime_deduction_cent, false)}`}
+                          </button>
+                        </td>
                         <td className="tabular px-4 py-2.5 text-right text-danger">
                           {r.advances_cent === 0 ? <span className="text-muted">—</span> : `−${centsToUsd(r.advances_cent, false)}`}
                         </td>
@@ -193,6 +218,7 @@ export default function AdminPayrollPage() {
                     <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.gross_cent)}</td>
                     <td className="tabular px-4 py-3 text-right">{totals.adjustments_cent >= 0 ? '+' : '−'}{centsToUsd(Math.abs(totals.adjustments_cent), false)}</td>
                     <td className="tabular px-4 py-3 text-right text-danger">{totals.penalties_cent === 0 ? '—' : `−${centsToUsd(totals.penalties_cent, false)}`}</td>
+                    <td className="tabular px-4 py-3 text-right text-danger">{totals.overtime_deduction_cent === 0 ? '—' : `−${centsToUsd(totals.overtime_deduction_cent, false)}`}</td>
                     <td className="tabular px-4 py-3 text-right">−{centsToUsd(totals.advances_cent, false)}</td>
                     <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.net_cent)}</td>
                     <td></td>
@@ -213,6 +239,9 @@ export default function AdminPayrollPage() {
       {penaltiesFor && (
         <PenaltiesModal row={penaltiesFor} month={month} onClose={() => setPenaltiesFor(null)} onChanged={() => { setMsg('Penalty updated.'); load(); }} />
       )}
+      {overtimeFor && (
+        <OvertimeModal row={overtimeFor} month={month} onClose={() => setOvertimeFor(null)} onChanged={() => { setMsg('Overtime updated.'); load(); }} />
+      )}
     </>
   );
 }
@@ -220,7 +249,7 @@ export default function AdminPayrollPage() {
 function GroupBody({ group, show, children }: { group: string; show: boolean; children: React.ReactNode }) {
   return (
     <>
-      {show && <tr><td colSpan={9} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>}
+      {show && <tr><td colSpan={10} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>}
       {children}
     </>
   );
@@ -324,6 +353,98 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
                 <Button size="sm" variant={p.waived ? 'secondary' : 'ghost'} loading={busy === id} onClick={() => toggle(p)}>
                   {p.waived ? 'Restore' : 'Remove'}
                 </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Modal>
+  );
+}
+
+interface OvertimeItem {
+  date: string;
+  overtimeMin: number;
+  rate_cent: number;
+  amount_cent: number;
+  decision: 'ACCEPTED' | 'REVOKED' | null;
+}
+
+function overtimeState(d: OvertimeItem['decision']): { label: string; tone: string } {
+  if (d === 'REVOKED') return { label: 'Revoked — deducted', tone: 'text-danger' };
+  if (d === 'ACCEPTED') return { label: 'Accepted — paid', tone: 'text-success' };
+  return { label: 'Pending — paid', tone: 'text-muted' };
+}
+
+// The attention queue drops a day the moment it has a decision, so this modal is
+// the only place a decided day can be found again — and the only way back from a
+// mis-clicked Revoke short of editing the database.
+function OvertimeModal({ row, month, onClose, onChanged }: { row: Row; month: string; onClose: () => void; onChanged: () => void }) {
+  const [items, setItems] = useState<OvertimeItem[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    const r = await apiGet<{ overtime: OvertimeItem[] }>(`/api/admin/overtime?userId=${row.user_id}&month=${month}`);
+    if (r.ok) setItems(r.data.overtime);
+    else setErr(errorMessage(r));
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  async function decide(o: OvertimeItem, decision: 'ACCEPTED' | 'REVOKED' | 'PENDING') {
+    const id = `${o.date}|${decision}`;
+    setBusy(id); setErr(null);
+    const res = await apiSend('/api/admin/overtime/decision', {
+      idempotent: true, idemPrefix: 'ot',
+      body: { userId: row.user_id, date: o.date, decision },
+    });
+    setBusy(null);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    setItems((prev) => prev?.map((x) => (x.date === o.date ? { ...x, decision: decision === 'PENDING' ? null : decision } : x)) ?? null);
+    onChanged();
+  }
+
+  return (
+    <Modal title={`Overtime · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      <p className="mb-3 text-sm text-muted">
+        Every day worked past its scheduled hours. Overtime is paid automatically, so a pending day
+        is already in their pay — revoking one deducts it. Undo puts a day back to pending.
+      </p>
+      {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
+      {items === null ? (
+        <div className="grid place-items-center py-8 text-muted"><Spinner /></div>
+      ) : items.length === 0 ? (
+        <EmptyState title="No overtime" hint="This employee has no overtime this month." />
+      ) : (
+        <ul className="divide-y divide-border">
+          {items.map((o) => {
+            const state = overtimeState(o.decision);
+            return (
+              <li key={o.date} className="flex items-center justify-between gap-3 py-2.5">
+                <div>
+                  <div className="text-sm font-medium">
+                    Over by <span className="tabular">{o.overtimeMin} min</span>
+                  </div>
+                  <div className="text-xs text-muted">
+                    {o.date} · {centsToUsd(o.amount_cent)} · <span className={state.tone}>{state.label}</span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  {o.decision === null ? (
+                    <>
+                      <Button size="sm" variant="secondary" loading={busy === `${o.date}|ACCEPTED`} onClick={() => decide(o, 'ACCEPTED')}>
+                        Accept
+                      </Button>
+                      <Button size="sm" variant="ghost" loading={busy === `${o.date}|REVOKED`} onClick={() => decide(o, 'REVOKED')}>
+                        Revoke
+                      </Button>
+                    </>
+                  ) : (
+                    <Button size="sm" variant="secondary" loading={busy === `${o.date}|PENDING`} onClick={() => decide(o, 'PENDING')}>
+                      Undo
+                    </Button>
+                  )}
+                </div>
               </li>
             );
           })}
