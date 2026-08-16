@@ -7,6 +7,7 @@ import {
   seedTestBranch,
   seedTestUser,
   seedDayOffOverride,
+  seedTestPunch,
 } from '../test-helpers/db';
 import { loginAs } from '../test-helpers/auth';
 
@@ -261,10 +262,47 @@ describe('punch integration (HTTP)', () => {
     expect(typeof body.data.in_at).toBe('string');
     expect(Number.isInteger(body.data.minutes_since_in)).toBe(true);
     expect(body.data.minutes_since_in).toBeGreaterThanOrEqual(0);
-    expect(body.data.earned_today_cent).toBe(0);
-    expect(body.data.earned_month_cent).toBe(0);
-    expect(body.data.approved_advance_balance_cent).toBe(0);
-    expect(body.data.net_cent).toBe(0);
+  });
+
+  it('/api/me/today carries hours only — no money fields, and hours_month excludes the open session', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-hrs', branch_id: branch.id });
+    const month = todayInBeirut(new Date()).slice(0, 7);
+    // A completed 8h shift earlier this month — anchored to day 1 so it is
+    // always in the past relative to "now", whatever day the suite runs on.
+    await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: new Date(`${month}-01T04:00:00.000Z`) });
+    await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${month}-01T12:00:00.000Z`) });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    // Punch in today too, so the test also proves an open session does not
+    // inflate hours_month (same basis the old earned_month_cent used).
+    const inRes = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `hrs-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-hrs' }),
+    });
+    expect(inRes.status).toBe(200);
+
+    const res = await fetch(`${BASE_URL}/api/me/today`, {
+      headers: { Cookie: cookies, 'X-CSRF-Token': csrf },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    // Exact key set: catches a stray money field left in, as much as one dropped.
+    expect(Object.keys(body.data).sort()).toEqual(['hours_month', 'in_at', 'minutes_since_in']);
+    expect(typeof body.data.in_at).toBe('string');
+    expect(body.data.minutes_since_in).toBeGreaterThanOrEqual(0);
+    expect(body.data.hours_month).toBe(8);
+    expect(body.data.earned_today_cent).toBeUndefined();
+    expect(body.data.earned_month_cent).toBeUndefined();
+    expect(body.data.approved_advance_balance_cent).toBeUndefined();
+    expect(body.data.net_cent).toBeUndefined();
   });
 
   it('Check 13: day-off override does NOT block punching (staff may help on a day off)', async () => {

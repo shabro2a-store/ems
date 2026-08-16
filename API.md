@@ -64,8 +64,10 @@ Enabled only when `ENABLE_DEV_ENDPOINTS=true`, else `404`. Body `{ kind }`. Skip
 GPS/geofence (uses the branch centre) for testing on devices without GPS.
 
 ### GET /api/me/today
-→ `200 { in_at, minutes_since_in, earned_today_cent, earned_month_cent,
-approved_advance_balance_cent, net_cent }` — real earnings for the caller.
+→ `200 { in_at, minutes_since_in, hours_month }` — the field screens' live
+counters. Hours only, no money: a shared shop floor with per-employee rates
+made a live earnings ticker a source of friction. The caller's own payslip
+(`GET /api/me/payroll`) still carries the real money figures.
 
 ### GET /api/me/payroll?month=YYYY-MM
 → `200 { hours, gross_cent, adjustments_cent, advances_cent, penalties_cent,

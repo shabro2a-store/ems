@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { apiGet, apiSend, centsToUsd, errorMessage, formatBeirutTime } from '@/lib/api';
+import { apiGet, apiSend, errorMessage, formatBeirutTime } from '@/lib/api';
 import { Card, CardBody, StatTile, Alert } from '@/components/ui';
 import DriverAlarm from '@/components/field/DriverAlarm';
 import EnableAlerts from '@/components/field/EnableAlerts';
@@ -9,10 +9,7 @@ import EnableAlerts from '@/components/field/EnableAlerts';
 interface TodayPayload {
   in_at: string | null;
   minutes_since_in: number | null;
-  earned_today_cent: number;
-  earned_month_cent: number;
-  approved_advance_balance_cent: number;
-  net_cent: number;
+  hours_month: number;
 }
 interface TripInfo { open: boolean; since_min?: number; threshold_min: number }
 type Status =
@@ -162,10 +159,9 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         </CardBody>
       </Card>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <StatTile label="On shift" value={today ? dur(today.in_at ? (today.minutes_since_in ?? 0) : 0) : '—'} />
-        <StatTile label="Earned today" value={today ? centsToUsd(today.earned_today_cent) : '—'} tone="success" />
-        <StatTile label="This month" value={today ? centsToUsd(today.earned_month_cent) : '—'} />
+        <StatTile label="This month" value={today ? `${today.hours_month.toFixed(1)}h` : '—'} />
       </div>
 
       {/* Trip status */}

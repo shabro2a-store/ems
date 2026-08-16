@@ -266,10 +266,11 @@ an "Open in app" deep link) — all actions happen in the web app.
   editable **Expected** monthly salary reference (never part of any total — display only, for
   the owner to eyeball against actual pay), inline adjustments, per-employee penalties with
   **Remove/Restore**, branch-aware PDF).
-- **Employee** (phone): `/employee` (punch + today/earnings, greets by name) ·
-  `/employee/advances` · `/employee/leave` · `/employee/payroll`.
+- **Employee** (phone): `/employee` (punch + hours today/this month, greets by name) ·
+  `/employee/advances` · `/employee/leave` · `/employee/payroll` (real earnings live here, not
+  on the home screen).
 - **Driver** (phone): `/driver` — **clock in/out** (attendance punch) **and** trip out/back
-  off one GPS check (must clock in before going out on an order), shift/earnings tiles, greets
+  off one GPS check (must clock in before going out on an order), shift/hours tiles, greets
   by name, + the same advances/leave/pay tabs. Shows a full-screen flashing **alarm** (sound +
   vibration) when the caller rings; polls `GET /api/me/calls`, dismiss acks it.
 - **Caller** (`/caller`, POS/tablet): each branch driver is a big button — available ones
@@ -306,7 +307,10 @@ equally final from the dashboard.
 
 The bugs found in the initial audit are fixed:
 - Correct-punch now **persists** (sets corrected/corrected_by/correction_reason).
-- `/api/me/today` returns **real earnings** (today + month + advances + net).
+- `/api/me/today` returned **real earnings** (today + month + advances + net); since superseded —
+  a live per-rate earnings ticker on a shared shop floor caused friction between staff, so the
+  field screens now show **hours only** (today + this month). Real earnings still live on the
+  employee's own payslip, `/api/me/payroll`.
 - Schedule editing moved into the **Employees** page (the old advances-fed dropdown is gone).
 - Every admin page has nav (single `admin/layout.tsx`); the bar shows the **display name**;
   flag badge is accurate.
