@@ -1280,72 +1280,146 @@ One number per day, 0-24, with the weekly total shown alongside."
 
 ---
 
-### Task 9: Leave and hours-change requests
+### Task 9: Day-off and time-off requests
+
+**Revised by the owner mid-execution.** The original task let an employee request
+an absolute shift length ("make Thursday 5 hours"). The owner rejected that: the
+admin owns the schedule, and an employee should only be able to ask for **time
+off** — "I need 2 hours off on Thursday" — which the admin reviews. Day-off
+requests are unchanged from how they work today.
+
+The difference matters because the employee never needs to know what their
+scheduled length is. The request is a subtraction, and the resolved day is
+whatever the schedule says minus what was granted.
 
 **Files:**
-- Modify: `apps/web/lib/services/leave.ts:8-16,33-47,97-115,138-174`
+- Modify: `packages/db/prisma/schema.prisma` (+ a rename migration)
+- Modify: `apps/web/lib/services/leave.ts`
 - Modify: `apps/web/app/api/me/leave/route.ts`
 - Modify: `apps/web/app/(app)/employee/leave/page.tsx`
-- Modify: `apps/web/components/admin/AdminDashboard.tsx:29,391,412-413`
+- Modify: `apps/web/components/admin/AdminDashboard.tsx` (the `pendingLeaves` type and its row + success wording)
 - Test: `apps/web/lib/services/leave.test.ts`
 
 **Interfaces:**
-- Consumes: `LeaveRequest.shift_min`, `OverrideKind.HOURS_CHANGE`.
-- Produces: `RequestLeaveInput` gains `shiftHours?: number | null` and its `kind` becomes `'DAY_OFF' | 'HOURS_CHANGE'`.
+- Consumes: `OverrideKind.HOURS_CHANGE`, `Schedule.shift_min`.
+- Produces: `LeaveRequest.off_min` (renamed from `shift_min`); `RequestLeaveInput` gains `hoursOff?: number | null` and its `kind` becomes `'DAY_OFF' | 'HOURS_CHANGE'`.
 
-- [ ] **Step 1: Update the service**
+- [ ] **Step 1: Rename the LeaveRequest column**
 
-In `apps/web/lib/services/leave.ts`, change `RequestLeaveInput.kind` to `'DAY_OFF' | 'HOURS_CHANGE'`, replace `startTime`/`endTime` with `shiftHours?: number | null`, and replace the two regex validations at lines 33–34:
+`LeaveRequest.shift_min` was added in Task 2 to hold an absolute shift length. It
+now holds minutes of time off requested, so the name must change with the
+meaning. Rename it to `off_min` in `schema.prisma` and in a new timestamped
+migration:
+
+```sql
+ALTER TABLE "LeaveRequest" RENAME COLUMN "shift_min" TO "off_min";
+ALTER TABLE "LeaveRequest" DROP CONSTRAINT IF EXISTS leave_shift_min_chk;
+ALTER TABLE "LeaveRequest" ADD CONSTRAINT leave_off_min_chk
+  CHECK ("off_min" IS NULL OR ("off_min" >= 0 AND "off_min" <= 1440));
+```
+
+Leave `ScheduleOverride.shift_min` alone — an override still records an absolute
+required length, which is what `computeCoverage` reads.
+
+- [ ] **Step 2: Update the service**
+
+In `apps/web/lib/services/leave.ts`, change `RequestLeaveInput.kind` to
+`'DAY_OFF' | 'HOURS_CHANGE'`, replace `startTime`/`endTime` with
+`hoursOff?: number | null`, and replace the two regex validations with:
 
 ```ts
-  if (input.shiftHours != null && (input.shiftHours < 0 || input.shiftHours > 24)) {
+  if (input.hoursOff != null && (input.hoursOff < 0 || input.hoursOff > 24)) {
     return { ok: false, code: 'INVALID_INPUT' };
   }
 ```
 
-Store `shift_min: input.shiftHours != null ? Math.round(input.shiftHours * 60) : null`. In `decideLeave`, carry `shift_min: leave.shift_min` into both the `create` and `update` of the override upsert. In `LeaveSummary.upcoming`, replace the two time fields with `shift_min: number | null` and map it through.
+Store `off_min: input.hoursOff != null ? Math.round(input.hoursOff * 60) : null`.
 
-- [ ] **Step 2: Update the request route and employee UI**
-
-In `apps/web/app/api/me/leave/route.ts`, change the Zod body to accept `shiftHours` (0–24, optional) and `kind: z.enum(['DAY_OFF', 'HOURS_CHANGE'])`. In `apps/web/app/(app)/employee/leave/page.tsx`, replace the two time pickers with a single number input labelled "Hours needed", 0–24 step 0.5, shown only when the request kind is an hours change.
-
-- [ ] **Step 3: Update the admin leave rows**
-
-In `AdminDashboard.tsx` line 29, replace `start_time`/`end_time` in the `pendingLeaves` type with `shift_min: number | null`. Line 391 becomes:
-
-```tsx
-{l.kind === 'HOURS_CHANGE' && l.shift_min != null ? ` → ${l.shift_min / 60}h` : ''}
-```
-
-Lines 412–413 become:
-
-```tsx
-                                return l.kind === 'HOURS_CHANGE' && l.shift_min != null
-                                  ? `Hours change approved — ${l.username} now works ${l.shift_min / 60}h (${days} updated on their schedule).`
-```
-
-Keep the rest of that success message untouched.
-
-- [ ] **Step 4: Update the leave tests**
-
-In `apps/web/lib/services/leave.test.ts`, replace every `TIME_CHANGE` with `HOURS_CHANGE` and every `startTime`/`endTime` pair with `shiftHours`. Add:
+`decideLeave` is where the subtraction happens. On approval of an `HOURS_CHANGE`
+request it must, for each date in the range, resolve that date's Beirut weekday,
+look up the employee's `Schedule.shift_min` for that weekday (absent means 0),
+and write an override with:
 
 ```ts
-it('rejects more than 24 hours', async () => {
+shift_min: Math.max(0, weekdayShiftMin - (leave.off_min ?? 0))
+```
+
+Resolve the weekday with `beirutWeekday` from the `time` package, applied to the
+date being written — not to `new Date()`. Load the employee's schedules once
+before the loop, not per date.
+
+`DAY_OFF` approval is unchanged: it still writes a `DAY_OFF` override and never
+consults the schedule.
+
+In `LeaveSummary.upcoming`, replace the two time fields with
+`shift_min: number | null` — the summary shows resolved overrides, which carry
+absolute lengths, not the request's `off_min`.
+
+- [ ] **Step 3: Update the request route and employee UI**
+
+In `apps/web/app/api/me/leave/route.ts`, change the Zod body to accept
+`hoursOff` (0–24, optional) with `kind: z.enum(['DAY_OFF', 'HOURS_CHANGE'])`.
+While you are in this file, its `start_date` / `end_date` use the same shape-only
+regex the owner already ruled on — apply the identical `isValidCalendarDate`
+helper and `.refine(...)` wiring used in `overtime/decision/route.ts`,
+`penalties/waive/route.ts` and `penalties/ack/route.ts`, byte-identical to
+those, to both date fields.
+
+In `apps/web/app/(app)/employee/leave/page.tsx`, replace the two time pickers
+with a single number input labelled **"Hours off"**, 0–24 step 0.5, shown only
+when the request is a time-off request rather than a full day off. The helper
+text should make the subtraction explicit, e.g. "Time off from that day's
+shift — your manager reviews it."
+
+- [ ] **Step 4: Update the admin leave rows**
+
+In `AdminDashboard.tsx`, the `pendingLeaves` type replaces `start_time` /
+`end_time` with `off_min: number | null`. The row shows what was asked for:
+
+```tsx
+{l.kind === 'HOURS_CHANGE' && l.off_min != null ? ` → ${l.off_min / 60}h off` : ''}
+```
+
+The approval success message states what changed, matching the voice used
+everywhere else in this queue:
+
+```tsx
+                                return l.kind === 'HOURS_CHANGE' && l.off_min != null
+                                  ? `Time off approved — ${l.username} owes ${l.off_min / 60}h less (${days} updated on their schedule).`
+```
+
+Keep the rest of that success message, and the day-off branch, untouched.
+
+- [ ] **Step 5: Update the leave tests**
+
+In `apps/web/lib/services/leave.test.ts`, replace every `TIME_CHANGE` with
+`HOURS_CHANGE` and every `startTime`/`endTime` pair with `hoursOff`. Add these
+three, using whatever fake or stub the surrounding tests already use:
+
+```ts
+it('rejects more than 24 hours off', async () => {
   const res = await requestLeave({
-    userId: 'u1', kind: 'HOURS_CHANGE', startDate: '2099-01-01', endDate: '2099-01-01', shiftHours: 25,
+    userId: 'u1', kind: 'HOURS_CHANGE', startDate: '2099-01-01', endDate: '2099-01-01', hoursOff: 25,
   }, fakeDb);
   expect(res).toEqual({ ok: false, code: 'INVALID_INPUT' });
 });
 ```
 
-using whatever fake or stub the surrounding tests already use.
+Plus two on `decideLeave`'s subtraction, which is the new logic and the part
+most worth pinning:
 
-- [ ] **Step 5: Verify and commit**
+- approving 2h off against an 8h weekday writes an override of 360 minutes
+- approving 10h off against an 8h weekday floors at 0, never negative
+
+- [ ] **Step 6: Verify and commit**
 
 ```bash
 pnpm --filter web exec vitest run --exclude "**/*.integration.test.ts" && pnpm -r typecheck
-git add -A && git commit -m "feat(leave): request a number of hours instead of a time window"
+git add -A && git commit -m "feat(leave): employees request time off, not a shift length
+
+The admin owns the schedule. An employee asks for hours off a given
+day and approval subtracts them from what that weekday requires, so
+the employee never needs to know their scheduled length."
 ```
 
 ---
