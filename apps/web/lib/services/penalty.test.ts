@@ -42,6 +42,23 @@ describe('shortfallPenalties', () => {
     expect(items[0]!.amount_cent).toBe(240_000);
   });
 
+  it('prices an uncapped shortfall as hours * rate', () => {
+    // The only amount_cent assertion used to be the capped 4-hour case, where
+    // hours is the constant 4 - so hours * rate and a hardcoded 4 * rate agree.
+    // 45 minutes short is 3 penalty hours, on the common 1-3 hour path that
+    // every real shortfall takes, and the two stop agreeing there.
+    const items = shortfallPenalties({
+      coverage: [day({ workedMin: 435, deltaMin: -45 })],
+      rateChanges: RATE,
+      waivedKeys: new Set(),
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.minutes).toBe(45);
+    expect(items[0]!.hours).toBe(3);
+    expect(items[0]!.rate_cent).toBe(60_000);
+    expect(items[0]!.amount_cent).toBe(180_000);
+  });
+
   it('ignores a day that met its hours', () => {
     expect(
       shortfallPenalties({ coverage: [day({})], rateChanges: RATE, waivedKeys: new Set() }),
