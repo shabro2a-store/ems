@@ -4,10 +4,17 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ems
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ems_dev_password}
+      # Must be set in /opt/ems/.env. Fails closed if missing - a default here
+      # would ship the same password to every install.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}
       POSTGRES_DB: ems
     ports:
-      - '5433:5432'
+      # Loopback only. Docker writes its own iptables rules ahead of UFW, so a
+      # host firewall does not reliably cover a 0.0.0.0 publish - the bind
+      # address is the control that actually holds. Containers still reach the
+      # database as `db:5432` over the compose network; this mapping exists
+      # solely for tools on the host (psql, Prisma Studio, the local dev app).
+      - '127.0.0.1:5433:5432'
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,9 +29,15 @@ services:
       dockerfile: Dockerfile.web
     restart: unless-stopped
     ports:
+      # Published on every interface, unlike db above. The Cloudflare Tunnel
+      # target is documented as localhost:3000, which a loopback bind would
+      # still serve when cloudflared runs on the host - but cloudflared's own
+      # config lives outside this repo and could not be checked, so narrowing
+      # this is left as a deliberate manual step. See DEPLOY.md "Network
+      # exposure".
       - '3000:3000'
     environment:
-      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:-ems_dev_password}@db:5432/ems
+      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
       NODE_ENV: production
       # Must be set in /opt/ems/.env (openssl rand -hex 32). Fails closed if missing.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - add it to /opt/ems/.env}
@@ -50,7 +63,7 @@ services:
       dockerfile: Dockerfile.worker
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:-ems_dev_password}@db:5432/ems
+      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
       NODE_ENV: production
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - add it to /opt/ems/.env}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://app.shabro2a.com}

@@ -51,24 +51,58 @@ failed earlier in the chain).
 
 ## Required environment (`/opt/ems/.env`)
 `docker-compose.yml` reads these via `${VAR}` substitution. **The stack refuses to
-start without `JWT_SECRET`.**
+start without `JWT_SECRET` or `POSTGRES_PASSWORD`** — `docker compose` aborts with
+the variable's name before any container starts.
 ```bash
 JWT_SECRET=<openssl rand -hex 32>          # REQUIRED — auth token signing secret
+POSTGRES_PASSWORD=<openssl rand -hex 24>   # REQUIRED — database password, no default
 PUBLIC_APP_URL=https://app.shabro2a.com    # makes auth cookies Secure
 ENABLE_DEV_ENDPOINTS=false                 # keep the GPS-bypass endpoints OFF in prod
-# POSTGRES_PASSWORD=<optional>             # defaults to ems_dev_password if unset
 # TELEGRAM_BOT_TOKEN / TELEGRAM_WEBHOOK_SECRET  # see "Telegram alerts" below
 # VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT  # see "Web Push" below
 # SENTRY_DSN=<optional>                    # error monitoring; off when unset
 ```
+`POSTGRES_PASSWORD` is only read when Postgres initialises its data directory, so
+on an **existing** install it must match the password the volume was created with
+(`ems_dev_password` on any server deployed before this release). Rotating it is a
+separate operation:
+```bash
+docker compose exec db psql -U ems -d ems -c "ALTER USER ems WITH PASSWORD '<new>';"
+# then put the same value in .env and: docker compose up -d
+```
 Adding a variable to `.env` is only half the job — it must also appear under the
 service's `environment:` block in `docker-compose.yml`, or the container never
 sees it. `.env.example` lists every variable the app reads.
-Generate the secret once (won't overwrite an existing one):
+Generate the secrets once (won't overwrite existing ones):
 ```bash
 grep -q '^JWT_SECRET=' .env || echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
+grep -q '^POSTGRES_PASSWORD=' .env || echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env
 ```
 Changing `JWT_SECRET` invalidates all sessions (everyone logs in again).
+
+## Network exposure
+`db` publishes to `127.0.0.1:5433` — the host only. Docker inserts its own
+iptables rules *ahead* of UFW, so a `0.0.0.0` publish stays reachable from the
+internet even with the firewall closed; the bind address is what actually gates
+it. Containers are unaffected: they reach Postgres as `db:5432` over the compose
+network. Check it after a deploy — the second command must refuse:
+```bash
+docker compose port db 5432          # expect 127.0.0.1:5433
+psql "postgresql://ems:<password>@<the VPS public IP>:5433/ems" -c 'select 1'
+```
+`web` still publishes on `0.0.0.0:3000`, so anyone who learns the origin IP can
+reach the app directly and bypass the tunnel (the app's own login still gates
+every request). If `cloudflared` runs **on the host** — the layout these docs
+describe, `https://app.shabro2a.com` → `localhost:3000` — then narrowing it costs
+nothing:
+```yaml
+    ports:
+      - '127.0.0.1:3000:3000'
+```
+Confirm `cloudflared` is a host service (`systemctl status cloudflared`) before
+making that change: a `cloudflared` running in its own container reaches the host
+over the docker bridge, not loopback, and a loopback bind would take the site
+down.
 
 ## Migrations & seed (first deploy, or after schema changes)
 ```bash
@@ -144,6 +178,9 @@ accuracy** and/or radius via Edit.
 
 ## Production checklist
 - [ ] `JWT_SECRET` set to a real random value (not the dev placeholder)
+- [ ] `POSTGRES_PASSWORD` set to a real random value (not `ems_dev_password`)
+- [ ] `docker compose port db 5432` reports `127.0.0.1:5433`, and Postgres refuses
+      a connection to the VPS's public IP
 - [ ] `ENABLE_DEV_ENDPOINTS=false`
 - [ ] Owner password changed from `change-me`
 - [ ] Each branch's location recorded on-site
