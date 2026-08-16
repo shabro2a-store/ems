@@ -167,7 +167,13 @@ describe('runMissedCheckout', () => {
     store.users.set('u1', {
       id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
     });
-    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, start_time: null, end_time: null });
+    // weekday must be wdYesterday (6, not wdToday's 0) for this fixture's date.
+    // At wdToday, the null-coerced `overnight = (null <= null) -> true` already
+    // makes endsToday false on its own ((wdToday && !overnight) is false, and
+    // weekday !== wdYesterday), so the guard being tested is never reached. At
+    // wdYesterday, overnight=true instead SATISFIES endsToday and the row would
+    // reach scheduledToUtc(today, null) without the guard.
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 6, start_time: null, end_time: null });
     store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-12T09:00:00+03:00') });
 
     const db = makeDb();
