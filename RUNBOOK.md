@@ -199,10 +199,13 @@ Run once on the VPS after first deploy:
 2. **Record the GPS on-site.** A new branch defaults to 0,0 and nobody can punch
    until its location is recorded: on a phone, standing at the branch, open
    Branches → the branch → **📍 Record location**.
-3. **Overtime grace** is the one branch field that changes behaviour rather than
-   geofencing: it sets how far past an employee's required hours a day has to run
-   before it is reported to the owner. It does not shrink or forgive the reported
-   overrun — only whether small ones get reported at all.
+3. **Overtime grace** and **trip threshold** both change behaviour rather than
+   geofencing. Overtime grace sets how far past an employee's required hours a day
+   has to run before it is reported to the owner — it does not shrink or forgive the
+   reported overrun, only whether small ones get reported at all. Trip threshold sets
+   when an open trip is flagged `over_threshold` and alerted (`tripThreshold` job).
+   Radius and max GPS accuracy are the geofencing fields — they decide whether a punch
+   or trip is accepted at all, not what gets reported afterward.
 4. Payroll is unaffected — payout uses branches only for filtering.
 
 ### Rotate `JWT_SECRET`

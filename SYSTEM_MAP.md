@@ -42,10 +42,13 @@ check `/api/health`'s `uptime_s` if in doubt.
   self-service password change.
 - **Admin protection**: the admin account cannot be created via the app, promoted/demoted,
   or deactivated (fail-closed with 403). `password_hash` is never returned to the client.
-- Session TTL: employee 120 min; driver session stays alive the whole time they are
-  checked in and expires 30 min after checkout (a driver with no open punch falls back
-  to the 120 min employee TTL). `mustChangePassword` is returned when the password
-  equals the seed default `change-me`.
+- Session TTL: employee 120 min; a driver checked in at login gets 12h (720 min,
+  `SESSION_TTL_DRIVER_CHECKED_IN_MIN`), comfortably outlasting any real shift; a driver
+  not checked in gets the standard 120 min. **This is not a rolling session** — nothing
+  in the app ever calls `POST /api/auth/refresh` (it exists and works, but no client code
+  invokes it), so the expiry is computed once at login and is final for that token; it does
+  not extend as the driver keeps working. `mustChangePassword` is returned when the
+  password equals the seed default `change-me`.
 
 ---
 
@@ -267,9 +270,14 @@ indistinguishable from a button that does nothing, which is exactly how this fai
 | **Advance** | Approve · Reject | Approve deducts from this month's pay. |
 | **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`; for `HOURS_CHANGE`, the requested hours are **subtracted** from that weekday's scheduled hours (floored at 0). The row shows the requested hours so the admin is not approving blind. |
 
-Every irreversible action (Reject, Revoke) is **two-step**: the first tap arms the button,
-the second commits. The decision endpoints answer `ALREADY_DECIDED` forever after, so a
-misclick could not otherwise be undone.
+Every irreversible action (Reject, Revoke) is **two-step** in the UI: the first tap arms
+the button, the second commits — guarding against a misclick on any of these rows. The
+backing mechanics differ, though: **Advance** and **Leave** decisions are one-shot — their
+endpoints answer `ALREADY_DECIDED` on any second call, so a misclick truly cannot be undone
+from here. **Penalty** (`penalties/waive`) and **Overtime** (`overtime/decision`) are plain
+upserts with no such lock — a fresh API call can still flip either one — but neither offers
+a UI path back once the item drops off the attention queue, so in practice all four are
+equally final from the dashboard.
 
 ---
 
