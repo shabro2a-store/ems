@@ -17,9 +17,27 @@ Build first, migrate second, swap last. `migrate deploy` is a no-op when the pul
 added no migration, so this order is always safe to run. It matters because the
 new image's code expects the new columns: bringing the containers up *before*
 migrating serves requests against a database that is still on the old schema, and
-those requests fail for as long as the migration takes. Migrations here are
+those requests fail for as long as the migration takes. Most migrations here are
 additive (new nullable columns and tables), so applying them while the old
-containers are still serving is harmless.
+containers are still serving is harmless — **the migration in this release is not
+one of those.**
+
+**This deploy's migration is destructive, and the order above is load-bearing, not
+just good practice.** It drops `Schedule`/`ScheduleOverride`/`LeaveRequest`'s old
+`start_time`/`end_time` columns and retires the `LATE`, `EARLY_LEAVE` and
+`TIME_CHANGE` enum values for good (Postgres can only replace an enum type, not
+trim one value out of it). The new image's Prisma client no longer has those
+values in its generated types at all. If the new containers ever serve traffic
+*before* `prisma migrate deploy` has run, every read that touches a
+`PenaltyWaiver`, `PenaltyAck`, `ScheduleOverride` or `LeaveRequest` row still
+carrying one of the retired values throws a Prisma enum-deserialisation error —
+and unlike the additive case above, that does not clear up once the migration
+finishes; it keeps failing on that data until it runs. Run the four commands in
+the order given; do not let `docker compose up -d` happen ahead of the migrate
+step. The same migration also **permanently deletes** every `PenaltyWaiver` and
+`PenaltyAck` row referencing the retired kinds — irreversible without a restore.
+Take a backup first if you want the option to go back (`scripts/backup.sh`; see
+[RUNBOOK.md](RUNBOOK.md) §3).
 
 First build takes ~3–5 min. The Postgres volume persists, so no data loss.
 
@@ -129,6 +147,8 @@ accuracy** and/or radius via Edit.
 - [ ] `ENABLE_DEV_ENDPOINTS=false`
 - [ ] Owner password changed from `change-me`
 - [ ] Each branch's location recorded on-site
+- [ ] Each employee's weekly shift hours set (a weekday left unset means any work
+      that day counts as overtime, not a shortfall)
 - [ ] Cloudflare Access removed/bypassed (or every user's email whitelisted)
 - [ ] One active **CALLER** account per branch — drivers cannot start a trip
       without a ring, so a branch with no caller cannot dispatch at all

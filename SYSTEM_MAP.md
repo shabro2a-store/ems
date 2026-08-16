@@ -42,8 +42,10 @@ check `/api/health`'s `uptime_s` if in doubt.
   self-service password change.
 - **Admin protection**: the admin account cannot be created via the app, promoted/demoted,
   or deactivated (fail-closed with 403). `password_hash` is never returned to the client.
-- Session TTL: employee 120 min; driver 30 min after scheduled end. `mustChangePassword`
-  is returned when the password equals the seed default `change-me`.
+- Session TTL: employee 120 min; driver session stays alive the whole time they are
+  checked in and expires 30 min after checkout (a driver with no open punch falls back
+  to the 120 min employee TTL). `mustChangePassword` is returned when the password
+  equals the seed default `change-me`.
 
 ---
 
@@ -53,7 +55,7 @@ cuid PKs, money = Int cents.
 
 - **User** — username(unique), **name?** (display), password_hash, role, branch_id?,
   hourly_rate_cent, is_active, telegram_chat_id?, notify_daily_summary, notify_routine_pings.
-- **Branch** — name, lat, lng, gps_radius_m(50), gps_accuracy_max_m(100), absent_grace_min(15),
+- **Branch** — name, lat, lng, gps_radius_m(50), gps_accuracy_max_m(100), overtime_grace_min(15),
   trip_threshold_min(30), is_active.
 - **Punch** — user, branch, kind(IN/OUT), at, evidence(lat/lng/accuracy_m/device_fp/ip),
   correction(corrected/corrected_by/correction_reason). Indexed by (user,at),(branch,at).
@@ -77,6 +79,10 @@ cuid PKs, money = Int cents.
 - **PenaltyAck** — (user, date, kind) unique. The admin saw an auto-penalty and let it
   stand. Changes **no money** — it exists only so the attention queue stops recomputing a
   penalty the admin has already reviewed. Waiver = revoked; ack = reviewed and upheld.
+- **OvertimeDecision** — (user, date) unique, `decision` ACCEPTED/REVOKED. Mirrors the
+  waiver/ack pattern: no row means pending, and pending overtime is **already paid** —
+  every worked minute is paid regardless of `shift_min`. `ACCEPTED` changes no money,
+  just clears the notice; `REVOKED` deducts that day's excess from payroll.
 - **Flag** — kind(WATCHED / MISSED_CHECKOUT / TRIP_OVER_THRESHOLD), user?, branch?, context_json,
   **notified_at?** (an alert was sent) and **resolved_at?** (a human dealt with it: admin
   dismissed, or the employee punched and auto-cleared it). Keeping them separate matters —
@@ -120,6 +126,8 @@ Full request/response detail is in [API.md](API.md). Summary:
 - Penalties: `GET penalties?userId&month` (computed list + waived flag) · `POST penalties/waive`
   (remove/restore one auto-penalty; never touches adjustments) · `POST penalties/ack`
   (uphold one; clears it from the attention queue without changing pay).
+- Overtime: `POST overtime/decision` (upserts one `OvertimeDecision` row per user/date;
+  `ACCEPTED` upholds and changes no money, `REVOKED` deducts that day's excess from payroll).
 - Flags: `POST flags/[id]/resolve`.
 - Telegram: `GET telegram/code` (the 6-digit bind code + whether a bot/chat is configured).
 
@@ -131,14 +139,22 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 - **Payroll (`payout.ts`)**: pairs each IN with next OUT; `minutes = floor((out-in)/60000)`;
   interval gross = `floor(minutes * rate_at_shift / 60)` (respects RateChange history). Open
-  session pays nothing. `net = gross + Σadjustments − ΣapprovedAdvances(month) − Σpenalties(month)`.
-  Can go negative.
+  session pays nothing. `net = gross + Σadjustments − ΣapprovedAdvances(month) − Σpenalties(month)
+  − ΣrevokedOvertime(month)`. Can go negative.
 - **Penalties (`penalty.ts`)**: covering fewer minutes than the day required (SHORTFALL), docked
   from pay. `penaltyHours = min(4, floor(shortfallMinutes / 15))` — under 15 min short is free
   (grace), then 1 hour per 15-min block, capped at 4h. Measured from the day's covered minutes vs
   the employee's `shift_min` (respecting overrides; DAY_OFF and unscheduled days are skipped;
   unclosed days are skipped until the missing punch is corrected). Computed on the fly (not
   stored); an admin **waiver** removes one. Penalty amount = hours × rate-at-shift.
+- **Overtime (`overtime.ts`)**: covering more than the day required by more than the branch's
+  `overtime_grace_min` (default 15) raises a notice — the same `DayCoverage` as a shortfall,
+  just `deltaMin` positive past the grace instead of negative. The grace only decides whether
+  the owner is told; a reported overrun is reported in full, never grace-trimmed. Every worked
+  minute is already paid by `payout.ts` regardless of `shift_min`, so a pending notice changes
+  no money: an admin **Accept** just clears it (writes an `OvertimeDecision`, no money moves);
+  **Revoke** deducts that day's excess (`overtimeMin * rate / 60`) from payroll. A day with 0
+  required hours (unscheduled, or a `DAY_OFF` override) makes every worked minute overtime.
 - **Day-offs never block punching** — an approved DAY_OFF suppresses "absent" alerts and shows
   the person as off, but staff may still clock in to help during a rush.
 - **No clock windows**: a shift is a number of hours, not a start/end time, so an employee may
@@ -186,8 +202,8 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 | Schedule | Job | Does |
 |---|---|---|
-| every 1 min | watchedDetector | Flags scheduled employees with no punch 30 min after shift start (WATCHED flag) |
-| every 1 min | missedCheckout | Still clocked in 35 min past shift end → MISSED_CHECKOUT flag + notify |
+| 00:10 daily | watchedDetector | Judges the Beirut day that just closed: scheduled (`shift_min > 0`), no `DAY_OFF` override, zero punches that day → WATCHED flag (absence notice, no automatic penalty) |
+| every 1 min | missedCheckout | Open check-in whose elapsed time exceeds `shift_min` + the branch's overtime grace → MISSED_CHECKOUT flag + notify |
 | every 1 min | tripThreshold | Open trip past branch threshold → set over_threshold + notify |
 | every 30 min | driverStale | Trip open ≥ 4h → notify |
 | 23:30 daily | endOfDayWatcher | Unresolved WATCHED flags → notify + close |
@@ -239,16 +255,17 @@ an "Open in app" deep link) — all actions happen in the web app.
 
 ### Needs attention (the admin's work queue)
 
-Five row types. Every action reports what it changed — a row that merely vanishes is
+Six row types. Every action reports what it changed — a row that merely vanishes is
 indistinguishable from a button that does nothing, which is exactly how this failed before.
 
 | Row | Actions | What they do |
 |---|---|---|
 | **Late** driver | none | Informational; clears itself when the driver presses Back. |
-| **Flag** | Dismiss (+ Fix punch) | Dismiss is an acknowledgement only — no record changes. `MISSED_CHECKOUT` also links to `/admin/punches`, where the punch can actually be corrected. |
+| **Flag** | Dismiss (+ Fix punch) | Dismiss is an acknowledgement only — no record changes. `MISSED_CHECKOUT` also links to `/admin/punches`, where the punch can actually be corrected. Absence (`WATCHED`) surfaces here too — notice only, no automatic penalty. |
 | **Penalty** | Accept · Revoke | Accept upholds (no money moves); Revoke waives and returns the money. |
+| **Overtime** | Accept · Revoke | Already paid either way — Accept leaves it that way; Revoke deducts that day's excess from payroll. |
 | **Advance** | Approve · Reject | Approve deducts from this month's pay. |
-| **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`, **new hours for `HOURS_CHANGE`**. The row shows the requested hours so the admin is not approving blind. |
+| **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`; for `HOURS_CHANGE`, the requested hours are **subtracted** from that weekday's scheduled hours (floored at 0). The row shows the requested hours so the admin is not approving blind. |
 
 Every irreversible action (Reject, Revoke) is **two-step**: the first tap arms the button,
 the second commits. The decision endpoints answer `ALREADY_DECIDED` forever after, so a

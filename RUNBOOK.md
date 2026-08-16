@@ -49,8 +49,25 @@ pnpm -r typecheck                 # typecheck entire monorepo
 pnpm -r test                      # unit + HTTP integration tests
 ```
 The integration tests hit a live server at `TEST_BASE_URL`
-(default `http://127.0.0.1:3000`) and need a reachable Postgres. To run only the
-standalone unit tests:
+(default `http://127.0.0.1:3000`) and need a reachable Postgres.
+
+**The server itself needs `DATABASE_URL` and `JWT_SECRET` in its own process to
+boot** — a root `.env` (matching `.env.example`) is the project's convention, and
+test-helper code loads it automatically, but `next dev`/`next build`/`next start`
+run with their cwd inside `apps/web` (that is where `pnpm --filter web ...`
+executes the script), and Next's own `.env` loader only checks that directory. A
+root `.env` sitting there is silently ignored by the running server. Export the
+variables into the shell that starts the server, e.g. from the repo root:
+```bash
+set -a; source .env; set +a
+pnpm --filter web dev   # or build && start, for the integration-test flow
+```
+or copy `.env` into `apps/web/.env` so Next picks it up itself. Skip this and the
+HTTP integration suite fails across most of its files with a misleading `login
+failed: 500` — the real cause, visible only in the server's own log output, is
+`JWT_SECRET missing or too short`.
+
+To run only the standalone unit tests:
 ```bash
 pnpm --filter web exec vitest run --exclude "**/*.integration.test.ts"
 ```
@@ -71,7 +88,18 @@ docker compose up -d
 ```
 
 Build first, migrate second, swap last. `migrate deploy` is a no-op when the pull
-added no migration, so this order is always safe.
+added no migration, so this order is always safe — **for this release specifically
+it is required, not just good practice.** The migration drops the old schedule
+`start_time`/`end_time` columns and retires the `LATE`, `EARLY_LEAVE` and
+`TIME_CHANGE` enum values; the new image's Prisma client no longer recognises
+those values at all. If the new containers serve traffic before `prisma migrate
+deploy` runs, every read touching a `PenaltyWaiver`, `PenaltyAck`,
+`ScheduleOverride` or `LeaveRequest` row still carrying a retired value throws a
+Prisma enum-deserialisation error, and it keeps failing until the migration runs —
+do not run `docker compose up -d` ahead of the migrate step above. The same
+migration also permanently deletes every `PenaltyWaiver`/`PenaltyAck` row
+referencing the retired kinds; take a backup first (§3 below) if you want the
+option to go back. See [DEPLOY.md](DEPLOY.md) for the full explanation.
 
 Verify the swap actually happened — `uptime_s` should be near zero:
 
@@ -164,12 +192,18 @@ Run once on the VPS after first deploy:
 ## 5. Common ops
 
 ### Add a new branch
-1. Owner adds via `https://app.shabro2a.com/admin/branches` → fill lat/lng, radius
-   (default 50m), trip threshold.
+1. Owner adds via `https://app.shabro2a.com/admin/branches` → **＋ Add branch**,
+   name it. Radius, max GPS accuracy, overtime grace and trip threshold all start
+   at defaults (50m / 100m / 15 min / 30 min) — open **Edit** right after to change
+   any of them for this branch.
 2. **Record the GPS on-site.** A new branch defaults to 0,0 and nobody can punch
    until its location is recorded: on a phone, standing at the branch, open
    Branches → the branch → **📍 Record location**.
-3. Payroll is unaffected — payout uses branches only for filtering.
+3. **Overtime grace** is the one branch field that changes behaviour rather than
+   geofencing: it sets how far past an employee's required hours a day has to run
+   before it is reported to the owner. It does not shrink or forgive the reported
+   overrun — only whether small ones get reported at all.
+4. Payroll is unaffected — payout uses branches only for filtering.
 
 ### Rotate `JWT_SECRET`
 - **All users get logged out.** Edit `/opt/ems/.env`, then `docker compose up -d`
@@ -209,6 +243,15 @@ docker compose exec web env | grep -E 'VAPID|TELEGRAM|SENTRY|ENABLE_DEV'
 | Sentry alert: spike of `INVALID_INPUT` | Schema drift between client + server | Verify both are on the latest `master` |
 | Drivers stop receiving the ring on locked phones | `VAPID_*` keys missing from the container, or rolled | `docker compose exec web env \| grep VAPID`; if rolled, each driver re-taps **Enable** |
 | `/admin/punches` empty | Genuine fault — this page is backed by `/api/admin/punches` and should show history | Check `docker compose logs web` for the API error; verify the branch/date filters aren't excluding everything |
+
+**A single `DB_SLOW` right after a deploy or restart?** The connection pool is cold
+on the first query of a new process — one observed run measured 134ms against the
+50ms limit, then 1-12ms on every call right after. This is separate from the
+`/api/health` check the production checklist asks for (that one only reports
+uptime, never touches the DB) — if you also check `/api/health/db` right after a
+deploy, as is natural, re-run it a few seconds later before treating a `DB_SLOW`
+as real. Only one that persists across repeated checks is worth chasing as actual
+Postgres load or disk trouble.
 
 **No Sentry alerts at all?** Sentry only initialises when both `SENTRY_DSN` is set
 *and* `NODE_ENV=production`. Confirm with

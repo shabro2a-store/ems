@@ -116,16 +116,22 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **GET /api/admin/overview?branchId=all|<id>** → live KPIs + per-employee status +
   attention queue: `{ branches, branchId, kpis{ present, absent, driversOut,
   driversOver, tripsToday, hoursToday, laborTodayCent }, people[] (drivers include
-  trips_today), attention{ lateDrivers, flags, penalties, pendingAdvances,
+  trips_today), attention{ lateDrivers, flags, penalties, overtime, pendingAdvances,
   pendingLeaves } }`.
   - `penalties[]` — `{ user_id, username, date, kind: SHORTFALL, minutes, hours,
     amount_cent }`. Computed on the fly, last 7 days, excluding any already waived or
     acknowledged. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
+  - `overtime[]` — `{ user_id, username, date, overtimeMin, amount_cent }`. Same
+    on-the-fly computation and 7-day lookback as `penalties[]`; only days past the
+    branch's overtime grace with no decision yet appear. Resolved with
+    `overtime/decision` (see below).
   - `pendingLeaves[]` includes `off_min` — an `HOURS_CHANGE` cannot be reviewed
     without the hours being requested.
-  - `flags[]` includes a rendered **`reason`** ("No punch in — their shift started at
-    09:00, 45m ago"), built server-side from `context_json`. Only unresolved flags appear
-    (`resolved_at IS NULL`); being alerted about one does not remove it from the queue.
+  - `flags[]` includes a rendered **`reason`** built server-side from `context_json` —
+    e.g. "No punch at all - they were scheduled 8h." for `WATCHED`, or "Still clocked
+    in past their 8h shift, 1h 20m over. Overtime, or forgot to punch out?" for
+    `MISSED_CHECKOUT`. Only unresolved flags appear (`resolved_at IS NULL`); being
+    alerted about one does not remove it from the queue.
 - **GET /api/admin/activity?branchId=&limit=** → `{ events: [{ id, type, username, at }] }`
   (punches + trips, newest first).
 - **GET /api/admin/trends?branchId=&days=** → `{ points: [{ date, label, present, hours }] }`.
@@ -155,7 +161,7 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 ### Branches
 - **GET /api/admin/branches** → `{ branches: [...] }`.
 - **POST /api/admin/branches** *(CSRF)* `{ name, lat?, lng?, gpsRadiusM?,
-  gpsAccuracyMaxM?, absentGraceMin?, tripThresholdMin? }` → `{ branch }`.
+  gpsAccuracyMaxM?, overtimeGraceMin?, tripThresholdMin? }` → `{ branch }`.
 - **PATCH /api/admin/branches/[id]** *(CSRF)* any of the above fields + `isActive`.
 - **DELETE /api/admin/branches/[id]** *(CSRF)* → `{ deleted, archived }`. Hard-deletes
   an empty branch; archives (is_active=false) one that has staff/punch/trip history.

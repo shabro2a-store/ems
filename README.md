@@ -5,7 +5,7 @@ in/out, driver trips, monthly payroll (money in integer cents), leave/day-off
 scheduling, cash advances, and a Telegram-notifying background worker.
 
 - **Admin** (owner): live operations dashboard with a **Needs attention** work queue
-  (penalties, flags, advance and leave requests — each action reports what it changed),
+  (shortfalls, overtime, flags, advance and leave requests — each action reports what it changed),
   employees + weekly schedules, branches + GPS geofences, punch log + corrections,
   payroll + PDF export.
 - **Employee / Driver** (phone): one-tap geofenced check in/out or trip out/back,
@@ -49,7 +49,13 @@ pnpm -r typecheck
 pnpm -r test        # unit tests + HTTP integration tests
 ```
 The HTTP integration tests need the web app running at `TEST_BASE_URL`
-(default `http://127.0.0.1:3000`) and a reachable Postgres. See `.github/workflows/ci.yml`.
+(default `http://127.0.0.1:3000`) and a reachable Postgres. The web server itself needs
+`DATABASE_URL`/`JWT_SECRET` in its own process to boot — a root `.env` is not enough on
+its own, since `next start`/`next dev` run with their cwd inside `apps/web` and never
+load it automatically. See RUNBOOK.md §1 for how to get it there; skipping this fails
+most of the suite with a misleading `login failed: 500` (the real cause is `JWT_SECRET
+missing or too short`). See `.github/workflows/ci.yml` for how CI does it — env vars set
+at the job level, so every step inherits them.
 
 ## Layout
 ```
