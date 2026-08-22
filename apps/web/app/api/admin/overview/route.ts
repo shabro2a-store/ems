@@ -4,11 +4,16 @@ import { prisma } from '@/lib/db/prisma';
 import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
 import { pendingOvertimeNotices } from '@/lib/services/overtime';
-import { requiredMinFor } from '@/lib/services/coverage';
+import { requiredMinFor, currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
 import { lookbackMonths, mergeNotices } from '@/lib/services/noticeWindow';
 
 // How far back the penalty review queue looks. Older ones are a payroll matter.
 const PENALTY_LOOKBACK_DAYS = 7;
+
+// A shift belongs to the Beirut day it started, so today's window alone cannot
+// see the arrival of someone who came in at 21:00 yesterday and is still here.
+// Two days is far more than any real shift and cheaper than being clever.
+const PUNCH_LOOKBACK_DAYS = 2;
 
 // A flag row that only names its kind ("watched") tells the admin nothing about
 // why the system raised it. The detail is already in context_json — this turns it
@@ -39,25 +44,6 @@ function flagReason(kind: string, ctx: unknown): string {
 
 type Status = 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT';
 
-function pairMinutes(
-  punches: { kind: string; at: Date }[],
-  now: number,
-): { minutes: number; openInAt: Date | null } {
-  const sorted = [...punches].sort((a, b) => a.at.getTime() - b.at.getTime());
-  let total = 0;
-  let openIn: Date | null = null;
-  for (const p of sorted) {
-    if (p.kind === 'IN') {
-      if (!openIn) openIn = p.at;
-    } else if (openIn) {
-      total += Math.max(0, Math.floor((p.at.getTime() - openIn.getTime()) / 60_000));
-      openIn = null;
-    }
-  }
-  if (openIn) total += Math.max(0, Math.floor((now - openIn.getTime()) / 60_000));
-  return { minutes: total, openInAt: openIn };
-}
-
 export async function GET(req: Request) {
   const h = headers();
   if (h.get('x-user-role') !== 'ADMIN') {
@@ -73,12 +59,14 @@ export async function GET(req: Request) {
   const { startUtc, endUtc } = todayInBeirutDateRange(todayStr);
   const dateOnly = new Date(`${todayStr}T00:00:00.000Z`);
   const todayWeekday = beirutWeekday(new Date());
-  const now = Date.now();
+  const nowDate = new Date();
+  const now = nowDate.getTime();
+  const punchesFromUtc = new Date(startUtc.getTime() - PUNCH_LOOKBACK_DAYS * 86_400_000);
 
   const [
     branches,
     users,
-    todayPunches,
+    recentPunches,
     openTrips,
     todayOverrides,
     todaySchedules,
@@ -97,7 +85,7 @@ export async function GET(req: Request) {
         select: { id: true, username: true, name: true, role: true, branch_id: true, hourly_rate_cent: true },
       }),
       prisma.punch.findMany({
-        where: { at: { gte: startUtc, lt: endUtc } },
+        where: { at: { gte: punchesFromUtc, lt: endUtc } },
         select: { user_id: true, kind: true, at: true },
       }),
       prisma.trip.findMany({
@@ -151,8 +139,8 @@ export async function GET(req: Request) {
   const tripsTodayByDriver = new Map(tripsTodayAgg.map((t) => [t.driver_id, t._count._all]));
 
   const branchName = new Map(branches.map((b) => [b.id, b.name]));
-  const punchesByUser = new Map<string, { kind: string; at: Date }[]>();
-  for (const p of todayPunches) {
+  const punchesByUser = new Map<string, PunchLite[]>();
+  for (const p of recentPunches) {
     const list = punchesByUser.get(p.user_id) ?? [];
     list.push({ kind: p.kind, at: p.at });
     punchesByUser.set(p.user_id, list);
@@ -172,7 +160,10 @@ export async function GET(req: Request) {
     .filter((u) => inScope(u.branch_id))
     .map((u) => {
       const trip = u.role === 'DRIVER' ? openTripByDriver.get(u.id) : undefined;
-      const { minutes, openInAt } = pairMinutes(punchesByUser.get(u.id) ?? [], now);
+      const { minutes, openInAt } = currentShiftDayMinutes({
+        punches: punchesByUser.get(u.id) ?? [],
+        now: nowDate,
+      });
       hoursMinutes += minutes;
       laborCent += Math.floor((minutes * u.hourly_rate_cent) / 60);
 

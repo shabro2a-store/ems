@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCoverage, type PunchLite } from './coverage';
+import { computeCoverage, currentShiftDayMinutes, type PunchLite } from './coverage';
 
 const utc = (iso: string) => new Date(iso);
 // 2026-08-17 is a Monday in Beirut (UTC+3 in August).
@@ -87,5 +87,63 @@ describe('computeCoverage', () => {
       overridesByDate: new Map(),
     });
     expect(out).toHaveLength(0);
+  });
+});
+
+describe('currentShiftDayMinutes', () => {
+  it('keeps an overnight shift on its arrival day past midnight', () => {
+    // 21:00 Mon Beirut = 18:00Z Mon. It is now 00:30 Tue Beirut = 21:30Z Mon.
+    // Asking "which punches fall in today's calendar day" finds nothing here,
+    // which is how a 21:00-07:00 employee used to vanish from the board at
+    // midnight and read zero hours for the rest of the night.
+    const out = currentShiftDayMinutes({
+      punches: punches(['2026-08-17T18:00:00Z', 'IN']),
+      now: utc('2026-08-17T21:30:00Z'),
+    });
+    expect(out.date).toBe('2026-08-17');
+    expect(out.minutes).toBe(210);
+    expect(out.openInAt).toEqual(utc('2026-08-17T18:00:00Z'));
+  });
+
+  it('adds a second session to the first instead of replacing it', () => {
+    // In at 10:00 Beirut, out at 10:05, straight back in, now 11:55. Time since
+    // the latest arrival is 110 minutes; the day is 115.
+    const out = currentShiftDayMinutes({
+      punches: punches(
+        ['2026-08-17T07:00:00Z', 'IN'],
+        ['2026-08-17T07:05:00Z', 'OUT'],
+        ['2026-08-17T07:05:00Z', 'IN'],
+      ),
+      now: utc('2026-08-17T08:55:00Z'),
+    });
+    expect(out.minutes).toBe(115);
+    expect(out.date).toBe('2026-08-17');
+  });
+
+  it('counts a finished day up to its last checkout, not to now', () => {
+    const out = currentShiftDayMinutes({
+      punches: punches(['2026-08-17T07:00:00Z', 'IN'], ['2026-08-17T11:00:00Z', 'OUT']),
+      now: utc('2026-08-17T14:00:00Z'),
+    });
+    expect(out.minutes).toBe(240);
+    expect(out.openInAt).toBeNull();
+  });
+
+  it('falls back to today when nothing is open', () => {
+    const out = currentShiftDayMinutes({ punches: [], now: utc('2026-08-17T21:30:00Z') });
+    expect(out.date).toBe('2026-08-18'); // 00:30 Tue in Beirut
+    expect(out.minutes).toBe(0);
+    expect(out.openInAt).toBeNull();
+  });
+
+  it('does not count yesterday\'s finished shift towards today', () => {
+    // The overnight shift closed at 07:00 Tue but belongs to Mon, so Tuesday
+    // starts from zero - the same attribution computeCoverage makes.
+    const out = currentShiftDayMinutes({
+      punches: punches(['2026-08-17T18:00:00Z', 'IN'], ['2026-08-18T04:00:00Z', 'OUT']),
+      now: utc('2026-08-18T05:00:00Z'), // 08:00 Tue Beirut
+    });
+    expect(out.date).toBe('2026-08-18');
+    expect(out.minutes).toBe(0);
   });
 });

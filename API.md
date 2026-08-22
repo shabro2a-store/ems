@@ -138,6 +138,12 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     minutes — a `DAY_OFF` override, an `HOURS_CHANGE` override for the whole
     shift, or a weekday with no hours set — and only `ABSENT` when hours were
     owed and no punch exists. Same resolution payroll uses (`requiredMinFor`).
+  - `people[].hours_today` and `kpis.hoursToday` are the **current shift-day**, not
+    today's calendar rows: a shift belongs to the Beirut day it started, so an
+    employee who arrived at 21:00 stays present with a rising total past midnight
+    (`currentShiftDayMinutes`). Punches are queried two days back so the previous
+    day's arrival is visible; work that closed on an earlier shift-day is not
+    counted towards this one.
   - `pendingLeaves[]` includes `off_min` — an `HOURS_CHANGE` cannot be reviewed
     without the hours being requested.
   - `flags[]` includes a rendered **`reason`** built server-side from `context_json` —

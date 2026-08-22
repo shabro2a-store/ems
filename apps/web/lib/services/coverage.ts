@@ -101,3 +101,43 @@ export function computeCoverage(args: {
   days.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return days;
 }
+
+export interface ShiftDayMinutes {
+  date: string; // YYYY-MM-DD (Beirut) - the shift-day these minutes belong to
+  minutes: number;
+  openInAt: Date | null; // the arrival still waiting for a checkout, if any
+}
+
+/**
+ * How many minutes this user has worked on the shift-day they are currently on.
+ *
+ * The shift-day is the Beirut day of their open arrival if they have one, else
+ * today - the same "a shift belongs to the day it started" rule computeCoverage
+ * applies, rather than "rows whose timestamp lands in today's calendar day".
+ * That is what keeps a 21:00-07:00 shift counting past midnight instead of
+ * vanishing at it, and what makes a second session add to the first rather than
+ * replace it.
+ *
+ * Callers must query punches far enough back to include a previous-day arrival.
+ */
+export function currentShiftDayMinutes(args: { punches: PunchLite[]; now: Date }): ShiftDayMinutes {
+  const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  const closedByDate = new Map<string, number>();
+  let openIn: Date | null = null;
+  for (const p of sorted) {
+    if (p.kind === 'IN') {
+      if (!openIn) openIn = p.at;
+      continue;
+    }
+    if (!openIn) continue; // checkout with no arrival - ignore, as payout does
+    const date = inBeirut(openIn).date;
+    const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.getTime()) / 60_000));
+    closedByDate.set(date, (closedByDate.get(date) ?? 0) + minutes);
+    openIn = null;
+  }
+
+  const date = inBeirut(openIn ?? args.now).date;
+  const openMin = openIn ? Math.max(0, Math.floor((args.now.getTime() - openIn.getTime()) / 60_000)) : 0;
+  return { date, minutes: (closedByDate.get(date) ?? 0) + openMin, openInAt: openIn };
+}

@@ -181,6 +181,13 @@ Full request/response detail is in [API.md](API.md). Summary:
   predating the column) is stale for the same reason. Erring towards paying the employee for
   hours nobody has reviewed is deliberate: without it, one `@@unique([user_id, date])` row
   revoked against 120 minutes silently expanded to deduct a later 300.
+- **One answer to "how long have they worked today"** (`currentShiftDayMinutes` in
+  `coverage.ts`): the current shift-day is the Beirut day of the employee's open arrival,
+  or today when nothing is open; its minutes are every closed pair that *started* on that
+  day plus the open session counted to now. Same day attribution `computeCoverage` uses,
+  so a 21:00-07:00 shift keeps counting past midnight and a second session adds to the
+  first instead of restarting it. Read by the admin dashboard and `GET /api/me/today`,
+  both of which query punches two days back so a previous-day arrival is visible.
 - **One answer to "what did this day require"** (`requiredMinFor` in `coverage.ts`): a
   `DAY_OFF` override is 0, an `HOURS_CHANGE` override with an explicit `shift_min` beats the
   weekly pattern, otherwise the weekday's `Schedule.shift_min`, otherwise 0. Payroll, the
