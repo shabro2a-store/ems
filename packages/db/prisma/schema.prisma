@@ -286,6 +286,12 @@ model OvertimeDecision {
   user       User                 @relation(fields: [user_id], references: [id])
   date       DateTime             @db.Date
   decision   OvertimeDecisionKind
+  // The day's overtime minutes at the moment the owner ruled. One row per
+  // calendar day, but the day's overtime can grow after the ruling, so the
+  // ruling has to name the amount it was made against: a decision only counts
+  // while this still equals the day's current overtime. Null is treated as
+  // stale, which is what makes any pre-column row harmless without a backfill.
+  overtime_min Int?
   reason     String?
   decided_by String
   created_at DateTime             @default(now())

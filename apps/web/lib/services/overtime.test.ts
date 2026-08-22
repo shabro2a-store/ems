@@ -98,9 +98,44 @@ describe('computeOvertime', () => {
       coverage: [day({ deltaMin: 60 })],
       rateChanges: RATE,
       graceMin: 15,
-      decisionsByDate: new Map([['2026-08-17', 'REVOKED']]),
+      decisionsByDate: new Map([['2026-08-17', { decision: 'REVOKED', overtime_min: 60 }]]),
     });
     expect(items[0]!.decision).toBe('REVOKED');
+  });
+
+  it('drops a decision once the day it was made against has grown', () => {
+    // The owner ruled on 120 minutes. The day is now 300. The ruling covers the
+    // day as it stood, so it no longer applies and the day reads as pending.
+    const items = computeOvertime({
+      coverage: [day({ requiredMin: 480, workedMin: 780, deltaMin: 300 })],
+      rateChanges: RATE,
+      graceMin: 15,
+      decisionsByDate: new Map([['2026-08-17', { decision: 'REVOKED', overtime_min: 120 }]]),
+    });
+    expect(items[0]!.overtimeMin).toBe(300);
+    expect(items[0]!.decision).toBeNull();
+  });
+
+  it('drops a decision that shrank as well as one that grew', () => {
+    const items = computeOvertime({
+      coverage: [day({ deltaMin: 60 })],
+      rateChanges: RATE,
+      graceMin: 15,
+      decisionsByDate: new Map([['2026-08-17', { decision: 'ACCEPTED', overtime_min: 300 }]]),
+    });
+    expect(items[0]!.decision).toBeNull();
+  });
+
+  it('treats a decision with no recorded amount as stale', () => {
+    // Any row written before the column existed. Null is read as stale rather
+    // than backfilled, so it can only ever cost the owner, never the employee.
+    const items = computeOvertime({
+      coverage: [day({ deltaMin: 60 })],
+      rateChanges: RATE,
+      graceMin: 15,
+      decisionsByDate: new Map([['2026-08-17', { decision: 'REVOKED', overtime_min: null }]]),
+    });
+    expect(items[0]!.decision).toBeNull();
   });
 });
 
@@ -115,13 +150,42 @@ describe('sumRevokedOvertimeCent', () => {
       rateChanges: RATE,
       graceMin: 15,
       decisionsByDate: new Map([
-        ['2026-08-17', 'REVOKED'],
-        ['2026-08-19', 'ACCEPTED'],
+        ['2026-08-17', { decision: 'REVOKED', overtime_min: 60 }],
+        ['2026-08-19', { decision: 'ACCEPTED', overtime_min: 60 }],
       ]),
     });
     // 08-18 is pending (no entry) and 08-19 is ACCEPTED - neither is REVOKED, so
     // only 08-17's amount may count. This pins REVOKED as the sole trigger: a
     // decision !== null check would wrongly pull in the ACCEPTED day too.
     expect(sumRevokedOvertimeCent(items)).toBe(60_000);
+  });
+
+  it('deducts nothing for a revoked day whose overtime grew after the ruling', () => {
+    // The reported defect, in cents. 15 min grace, an 8h shift at $2.00/h.
+    // The owner saw 120 minutes over and revoked $4.00. Three more hours then
+    // landed on the same day, making it 300 minutes over. The one decision row
+    // is keyed by the day, so it used to expand to cover the new total and take
+    // $10.00 - money the owner never agreed to.
+    const rate = [{ rate_cent: 200, effective_from: new Date('2020-01-01T00:00:00Z') }];
+    const ruledAt120 = new Map([['2026-08-17', { decision: 'REVOKED' as const, overtime_min: 120 }]]);
+
+    const asRuled = computeOvertime({
+      coverage: [day({ requiredMin: 480, workedMin: 600, deltaMin: 120 })],
+      rateChanges: rate,
+      graceMin: 15,
+      decisionsByDate: ruledAt120,
+    });
+    expect(asRuled[0]!.amount_cent).toBe(400);
+    expect(sumRevokedOvertimeCent(asRuled)).toBe(400);
+
+    const afterMoreWork = computeOvertime({
+      coverage: [day({ requiredMin: 480, workedMin: 780, deltaMin: 300 })],
+      rateChanges: rate,
+      graceMin: 15,
+      decisionsByDate: ruledAt120,
+    });
+    expect(afterMoreWork[0]!.amount_cent).toBe(1000);
+    expect(sumRevokedOvertimeCent(afterMoreWork)).toBe(0);
+    expect(afterMoreWork[0]!.decision).toBeNull();
   });
 });

@@ -89,10 +89,13 @@ cuid PKs, money = Int cents.
 - **PenaltyAck** — (user, date, kind) unique. The admin saw an auto-penalty and let it
   stand. Changes **no money** — it exists only so the attention queue stops recomputing a
   penalty the admin has already reviewed. Waiver = revoked; ack = reviewed and upheld.
-- **OvertimeDecision** — (user, date) unique, `decision` ACCEPTED/REVOKED. Mirrors the
-  waiver/ack pattern: no row means pending, and pending overtime is **already paid** —
-  every worked minute is paid regardless of `shift_min`. `ACCEPTED` changes no money,
-  just clears the notice; `REVOKED` deducts that day's excess from payroll.
+- **OvertimeDecision** — (user, date) unique, `decision` ACCEPTED/REVOKED, plus
+  **`overtime_min?`** — the day's overtime at the moment the owner ruled, stamped
+  server-side. Mirrors the waiver/ack pattern: no row means pending, and pending
+  overtime is **already paid** — every worked minute is paid regardless of `shift_min`.
+  `ACCEPTED` changes no money, just clears the notice; `REVOKED` deducts that day's
+  excess from payroll. A decision only counts while `overtime_min` still equals the
+  day's current overtime — see "Stale overtime decisions" in §4.
 - **Flag** — kind(WATCHED / MISSED_CHECKOUT / TRIP_OVER_THRESHOLD), user?, branch?, context_json,
   **notified_at?** (an alert was sent) and **resolved_at?** (a human dealt with it: admin
   dismissed, or the employee punched and auto-cleared it). Keeping them separate matters —
@@ -169,6 +172,15 @@ Full request/response detail is in [API.md](API.md). Summary:
   A revoked day shows as its own line (`overtime_deduction_cent`) on both payroll screens,
   and **Undo** on the payroll screen's overtime modal deletes the decision row, putting the
   day back to pending and the money back in the employee's pay.
+- **Stale overtime decisions**: a decision applies to the day **as it stood when it was
+  made**. The row records `overtime_min` (stamped server-side from the day's coverage, never
+  accepted from the client), and it only counts while that still equals the day's current
+  overtime. Work added to a day the owner already ruled on makes the ruling stale: the day
+  reads as `decision: null` again — back on the attention queue at the full new amount, with
+  **nothing deducted** until the owner rules on that amount. A null `overtime_min` (any row
+  predating the column) is stale for the same reason. Erring towards paying the employee for
+  hours nobody has reviewed is deliberate: without it, one `@@unique([user_id, date])` row
+  revoked against 120 minutes silently expanded to deduct a later 300.
 - **One answer to "what did this day require"** (`requiredMinFor` in `coverage.ts`): a
   `DAY_OFF` override is 0, an `HOURS_CHANGE` override with an explicit `shift_min` beats the
   weekly pattern, otherwise the weekday's `Schedule.shift_min`, otherwise 0. Payroll, the

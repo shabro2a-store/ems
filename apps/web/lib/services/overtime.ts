@@ -15,6 +15,27 @@ export interface OvertimeItem {
   decision: 'ACCEPTED' | 'REVOKED' | null; // null means pending, and pending is paid
 }
 
+/** A stored ruling plus the overtime it was made against. */
+export interface DecisionLite {
+  decision: 'ACCEPTED' | 'REVOKED';
+  overtime_min: number | null;
+}
+
+/**
+ * A ruling applies to the day as it stood when it was made. One row per
+ * calendar day, but the day's overtime keeps moving as punches land, so a
+ * ruling made against 120 minutes must not silently expand to cover 300. When
+ * the figures disagree the ruling is stale and the day reads as pending again:
+ * back on the review queue at the full new amount, and nothing deducted until
+ * the owner rules on that amount. A null recorded figure predates the column
+ * and is stale for the same reason - erring towards paying the employee.
+ */
+function liveDecision(stored: DecisionLite | undefined, overtimeMin: number): 'ACCEPTED' | 'REVOKED' | null {
+  if (!stored) return null;
+  if (stored.overtime_min !== overtimeMin) return null;
+  return stored.decision;
+}
+
 /**
  * Days that ran past their required hours by more than the branch grace. The
  * grace only decides whether the owner is told; a reported overrun reports all
@@ -24,7 +45,7 @@ export function computeOvertime(args: {
   coverage: DayCoverage[];
   rateChanges: RateChangeLite[];
   graceMin: number;
-  decisionsByDate: Map<string, 'ACCEPTED' | 'REVOKED'>;
+  decisionsByDate: Map<string, DecisionLite>;
 }): OvertimeItem[] {
   const items: OvertimeItem[] = [];
   for (const day of args.coverage) {
@@ -36,7 +57,7 @@ export function computeOvertime(args: {
       overtimeMin: day.deltaMin,
       rate_cent: rate,
       amount_cent: Math.floor((day.deltaMin * rate) / 60),
-      decision: args.decisionsByDate.get(day.date) ?? null,
+      decision: liveDecision(args.decisionsByDate.get(day.date), day.deltaMin),
     });
   }
   items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -75,7 +96,7 @@ export async function overtimeForUser(
     }),
     db.overtimeDecision.findMany({
       where: { user_id: userId, date: { gte: start, lt: end } },
-      select: { date: true, decision: true },
+      select: { date: true, decision: true, overtime_min: true },
     }),
     db.user.findUnique({
       where: { id: userId },
@@ -95,8 +116,13 @@ export async function overtimeForUser(
     });
   }
 
-  const decisionsByDate = new Map<string, 'ACCEPTED' | 'REVOKED'>();
-  for (const d of decisions) decisionsByDate.set(d.date.toISOString().slice(0, 10), d.decision);
+  const decisionsByDate = new Map<string, DecisionLite>();
+  for (const d of decisions) {
+    decisionsByDate.set(d.date.toISOString().slice(0, 10), {
+      decision: d.decision,
+      overtime_min: d.overtime_min,
+    });
+  }
 
   const graceMin = user?.branch?.overtime_grace_min ?? 15;
 
@@ -120,6 +146,22 @@ export async function overtimeDeductionForUser(
 ): Promise<number> {
   const items = await overtimeForUser(userId, month, db);
   return sumRevokedOvertimeCent(items);
+}
+
+/**
+ * The day's overtime minutes as they stand right now, for stamping onto a
+ * decision. Computed here rather than taken from the caller: it is the figure
+ * that decides whether money moves, so the client must not get a say in it.
+ * A day with no overtime item (inside the grace, or still open) is zero, which
+ * never matches a real notice and so can never authorise a deduction.
+ */
+export async function overtimeMinForDay(
+  userId: string,
+  date: string,
+  db: PrismaClient,
+): Promise<number> {
+  const items = await overtimeForUser(userId, date.slice(0, 7), db);
+  return items.find((i) => i.date === date)?.overtimeMin ?? 0;
 }
 
 export interface OvertimeNotice extends OvertimeItem {
@@ -162,7 +204,7 @@ export async function pendingOvertimeNotices(
     }),
     db.overtimeDecision.findMany({
       where: { user_id: { in: ids }, date: { gte: start, lt: end } },
-      select: { user_id: true, date: true, decision: true },
+      select: { user_id: true, date: true, decision: true, overtime_min: true },
     }),
     db.user.findMany({
       where: { id: { in: ids } },
@@ -184,12 +226,13 @@ export async function pendingOvertimeNotices(
   const overridesBy = by(overrides);
   const ratesBy = by(rateChanges);
 
-  const decisionsByUser = new Map<string, Map<string, 'ACCEPTED' | 'REVOKED'>>();
+  const decisionsByUser = new Map<string, Map<string, DecisionLite>>();
   for (const d of decisions) {
     const dateKey = d.date.toISOString().slice(0, 10);
+    const lite: DecisionLite = { decision: d.decision, overtime_min: d.overtime_min };
     const forUser = decisionsByUser.get(d.user_id);
-    if (forUser) forUser.set(dateKey, d.decision);
-    else decisionsByUser.set(d.user_id, new Map([[dateKey, d.decision]]));
+    if (forUser) forUser.set(dateKey, lite);
+    else decisionsByUser.set(d.user_id, new Map([[dateKey, lite]]));
   }
 
   const graceByUser = new Map<string, number>();

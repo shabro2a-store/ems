@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
+import { overtimeMinForDay } from '@/lib/services/overtime';
 
 // The regex only checks shape. Round-tripping through a UTC Date catches a
 // string that is shaped like a date but names no real calendar day (e.g.
@@ -74,21 +75,38 @@ export async function POST(req: Request) {
       entity: 'OvertimeDecision',
       entityId: `${body.userId}:${body.date}`,
       before: existing
-        ? { user_id: body.userId, date: body.date, decision: existing.decision, reason: existing.reason }
+        ? {
+            user_id: body.userId,
+            date: body.date,
+            decision: existing.decision,
+            overtime_min: existing.overtime_min,
+            reason: existing.reason,
+          }
         : null,
       after: { user_id: body.userId, date: body.date, decision: null, reason: body.reason ?? null },
     });
   } else {
+    // Stamped server-side, never taken from the request: this is the figure a
+    // REVOKED decision deducts against, and a client that could name it could
+    // make an old ruling cover work the owner never saw.
+    const overtimeMin = await overtimeMinForDay(body.userId, body.date, prisma);
+
     await prisma.overtimeDecision.upsert({
       where: { user_id_date: { user_id: body.userId, date: dateOnly } },
       create: {
         user_id: body.userId,
         date: dateOnly,
         decision: body.decision,
+        overtime_min: overtimeMin,
         reason: body.reason ?? null,
         decided_by: adminId,
       },
-      update: { decision: body.decision, reason: body.reason ?? null, decided_by: adminId },
+      update: {
+        decision: body.decision,
+        overtime_min: overtimeMin,
+        reason: body.reason ?? null,
+        decided_by: adminId,
+      },
     });
 
     await writeAuditLog({
@@ -96,7 +114,13 @@ export async function POST(req: Request) {
       action: AUDIT_ACTION[body.decision],
       entity: 'OvertimeDecision',
       entityId: `${body.userId}:${body.date}`,
-      after: { user_id: body.userId, date: body.date, decision: body.decision, reason: body.reason ?? null },
+      after: {
+        user_id: body.userId,
+        date: body.date,
+        decision: body.decision,
+        overtime_min: overtimeMin,
+        reason: body.reason ?? null,
+      },
     });
   }
 

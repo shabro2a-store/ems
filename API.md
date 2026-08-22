@@ -127,8 +127,9 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     acknowledged. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
   - `overtime[]` — `{ user_id, username, date, overtimeMin, amount_cent }`. Same
     on-the-fly computation and 7-day lookback as `penalties[]`; only days past the
-    branch's overtime grace with no decision yet appear. Resolved with
-    `overtime/decision` (see below).
+    branch's overtime grace with no *live* decision yet appear — a decision whose
+    recorded minutes no longer match the day reads as pending and reappears here.
+    Resolved with `overtime/decision` (see below).
   - Both lists are loaded once per calendar month the 7-day lookback touches, so
     the window still reaches back over a month boundary. It matters most for
     overtime, where a day with no decision is already paid: a month-end overrun
@@ -236,6 +237,11 @@ so it surfaces in payroll only if revoked.
   `OvertimeDecisionKind` — the absence of a row *is* pending — so it **deletes** the
   row, returning the day to the queue and the money to the employee. Audited as
   `overtime.accepted` / `overtime.revoked` / `overtime.undecided`. → `{ decision }`.
+  The route also stamps the day's current overtime minutes onto the row, computed
+  **server-side** from that day's coverage — it is the figure a `REVOKED` decision
+  deducts against, so the body cannot name it. If the day's overtime later changes the
+  decision goes stale: `decision` reads `null` everywhere, the day returns to the
+  attention queue at the new amount, and nothing is deducted until the owner rules again.
 
 ### Flags
 - **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag
