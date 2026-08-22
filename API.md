@@ -167,6 +167,10 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **GET /api/admin/activity?branchId=&limit=** → `{ events: [{ id, type, username, at }] }`
   (punches + trips, newest first).
 - **GET /api/admin/trends?branchId=&days=** → `{ points: [{ date, label, present, hours }] }`.
+  The run of days comes from `beirutDateSeries`, and the query's lower bound from that run's
+  first day — both calendar-derived, so no day is repeated or skipped either side of a DST
+  change. Note this endpoint counts an open session up to `now` without the 30h
+  forgotten-checkout clamp the dashboard applies, so the two can disagree; see the report.
 - **GET /api/admin/now** → legacy presence snapshot `{ branches, flags }` (superseded by
   `overview`; kept only because integration tests still exercise it).
 

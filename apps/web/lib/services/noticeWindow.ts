@@ -1,3 +1,5 @@
+import { previousBeirutDate } from 'time';
+
 export interface DatedNotice {
   user_id: string;
   username: string;
@@ -53,4 +55,19 @@ export function mergeNotices<T extends DatedNotice>(batches: T[][]): T[] {
   return [...byUserDay.values()].sort((a, b) =>
     a.date === b.date ? a.username.localeCompare(b.username) : b.date.localeCompare(a.date),
   );
+}
+
+/**
+ * The last `days` Beirut dates ending on `endDate`, oldest first.
+ *
+ * Walks the calendar rather than stepping an instant back by 24h at a time. A
+ * Beirut day is 23 or 25 hours long twice a year, so the instant walk repeats
+ * one date and skips another: asked for a week ending 2026-03-30 it lists
+ * 2026-03-28 twice and never lists 2026-03-29. A caller keying a Map by date
+ * then collapses the duplicate and renders one bar as zero.
+ */
+export function beirutDateSeries(endDate: string, days: number): string[] {
+  const out: string[] = [endDate];
+  for (let i = 1; i < days; i++) out.push(previousBeirutDate(out[i - 1]!));
+  return out.reverse();
 }

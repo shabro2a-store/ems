@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lookbackMonths, mergeNotices, type DatedNotice } from './noticeWindow';
+import { beirutDateSeries, lookbackMonths, mergeNotices, type DatedNotice } from './noticeWindow';
 
 interface Notice extends DatedNotice {
   amount_cent: number;
@@ -62,5 +62,44 @@ describe('mergeNotices', () => {
 
   it('returns an empty list when no month produced anything', () => {
     expect(mergeNotices<Notice>([[], []])).toEqual([]);
+  });
+});
+
+describe('beirutDateSeries', () => {
+  it('lists the last N Beirut dates, oldest first, ending on the given day', () => {
+    expect(beirutDateSeries('2026-08-23', 4)).toEqual([
+      '2026-08-20',
+      '2026-08-21',
+      '2026-08-22',
+      '2026-08-23',
+    ]);
+    expect(beirutDateSeries('2026-08-23', 1)).toEqual(['2026-08-23']);
+  });
+
+  it('crosses a month boundary', () => {
+    expect(beirutDateSeries('2026-03-02', 3)).toEqual(['2026-02-28', '2026-03-01', '2026-03-02']);
+  });
+
+  it('neither repeats nor skips a day across either DST change', () => {
+    // The old instant walk (now - i*24h) listed 2026-03-28 twice and never
+    // listed 2026-03-29, and the duplicate collapsed in the caller's Map so one
+    // bar rendered zero.
+    const spring = beirutDateSeries('2026-03-30', 7);
+    expect(spring).toEqual([
+      '2026-03-24',
+      '2026-03-25',
+      '2026-03-26',
+      '2026-03-27',
+      '2026-03-28',
+      '2026-03-29',
+      '2026-03-30',
+    ]);
+
+    const autumn = beirutDateSeries('2026-10-26', 4);
+    expect(autumn).toEqual(['2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26']);
+
+    for (const series of [spring, autumn]) {
+      expect(new Set(series).size).toBe(series.length);
+    }
   });
 });

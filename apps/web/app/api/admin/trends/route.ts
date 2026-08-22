@@ -1,15 +1,12 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
+import { inBeirut, todayInBeirut, todayInBeirutDateRange } from 'time';
+import { beirutDateSeries } from '@/lib/services/noticeWindow';
 
 // Per-day trend for the dashboard chart: for each of the last N Beirut days,
 // how many distinct staff were present and how many hours were worked.
 // Branch-filterable via ?branchId=<id>.
-
-function beirutDate(d: Date): string {
-  // en-CA yields YYYY-MM-DD
-  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Beirut' });
-}
 
 export async function GET(req: Request) {
   const h = headers();
@@ -23,7 +20,13 @@ export async function GET(req: Request) {
   const days = Math.min(Math.max(Number(url.searchParams.get('days')) || 7, 1), 31);
 
   const now = Date.now();
-  const from = new Date(now - days * 24 * 60 * 60 * 1000);
+
+  // Both the date list and the query bound come from the calendar. Stepping an
+  // instant back 24h at a time repeats one date and skips another either side
+  // of a DST change, and the repeat collapses in the idx Map below - so one bar
+  // would read zero and the short day would never appear at all.
+  const dateList = beirutDateSeries(todayInBeirut(new Date(now)), days);
+  const from = todayInBeirutDateRange(dateList[0]!).startUtc;
 
   const punches = await prisma.punch.findMany({
     where: { at: { gte: from }, ...(branchId ? { branch_id: branchId } : {}) },
@@ -31,11 +34,6 @@ export async function GET(req: Request) {
     select: { user_id: true, kind: true, at: true },
   });
 
-  // Ordered list of the last `days` Beirut date strings (oldest first).
-  const dateList: string[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    dateList.push(beirutDate(new Date(now - i * 24 * 60 * 60 * 1000)));
-  }
   const idx = new Map(dateList.map((d, i) => [d, i]));
 
   const present: Set<string>[] = dateList.map(() => new Set());
@@ -44,7 +42,7 @@ export async function GET(req: Request) {
   const openIn = new Map<string, Date>();
 
   for (const p of punches) {
-    const day = beirutDate(p.at);
+    const day = inBeirut(p.at).date;
     const i = idx.get(day);
     if (i === undefined) continue;
     const key = `${day}|${p.user_id}`;

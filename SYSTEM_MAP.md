@@ -248,8 +248,10 @@ Full request/response detail is in [API.md](API.md). Summary:
   subtracting 24 hours from an instant — a Beirut day is 23 or 25 hours long twice a year.
   `todayInBeirutDateRange` returns the first instant of the date to the first instant of the
   next (on the spring-forward day, whose local midnight never happens, that first instant is
-  the transition itself), and `previousBeirutDate` is what anything judging "the day that
-  just ended" must use.
+  the transition itself), `previousBeirutDate` is what anything judging "the day that just
+  ended" must use, and `beirutDateSeries` (`noticeWindow.ts`) builds the dashboard chart's
+  run of days — walking an instant back 24h at a time repeats one date and skips another
+  either side of a transition.
 
 ---
 
