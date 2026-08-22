@@ -27,7 +27,7 @@ async function overview(session: { cookies: string; csrf: string }) {
   expect(res.status).toBe(200);
   const body = (await res.json()) as {
     ok: boolean;
-    data: { people: Person[]; kpis: { absent: number; present: number; hoursToday: number } };
+    data: { people: Person[]; kpis: { absent: number; present: number; hoursToday: number; laborTodayCent: number } };
   };
   expect(body.ok).toBe(true);
   return body.data;
@@ -190,5 +190,44 @@ describe('admin overview: an overnight shift after midnight (HTTP)', () => {
     const data = await overview(session);
     const row = data.people.find((p) => p.username === 'ov-two-sessions');
     expect(row?.hours_today).toBe(2);
+  });
+});
+
+describe('admin overview: a forgotten checkout (HTTP)', () => {
+  beforeEach(async () => {
+    await cleanDb();
+  });
+
+  afterAll(async () => {
+    await getTestPrisma().$disconnect();
+  });
+
+  it('does not report a two-day-old open punch as someone still working', async () => {
+    // missedCheckout raises a MISSED_CHECKOUT flag but never closes the punch,
+    // so the row stays open indefinitely. Widening the board's punch query to
+    // two days means it now sees such a punch - and counting it would show the
+    // person present with ~40 hours on the day, feeding kpis.laborTodayCent,
+    // which is the number the owner reads to judge the day.
+    const branch = await seedTestBranch();
+    const weekday = beirutWeekday(new Date());
+    const forgot = await seedTestUser({ username: 'ov-forgot', branch_id: branch.id, hourly_rate_cent: 1000 });
+    const admin = await seedTestUser({ username: 'ov-admin5', role: Role.ADMIN });
+    await seedTestSchedule({ user_id: forgot.id, weekday, shift_min: 480 });
+    await seedTestPunch({
+      user_id: forgot.id,
+      branch_id: branch.id,
+      kind: 'IN',
+      at: new Date(Date.now() - 40 * 60 * 60 * 1000),
+    });
+
+    const session = await loginAs(admin.username, 'change-me');
+    const data = await overview(session);
+    const row = data.people.find((p) => p.username === 'ov-forgot');
+
+    expect(row?.status).toBe('ABSENT');
+    expect(row?.hours_today).toBe(0);
+    expect(data.kpis.present).toBe(0);
+    expect(data.kpis.hoursToday).toBe(0);
+    expect(data.kpis.laborTodayCent).toBe(0);
   });
 });

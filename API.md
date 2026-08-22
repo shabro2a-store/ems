@@ -153,7 +153,10 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     employee who arrived at 21:00 stays present with a rising total past midnight
     (`currentShiftDayMinutes`). Punches are queried two days back so the previous
     day's arrival is visible; work that closed on an earlier shift-day is not
-    counted towards this one.
+    counted towards this one. An open check-in older than 30h is treated as a forgotten
+    checkout: it adds no minutes and the person is not `IN`, because `missedCheckout`
+    flags such a punch but never closes it — the MISSED_CHECKOUT flag in `attention` is
+    what reports it, not `hours_today` or `laborTodayCent`.
   - `pendingLeaves[]` includes `off_min` — an `HOURS_CHANGE` cannot be reviewed
     without the hours being requested.
   - `flags[]` includes a rendered **`reason`** built server-side from `context_json` —

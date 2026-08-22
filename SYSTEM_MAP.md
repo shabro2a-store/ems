@@ -191,6 +191,11 @@ Full request/response detail is in [API.md](API.md). Summary:
   so a 21:00-07:00 shift keeps counting past midnight and a second session adds to the
   first instead of restarting it. Read by the admin dashboard and `GET /api/me/today`,
   both of which query punches two days back so a previous-day arrival is visible.
+  An open check-in older than **30h** (`MAX_OPEN_SESSION_MIN`) is a forgotten checkout,
+  not a shift — `missedCheckout` flags one but never closes the punch — so it contributes
+  nothing and the person is not shown as present. Above a full 24h `shift_min` so a real
+  shift is never truncated, and the MISSED_CHECKOUT flag in the attention queue is where
+  a forgotten checkout belongs rather than the hours column.
 - **One answer to "what did this day require"** (`requiredMinFor` in `coverage.ts`): a
   `DAY_OFF` override is 0, an `HOURS_CHANGE` override with an explicit `shift_min` beats the
   weekly pattern, otherwise the weekday's `Schedule.shift_min`, otherwise 0. Payroll, the

@@ -106,7 +106,20 @@ export interface ShiftDayMinutes {
   date: string; // YYYY-MM-DD (Beirut) - the shift-day these minutes belong to
   minutes: number;
   openInAt: Date | null; // the arrival still waiting for a checkout, if any
+  staleOpenInAt: Date | null; // an arrival too old to be a real shift, ignored
 }
+
+/**
+ * Past this, an open check-in is a forgotten checkout rather than a shift.
+ *
+ * Schedule.shift_min allows up to 1440, so a genuine 24-hour shift exists and
+ * must never be truncated; six hours on top covers a very late checkout punch
+ * without letting an abandoned session run away. missedCheckout has already
+ * raised a MISSED_CHECKOUT flag long before this (it fires at the day's
+ * required minutes plus the branch grace), so nothing is lost by stopping here
+ * - the flag is where a forgotten checkout belongs, not the hours column.
+ */
+export const MAX_OPEN_SESSION_MIN = 30 * 60;
 
 /**
  * How many minutes this user has worked on the shift-day they are currently on.
@@ -137,7 +150,21 @@ export function currentShiftDayMinutes(args: { punches: PunchLite[]; now: Date }
     openIn = null;
   }
 
-  const date = inBeirut(openIn ?? args.now).date;
-  const openMin = openIn ? Math.max(0, Math.floor((args.now.getTime() - openIn.getTime()) / 60_000)) : 0;
-  return { date, minutes: (closedByDate.get(date) ?? 0) + openMin, openInAt: openIn };
+  // Nobody works for days on end: an open session past MAX_OPEN_SESSION_MIN is
+  // somebody who forgot to punch out, and counting it would put 40-odd hours
+  // into today's total and today's labour cost. Drop it and let the
+  // MISSED_CHECKOUT flag speak instead - reported separately so a caller can
+  // still tell an abandoned punch from no punch at all.
+  const openMinRaw = openIn ? Math.max(0, Math.floor((args.now.getTime() - openIn.getTime()) / 60_000)) : 0;
+  const stale = openIn !== null && openMinRaw > MAX_OPEN_SESSION_MIN;
+  const live = stale ? null : openIn;
+
+  const date = inBeirut(live ?? args.now).date;
+  const openMin = live ? openMinRaw : 0;
+  return {
+    date,
+    minutes: (closedByDate.get(date) ?? 0) + openMin,
+    openInAt: live,
+    staleOpenInAt: stale ? openIn : null,
+  };
 }

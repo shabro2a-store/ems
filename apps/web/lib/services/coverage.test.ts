@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { computeCoverage, currentShiftDayMinutes, type PunchLite } from './coverage';
+import {
+  computeCoverage,
+  currentShiftDayMinutes,
+  MAX_OPEN_SESSION_MIN,
+  type PunchLite,
+} from './coverage';
 
 const utc = (iso: string) => new Date(iso);
 // 2026-08-17 is a Monday in Beirut (UTC+3 in August).
@@ -127,6 +132,46 @@ describe('currentShiftDayMinutes', () => {
     });
     expect(out.minutes).toBe(240);
     expect(out.openInAt).toBeNull();
+  });
+
+  it('drops an open session too old to be a shift, and says so', () => {
+    // missedCheckout only raises a flag; it never closes the punch. Someone who
+    // forgot to punch out on Monday would otherwise read as present with 40-odd
+    // hours on the board, and that number feeds the day's labour cost.
+    const openedAt = utc('2026-08-17T07:00:00Z');
+    const out = currentShiftDayMinutes({
+      punches: [{ kind: 'IN', at: openedAt }],
+      now: utc('2026-08-18T23:00:00Z'), // 40 hours later
+    });
+    expect(out.minutes).toBe(0);
+    expect(out.openInAt).toBeNull();
+    expect(out.staleOpenInAt).toEqual(openedAt);
+    expect(out.date).toBe('2026-08-19'); // 02:00 Wed in Beirut - back to today
+  });
+
+  it('still counts a long but plausible shift, including a full 24-hour one', () => {
+    // Schedule.shift_min allows 1440, so the boundary has to sit above a real
+    // 24-hour shift or the clamp would truncate legitimate work.
+    const openedAt = utc('2026-08-17T07:00:00Z');
+    const at = (min: number) => new Date(openedAt.getTime() + min * 60_000);
+
+    const dayLong = currentShiftDayMinutes({ punches: [{ kind: 'IN', at: openedAt }], now: at(24 * 60) });
+    expect(dayLong.minutes).toBe(24 * 60);
+    expect(dayLong.staleOpenInAt).toBeNull();
+
+    const onTheLimit = currentShiftDayMinutes({
+      punches: [{ kind: 'IN', at: openedAt }],
+      now: at(MAX_OPEN_SESSION_MIN),
+    });
+    expect(onTheLimit.minutes).toBe(MAX_OPEN_SESSION_MIN);
+    expect(onTheLimit.staleOpenInAt).toBeNull();
+
+    const pastTheLimit = currentShiftDayMinutes({
+      punches: [{ kind: 'IN', at: openedAt }],
+      now: at(MAX_OPEN_SESSION_MIN + 1),
+    });
+    expect(pastTheLimit.minutes).toBe(0);
+    expect(pastTheLimit.staleOpenInAt).toEqual(openedAt);
   });
 
   it('falls back to today when nothing is open', () => {
