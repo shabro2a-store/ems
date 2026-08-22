@@ -24,8 +24,20 @@ const Body = z.object({
   userId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, 'date must be a real calendar day'),
   decision: z.enum(['ACCEPTED', 'REVOKED', 'PENDING']),
+  // The overtime the screen actually rendered. A comparison token only: it is
+  // never stored and never becomes money. The stored figure is always the
+  // server's own, and the two must agree or the ruling is refused - otherwise
+  // a punch landing while the modal sits open turns a click on "$4.00" into a
+  // $10.00 deduction. Not required for PENDING, which only ever hands money
+  // back.
+  overtimeMin: z.number().int().min(0).optional(),
   reason: z.string().max(500).optional(),
 });
+
+function formatMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  return h > 0 ? `${h}h ${min % 60}m` : `${min}m`;
+}
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -58,6 +70,11 @@ export async function POST(req: Request) {
   } catch (err) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
+  // Optional in the schema so PENDING need not carry it, mandatory here for a
+  // ruling that moves money: without it there is nothing to confirm against.
+  if (body.decision !== 'PENDING' && body.overtimeMin === undefined) {
+    return jsonError('INVALID_INPUT', 'overtimeMin is required: a decision must name the amount it was made against', 400);
+  }
 
   const cached = await readIdempotentResponse({ userId: adminId, key: idemKey });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
@@ -86,10 +103,17 @@ export async function POST(req: Request) {
       after: { user_id: body.userId, date: body.date, decision: null, reason: body.reason ?? null },
     });
   } else {
-    // Stamped server-side, never taken from the request: this is the figure a
-    // REVOKED decision deducts against, and a client that could name it could
-    // make an old ruling cover work the owner never saw.
+    // Always the server's own figure - the request cannot name what gets
+    // stored. The client's number above only decides whether the ruling is
+    // allowed to land at all.
     const overtimeMin = await overtimeMinForDay(body.userId, body.date, prisma);
+    if (body.overtimeMin !== overtimeMin) {
+      return jsonError(
+        'OVERTIME_CHANGED',
+        `This day's overtime changed from ${formatMinutes(body.overtimeMin!)} to ${formatMinutes(overtimeMin)} while the screen was open. Nothing was changed - check the new figure and decide again.`,
+        409,
+      );
+    }
 
     await prisma.overtimeDecision.upsert({
       where: { user_id_date: { user_id: body.userId, date: dateOnly } },

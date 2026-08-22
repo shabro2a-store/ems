@@ -173,9 +173,12 @@ Full request/response detail is in [API.md](API.md). Summary:
   and **Undo** on the payroll screen's overtime modal deletes the decision row, putting the
   day back to pending and the money back in the employee's pay.
 - **Stale overtime decisions**: a decision applies to the day **as it stood when it was
-  made**. The row records `overtime_min` (stamped server-side from the day's coverage, never
-  accepted from the client), and it only counts while that still equals the day's current
-  overtime. Work added to a day the owner already ruled on makes the ruling stale: the day
+  made**, and a ruling is a confirmation of what was displayed. The request carries the
+  `overtimeMin` the screen rendered; the route recomputes the day's true overtime and
+  **refuses** the ruling with `409 OVERTIME_CHANGED` if they differ, writing nothing. On a
+  match the row stores the **server's** figure — the client's number is a comparison token,
+  never money. That decides what a ruling may cover; the stored `overtime_min` then only
+  counts while it still equals the day's current overtime. Work added to a day the owner already ruled on makes the ruling stale: the day
   reads as `decision: null` again — back on the attention queue at the full new amount, with
   **nothing deducted** until the owner rules on that amount. A null `overtime_min` (any row
   predating the column) is stale for the same reason. Erring towards paying the employee for

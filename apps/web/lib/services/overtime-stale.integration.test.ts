@@ -69,12 +69,15 @@ async function workThreeHoursMore(userId: string, branchId: string) {
   await seedTestPunch({ user_id: userId, branch_id: branchId, kind: 'OUT', at: OUT_2 });
 }
 
+// `overtimeMin` is the figure the owner's screen was showing when they clicked.
+// Pass it explicitly everywhere: which amount a ruling was made against is the
+// whole subject of this file.
 async function decide(
   session: { cookies: string; csrf: string },
   userId: string,
   date: string,
   decision: 'ACCEPTED' | 'REVOKED' | 'PENDING',
-  extra: Record<string, unknown> = {},
+  overtimeMin?: number,
 ): Promise<Response> {
   return fetch(`${BASE_URL}/api/admin/overtime/decision`, {
     method: 'POST',
@@ -84,7 +87,9 @@ async function decide(
       'X-CSRF-Token': session.csrf,
       'Idempotency-Key': idemKey(),
     },
-    body: JSON.stringify({ userId, date, decision, ...extra }),
+    body: JSON.stringify(
+      overtimeMin === undefined ? { userId, date, decision } : { userId, date, decision, overtimeMin },
+    ),
   });
 }
 
@@ -134,7 +139,7 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
     const queuedBefore = await pendingFor(emp.id, emp.username);
     expect(queuedBefore).toHaveLength(1);
     expect(queuedBefore[0]!.overtimeMin).toBe(OVER_1_MIN);
-    expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
+    expect((await decide(aSession, emp.id, DAY, 'REVOKED', OVER_1_MIN)).status).toBe(200);
 
     const revoked = await payrollRow(aSession, 'ots-emp');
     expect(revoked.gross_cent).toBe(GROSS_1_CENT);
@@ -177,10 +182,11 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
   it('deducts the new amount once the owner rules on it again', async () => {
     const { branch, emp, admin } = await setup();
     const aSession = await loginAs(admin.username, 'change-me');
-    expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
+    expect((await decide(aSession, emp.id, DAY, 'REVOKED', OVER_1_MIN)).status).toBe(200);
     await workThreeHoursMore(emp.id, branch.id);
 
-    expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
+    // The owner is looking at the new figure now, and rules on that.
+    expect((await decide(aSession, emp.id, DAY, 'REVOKED', OVER_2_MIN)).status).toBe(200);
 
     const rows = await getTestPrisma().overtimeDecision.findMany({ where: { user_id: emp.id } });
     expect(rows).toHaveLength(1);
@@ -192,29 +198,80 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
     expect(await pendingFor(emp.id, emp.username)).toHaveLength(0);
   });
 
-  it('stamps the recorded minutes server-side and ignores anything the client sends', async () => {
-    const { emp, admin } = await setup();
+  it('refuses a ruling made against an amount the day no longer has', async () => {
+    // The modal does not poll. It renders 120 min / $4.00, a punch lands on
+    // that day while it sits open, and the owner clicks Revoke on the row they
+    // can see. Stamping "whatever the day is at click time" would quietly turn
+    // that click into a $10.00 deduction.
+    const { branch, emp, admin } = await setup();
     const aSession = await loginAs(admin.username, 'change-me');
 
-    // A client naming the figure could revive a stale ruling, or pre-authorise
-    // a deduction against hours the owner has not seen yet.
-    const res = await decide(aSession, emp.id, DAY, 'REVOKED', { overtime_min: OVER_2_MIN, overtimeMin: OVER_2_MIN });
-    expect(res.status).toBe(200);
+    const rendered = await listedOvertime(aSession, emp.id);
+    expect(rendered[0]!.overtimeMin).toBe(OVER_1_MIN);
+    expect(rendered[0]!.amount_cent).toBe(OVER_1_CENT);
 
+    await workThreeHoursMore(emp.id, branch.id);
+
+    const res = await decide(aSession, emp.id, DAY, 'REVOKED', rendered[0]!.overtimeMin);
+    const body = (await res.json()) as { ok: boolean; error?: { code: string; message: string } };
+
+    // Nothing stamped and nothing deducted - asserted first, because that is
+    // the property that protects the employee's pay whatever the reply says.
+    expect(await overtimeDeductionForUser(emp.id, MONTH, getTestPrisma())).toBe(0);
+    expect((await payrollRow(aSession, 'ots-emp')).overtime_deduction_cent).toBe(0);
+    expect(await getTestPrisma().overtimeDecision.findMany({ where: { user_id: emp.id } })).toHaveLength(0);
+    expect(
+      await getTestPrisma().auditLog.findMany({
+        where: { entity: 'OvertimeDecision', entity_id: `${emp.id}:${DAY}` },
+      }),
+    ).toHaveLength(0);
+
+    // And the owner is told why, with both figures.
+    expect(res.status).toBe(409);
+    expect(body.ok).toBe(false);
+    expect(body.error?.code).toBe('OVERTIME_CHANGED');
+    expect(body.error?.message).toContain('2h 0m');
+    expect(body.error?.message).toContain('5h 0m');
+
+    // Still waiting for a ruling, at the amount that is actually there.
+    const queued = await pendingFor(emp.id, emp.username);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.overtimeMin).toBe(OVER_2_MIN);
+  });
+
+  it('lands the ruling once it names the figure the day actually has', async () => {
+    const { branch, emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    await workThreeHoursMore(emp.id, branch.id);
+
+    expect((await decide(aSession, emp.id, DAY, 'REVOKED', OVER_2_MIN)).status).toBe(200);
     const rows = await getTestPrisma().overtimeDecision.findMany({ where: { user_id: emp.id } });
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.overtime_min).toBe(OVER_1_MIN);
+    expect(rows[0]!.overtime_min).toBe(OVER_2_MIN);
+    expect((await payrollRow(aSession, 'ots-emp')).overtime_deduction_cent).toBe(OVER_2_CENT);
 
     const audit = await getTestPrisma().auditLog.findFirst({
       where: { entity: 'OvertimeDecision', entity_id: `${emp.id}:${DAY}`, action: 'overtime.revoked' },
     });
-    expect(audit?.after_json).toMatchObject({ overtime_min: OVER_1_MIN });
+    expect(audit?.after_json).toMatchObject({ overtime_min: OVER_2_MIN });
+  });
+
+  it('refuses a money-moving ruling that names no amount at all', async () => {
+    // Without the token there is nothing to confirm against, so a client must
+    // not be able to opt out of the check by omitting it.
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+
+    const res = await decide(aSession, emp.id, DAY, 'REVOKED');
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('INVALID_INPUT');
+    expect(await getTestPrisma().overtimeDecision.findMany({ where: { user_id: emp.id } })).toHaveLength(0);
   });
 
   it('still undoes a ruling: the row goes and the day returns to pending', async () => {
     const { emp, admin } = await setup();
     const aSession = await loginAs(admin.username, 'change-me');
-    expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
+    expect((await decide(aSession, emp.id, DAY, 'REVOKED', OVER_1_MIN)).status).toBe(200);
     expect((await payrollRow(aSession, 'ots-emp')).overtime_deduction_cent).toBe(OVER_1_CENT);
 
     const undo = await decide(aSession, emp.id, DAY, 'PENDING');

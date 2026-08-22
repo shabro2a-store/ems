@@ -242,18 +242,23 @@ so it surfaces in payroll only if revoked.
   Unlike the attention queue this keeps **decided** days, which is what makes a
   decision reversible — the queue drops a day the moment it has one.
 - **POST /api/admin/overtime/decision** *(CSRF, Idempotent)* `{ userId, date:
-  "YYYY-MM-DD", decision: "ACCEPTED"|"REVOKED"|"PENDING", reason? }` — upserts the
+  "YYYY-MM-DD", decision: "ACCEPTED"|"REVOKED"|"PENDING", overtimeMin, reason? }` — upserts the
   one `OvertimeDecision` row for that (user, date). `ACCEPTED` **changes no money**
   and only takes the notice off the attention queue; `REVOKED` makes payroll
   subtract that day's excess. `PENDING` is the undo: it is not an
   `OvertimeDecisionKind` — the absence of a row *is* pending — so it **deletes** the
   row, returning the day to the queue and the money to the employee. Audited as
   `overtime.accepted` / `overtime.revoked` / `overtime.undecided`. → `{ decision }`.
-  The route also stamps the day's current overtime minutes onto the row, computed
-  **server-side** from that day's coverage — it is the figure a `REVOKED` decision
-  deducts against, so the body cannot name it. If the day's overtime later changes the
-  decision goes stale: `decision` reads `null` everywhere, the day returns to the
-  attention queue at the new amount, and nothing is deducted until the owner rules again.
+  `overtimeMin` is **required** for `ACCEPTED`/`REVOKED` (not for `PENDING`, which only
+  hands money back): it is the amount the screen was showing. The route computes the day's
+  true current overtime **server-side** and compares. They must match — otherwise
+  `409 OVERTIME_CHANGED`, naming both figures, and **nothing is written**. On a match the
+  row is stamped with the **server's** value, so the body never supplies money; the client's
+  number is only ever a comparison token. Without this a punch landing while the payroll
+  overtime modal sat open (it does not poll) turned a click on a `$4.00` row into a `$10.00`
+  deduction. If the day's overtime changes *after* a decision, that decision goes stale:
+  `decision` reads `null` everywhere, the day returns to the attention queue at the new
+  amount, and nothing is deducted until the owner rules again.
 
 ### Flags
 - **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag

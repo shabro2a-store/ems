@@ -362,7 +362,9 @@ export default function AdminDashboard() {
                 })}
                 {att.overtime.map((o) => {
                   const key = `${o.user_id}|${o.date}`;
-                  const body = { userId: o.user_id, date: o.date };
+                  // overtimeMin is the amount this row is showing: the server
+                  // refuses the ruling if the day has moved on since it rendered.
+                  const body = { userId: o.user_id, date: o.date, overtimeMin: o.overtimeMin };
                   return (
                     <li key={key} className="flex items-start gap-3 px-4 py-3 sm:px-5">
                       <Badge tone="warning">Overtime</Badge>

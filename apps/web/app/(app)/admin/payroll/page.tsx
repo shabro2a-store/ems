@@ -415,10 +415,17 @@ function OvertimeModal({ row, month, onClose, onChanged }: { row: Row; month: st
     setBusy(id); setErr(null);
     const res = await apiSend('/api/admin/overtime/decision', {
       idempotent: true, idemPrefix: 'ot',
-      body: { userId: row.user_id, date: o.date, decision },
+      // This modal does not poll, so the figure on screen can go stale while it
+      // sits open. Sending it lets the server refuse a ruling made against an
+      // amount that no longer exists rather than silently deducting the new one.
+      body: { userId: row.user_id, date: o.date, decision, overtimeMin: o.overtimeMin },
     });
     setBusy(null);
-    if (!res.ok) { setErr(errorMessage(res)); return; }
+    if (!res.ok) {
+      setErr(errorMessage(res));
+      await load(); // the refused ruling means the list is out of date - show the new figure
+      return;
+    }
     setItems((prev) => prev?.map((x) => (x.date === o.date ? { ...x, decision: decision === 'PENDING' ? null : decision } : x)) ?? null);
     onChanged();
   }

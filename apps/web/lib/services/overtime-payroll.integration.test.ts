@@ -75,6 +75,9 @@ async function decide(
   userId: string,
   date: string,
   decision: 'ACCEPTED' | 'REVOKED' | 'PENDING',
+  // The amount the screen was showing. The route refuses a ruling that names a
+  // figure the day no longer has; every day in this file is the 120-min one.
+  overtimeMin = 120,
 ): Promise<Response> {
   return fetch(`${BASE_URL}/api/admin/overtime/decision`, {
     method: 'POST',
@@ -84,7 +87,7 @@ async function decide(
       'X-CSRF-Token': session.csrf,
       'Idempotency-Key': idemKey(),
     },
-    body: JSON.stringify({ userId, date, decision }),
+    body: JSON.stringify({ userId, date, decision, overtimeMin }),
   });
 }
 

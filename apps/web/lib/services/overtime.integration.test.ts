@@ -38,7 +38,9 @@ describe('POST /api/admin/overtime/decision', () => {
     const emp = await seedTestUser({ username: 'ot_emp2', role: 'EMPLOYEE' });
     const adminUser = await seedTestUser({ username: 'ot_admin', role: 'ADMIN' });
     const admin = await loginAs('ot_admin', 'change-me');
-    const body = JSON.stringify({ userId: emp.id, date: '2026-08-17', decision: 'REVOKED' });
+    // No punches at all, so the day's overtime is zero - and a ruling has to
+    // name the amount it is being made against.
+    const body = JSON.stringify({ userId: emp.id, date: '2026-08-17', decision: 'REVOKED', overtimeMin: 0 });
     const headers = {
       'Content-Type': 'application/json',
       Cookie: admin.cookies,
@@ -94,7 +96,7 @@ describe('POST /api/admin/overtime/decision', () => {
     const acceptRes = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
       method: 'POST',
       headers: { ...baseHeaders, 'Idempotency-Key': idemKey('ot') },
-      body: JSON.stringify({ userId: emp.id, date: '2026-08-18', decision: 'ACCEPTED' }),
+      body: JSON.stringify({ userId: emp.id, date: '2026-08-18', decision: 'ACCEPTED', overtimeMin: 0 }),
     });
     expect(acceptRes.status).toBe(200);
     expect((await acceptRes.json()).data).toEqual({ decision: 'ACCEPTED' });
@@ -102,7 +104,7 @@ describe('POST /api/admin/overtime/decision', () => {
     const revokeRes = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
       method: 'POST',
       headers: { ...baseHeaders, 'Idempotency-Key': idemKey('ot') },
-      body: JSON.stringify({ userId: emp.id, date: '2026-08-18', decision: 'REVOKED', reason: 'changed my mind' }),
+      body: JSON.stringify({ userId: emp.id, date: '2026-08-18', decision: 'REVOKED', overtimeMin: 0, reason: 'changed my mind' }),
     });
     expect(revokeRes.status).toBe(200);
     expect((await revokeRes.json()).data).toEqual({ decision: 'REVOKED' });
