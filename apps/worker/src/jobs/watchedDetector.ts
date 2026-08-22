@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, beirutWeekday, previousBeirutDate } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
@@ -26,10 +26,11 @@ export async function runWatchedDetector(
 ): Promise<WatchedDetectorResult> {
   const db = opts.db ?? defaultPrisma;
   const now = opts.now ?? new Date();
-  const yesterdayInstant = new Date(now.getTime() - 24 * 60 * 60_000);
-  const yesterday = todayInBeirut(yesterdayInstant);
-  const wd = beirutWeekday(yesterdayInstant);
+  // From the calendar, not from now-24h: on the morning after a short DST day
+  // that arithmetic lands two days back and the short day is never judged.
+  const yesterday = previousBeirutDate(todayInBeirut(now));
   const { startUtc: startOfDay, endUtc: endOfDay } = todayInBeirutDateRange(yesterday);
+  const wd = beirutWeekday(startOfDay);
   const overrideDate = new Date(`${yesterday}T00:00:00.000Z`);
 
   const schedules = await db.schedule.findMany({

@@ -144,6 +144,10 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     minutes — a `DAY_OFF` override, an `HOURS_CHANGE` override for the whole
     shift, or a weekday with no hours set — and only `ABSENT` when hours were
     owed and no punch exists. Same resolution payroll uses (`requiredMinFor`).
+  - The day window comes from `todayInBeirutDateRange`, which resolves both ends from
+    the calendar date. Deriving the end as `start + 24h` collapsed the range to nothing
+    on Beirut's 25-hour fall-back day (2026-10-24) and lost an hour before the
+    spring-forward — an empty window reads as "nobody worked".
   - `people[].hours_today` and `kpis.hoursToday` are the **current shift-day**, not
     today's calendar rows: a shift belongs to the Beirut day it started, so an
     employee who arrived at 21:00 stays present with a rising total past midnight

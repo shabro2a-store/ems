@@ -239,6 +239,12 @@ Full request/response detail is in [API.md](API.md). Summary:
   refills at the start of each month (payroll's month boundary).
 - **Leave**: approval upserts one ScheduleOverride per date in range.
 - **Time (`time`)**: Beirut day boundaries, weekday Sun=0..Sat=6, schedule wall-clock → UTC.
+  Day boundaries are always resolved from the **calendar date**, never by adding or
+  subtracting 24 hours from an instant — a Beirut day is 23 or 25 hours long twice a year.
+  `todayInBeirutDateRange` returns the first instant of the date to the first instant of the
+  next (on the spring-forward day, whose local midnight never happens, that first instant is
+  the transition itself), and `previousBeirutDate` is what anything judging "the day that
+  just ended" must use.
 
 ---
 
