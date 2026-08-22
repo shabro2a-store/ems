@@ -7,6 +7,7 @@ import { Card, CardBody, StatTile, Alert } from '@/components/ui';
 interface TodayPayload {
   in_at: string | null;
   minutes_since_in: number | null;
+  minutes_today: number;
   hours_month: number;
 }
 type Status =
@@ -118,7 +119,7 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
       </Card>
 
       <div className="grid grid-cols-2 gap-3">
-        <StatTile label="Today" value={today ? dur(today.in_at ? (today.minutes_since_in ?? 0) : 0) : '—'} />
+        <StatTile label="Today" value={today ? dur(today.minutes_today) : '—'} />
         <StatTile label="This month" value={today ? `${today.hours_month.toFixed(1)}h` : '—'} />
       </div>
 

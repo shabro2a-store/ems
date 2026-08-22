@@ -295,7 +295,7 @@ describe('punch integration (HTTP)', () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     // Exact key set: catches a stray money field left in, as much as one dropped.
-    expect(Object.keys(body.data).sort()).toEqual(['hours_month', 'in_at', 'minutes_since_in']);
+    expect(Object.keys(body.data).sort()).toEqual(['hours_month', 'in_at', 'minutes_since_in', 'minutes_today']);
     expect(typeof body.data.in_at).toBe('string');
     expect(body.data.minutes_since_in).toBeGreaterThanOrEqual(0);
     expect(body.data.hours_month).toBe(8);

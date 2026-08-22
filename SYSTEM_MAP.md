@@ -329,7 +329,10 @@ The bugs found in the initial audit are fixed:
 - `/api/me/today` returned **real earnings** (today + month + advances + net); since superseded —
   a live per-rate earnings ticker on a shared shop floor caused friction between staff, so the
   field screens now show **hours only** (today + this month). Real earnings still live on the
-  employee's own payslip, `/api/me/payroll`.
+  employee's own payslip, `/api/me/payroll`. The "Today" tile is the whole shift-day
+  (`minutes_today`), not the open session — it used to render `minutes_since_in`, so punching
+  out and back in restarted it from zero and the earlier session disappeared. The driver keeps
+  a separate "On shift" tile for the current session, which is what that label means.
 - Schedule editing moved into the **Employees** page (the old advances-fed dropdown is gone).
 - Every admin page has nav (single `admin/layout.tsx`); the bar shows the **display name**;
   flag badge is accurate.

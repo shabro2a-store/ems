@@ -64,10 +64,16 @@ Enabled only when `ENABLE_DEV_ENDPOINTS=true`, else `404`. Body `{ kind }`. Skip
 GPS/geofence (uses the branch centre) for testing on devices without GPS.
 
 ### GET /api/me/today
-→ `200 { in_at, minutes_since_in, hours_month }` — the field screens' live
-counters. Hours only, no money: a shared shop floor with per-employee rates
+→ `200 { in_at, minutes_since_in, minutes_today, hours_month }` — the field screens'
+live counters. Hours only, no money: a shared shop floor with per-employee rates
 made a live earnings ticker a source of friction. The caller's own payslip
 (`GET /api/me/payroll`) still carries the real money figures.
+- `minutes_since_in` is the **open session** alone, `null` when checked out — the
+  driver's "On shift" tile.
+- `minutes_today` is the whole **current shift-day** (`currentShiftDayMinutes`): every
+  session that started on it, plus the open one counted to now. Punching out and back
+  in adds to it instead of restarting it, and an overnight arrival keeps it climbing
+  past midnight. This is what the tile labelled "Today" shows.
 
 ### GET /api/me/payroll?month=YYYY-MM
 → `200 { hours, gross_cent, adjustments_cent, advances_cent, penalties_cent,

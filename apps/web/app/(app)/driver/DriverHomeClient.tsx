@@ -9,6 +9,7 @@ import EnableAlerts from '@/components/field/EnableAlerts';
 interface TodayPayload {
   in_at: string | null;
   minutes_since_in: number | null;
+  minutes_today: number;
   hours_month: number;
 }
 interface TripInfo { open: boolean; since_min?: number; threshold_min: number }
@@ -159,9 +160,14 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         </CardBody>
       </Card>
 
+      {/* Three tiles on a 375px phone: "1h 55m" at tile size does not fit a
+          third of the row, so the month spans instead of squeezing. */}
       <div className="grid grid-cols-2 gap-3">
         <StatTile label="On shift" value={today ? dur(today.in_at ? (today.minutes_since_in ?? 0) : 0) : '—'} />
-        <StatTile label="This month" value={today ? `${today.hours_month.toFixed(1)}h` : '—'} />
+        <StatTile label="Today" value={today ? dur(today.minutes_today) : '—'} />
+        <div className="col-span-2">
+          <StatTile label="This month" value={today ? `${today.hours_month.toFixed(1)}h` : '—'} />
+        </div>
       </div>
 
       {/* Trip status */}
