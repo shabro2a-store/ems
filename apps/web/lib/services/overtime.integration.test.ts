@@ -141,7 +141,9 @@ describe('POST /api/admin/overtime/decision', () => {
     const dayOverflow = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
       method: 'POST',
       headers: { ...baseHeaders, 'Idempotency-Key': idemKey('ot') },
-      body: JSON.stringify({ userId: emp.id, date: '2026-02-30', decision: 'REVOKED' }),
+      // overtimeMin must be present and correct, or the 400 below would be the
+      // missing-token rejection and would pass with the date guard deleted.
+      body: JSON.stringify({ userId: emp.id, date: '2026-02-30', decision: 'REVOKED', overtimeMin: 0 }),
     });
     expect(dayOverflow.status).toBe(400);
     const dayOverflowBody = (await dayOverflow.json()) as { ok: boolean; error?: { code: string } };
@@ -153,7 +155,7 @@ describe('POST /api/admin/overtime/decision', () => {
     const monthOverflow = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
       method: 'POST',
       headers: { ...baseHeaders, 'Idempotency-Key': idemKey('ot') },
-      body: JSON.stringify({ userId: emp.id, date: '2026-13-01', decision: 'REVOKED' }),
+      body: JSON.stringify({ userId: emp.id, date: '2026-13-01', decision: 'REVOKED', overtimeMin: 0 }),
     });
     expect(monthOverflow.status).toBe(400);
     const monthOverflowBody = (await monthOverflow.json()) as { ok: boolean; error?: { code: string } };
