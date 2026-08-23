@@ -12,6 +12,7 @@ function day(over: Partial<DayCoverage>): DayCoverage {
     deltaMin: 0,
     closed: true,
     lastPunchAt: new Date('2026-08-17T14:00:00Z'),
+    grossCent: 0, // overtime never reads it; penalties are what the gross bounds
     ...over,
   };
 }

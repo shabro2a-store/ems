@@ -130,6 +130,7 @@ export async function overtimeForUser(
     punches: punches as PunchLite[],
     shiftMinByWeekday,
     overridesByDate,
+    rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
   });
   return computeOvertime({
     coverage,
@@ -253,14 +254,16 @@ export async function pendingOvertimeNotices(
       });
     }
 
+    const userRates = (ratesBy.get(u.id) ?? []) as RateChangeLite[];
     const coverage = computeCoverage({
       punches: (punchesBy.get(u.id) ?? []) as PunchLite[],
       shiftMinByWeekday,
       overridesByDate,
+      rateCentAt: (at) => rateAt(userRates, at),
     });
     const items = computeOvertime({
       coverage,
-      rateChanges: (ratesBy.get(u.id) ?? []) as RateChangeLite[],
+      rateChanges: userRates,
       graceMin: graceByUser.get(u.id) ?? 15,
       decisionsByDate: decisionsByUser.get(u.id) ?? new Map(),
     });

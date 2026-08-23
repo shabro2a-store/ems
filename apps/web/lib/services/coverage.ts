@@ -37,21 +37,36 @@ export interface DayCoverage {
   deltaMin: number; // worked - required; negative is a shortfall
   closed: boolean; // false while a check-in has no matching checkout
   lastPunchAt: Date; // used to resolve the rate in force that day
+  // What this day actually earned, priced the way payroll prices it: every
+  // IN/OUT interval at the rate in force when it closed, each floored on its
+  // own. Not workedMin * one rate - a RateChange is stamped effective_from the
+  // instant it is saved, so it can land in the middle of a workday and the two
+  // answers diverge. Anything that wants to bound a day by its own pay has to
+  // bound it by this figure or it can quietly overshoot into the next day.
+  grossCent: number;
 }
 
 /**
- * How many minutes each day owed and how many were actually covered.
- * Pure - no DB. A shift belongs to the Beirut day the employee checked IN, so
- * an overnight shift needs no special casing: it is simply that day's shift.
+ * How many minutes each day owed, how many were actually covered, and what the
+ * covered ones earned. Pure - no DB. A shift belongs to the Beirut day the
+ * employee checked IN, so an overnight shift needs no special casing: it is
+ * simply that day's shift.
+ *
+ * `rateCentAt` is required rather than optional on purpose. It is only ever
+ * `(at) => rateAt(rateChanges, at)`, but a caller that could omit it would get
+ * a silent zero gross, and a zero gross is a valid-looking number that clamps
+ * a whole day's penalty to nothing.
  */
 export function computeCoverage(args: {
   punches: PunchLite[];
   shiftMinByWeekday: Map<number, number>;
   overridesByDate: Map<string, OverrideLite>;
+  rateCentAt: (at: Date) => number;
 }): DayCoverage[] {
   const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
 
   const workedByDate = new Map<string, number>();
+  const grossByDate = new Map<string, number>();
   const lastPunchByDate = new Map<string, Date>();
   // The weekday must come from the ARRIVAL, not the closing punch: an overnight
   // shift closes on the next calendar day, which is a different weekday.
@@ -68,6 +83,10 @@ export function computeCoverage(args: {
     const date = inBeirut(openIn.at).date;
     const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
     workedByDate.set(date, (workedByDate.get(date) ?? 0) + minutes);
+    // Same expression payout.ts uses per interval, resolved at the SAME instant
+    // (the checkout), so summing these across a month reproduces gross exactly.
+    const intervalCent = Math.floor((minutes * args.rateCentAt(p.at)) / 60);
+    grossByDate.set(date, (grossByDate.get(date) ?? 0) + intervalCent);
     lastPunchByDate.set(date, p.at);
     if (!arrivalByDate.has(date)) arrivalByDate.set(date, openIn.at);
     openIn = null;
@@ -95,6 +114,7 @@ export function computeCoverage(args: {
       deltaMin: workedMin - requiredMin,
       closed: !openDates.has(date),
       lastPunchAt,
+      grossCent: grossByDate.get(date) ?? 0,
     });
   }
 

@@ -40,8 +40,9 @@ export interface PenaltyItem {
   kind: PenaltyKind;
   shortfallMin: number; // minutes short of the required coverage
   penaltyMin: number; // minutes docked for it
-  rate_cent: number; // hourly rate applied
-  amount_cent: number; // floor(penaltyMin * rate_cent / 60)
+  rate_cent: number; // the rate in force at the day's last punch, for reference
+  // floor(penaltyMin * rate_cent / 60), clamped to what the day actually earned
+  amount_cent: number;
   waived: boolean; // money: a waiver row exists, so nothing is docked for this day
   waiverStale: boolean; // review: that waiver was given against a different figure
 }
@@ -123,13 +124,23 @@ export function shortfallPenalties(args: {
     if (penaltyMin === 0) continue;
     const rate = rateAt(args.rateChanges, day.lastPunchAt);
     const waiver = args.waivers.get(`${day.date}|SHORTFALL`);
+    // The minute ceiling gets the intent right but cannot get the money right
+    // on its own: it prices the whole day at one rate, while payroll prices
+    // each interval at the rate in force when it closed. A RateChange saved
+    // mid-shift makes the two disagree, and the penalty can then exceed the
+    // day's pay and start taking the next day's - the exact thing the owner
+    // called unethical. Sum-of-floors also runs below floor-of-sum by up to a
+    // cent per interval. Clamping to the day's own gross closes both, and is
+    // what makes "the worst day is zero pay" true rather than nearly true.
+    const amountCent = Math.min(Math.floor((penaltyMin * rate) / 60), day.grossCent);
+    if (amountCent === 0) continue;
     items.push({
       date: day.date,
       kind: 'SHORTFALL',
       shortfallMin,
       penaltyMin,
       rate_cent: rate,
-      amount_cent: Math.floor((penaltyMin * rate) / 60),
+      amount_cent: amountCent,
       // The row itself stops the money, whatever figure it names - the owner
       // decided this employee keeps this day's pay, and a correction he made
       // afterwards must not quietly reverse that. The recorded figure only
@@ -200,6 +211,7 @@ export async function penaltiesForUser(
     punches: punches as PunchLite[],
     shiftMinByWeekday,
     overridesByDate,
+    rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
   });
   return shortfallPenalties({
     coverage,
@@ -331,14 +343,16 @@ export async function pendingPenaltyNotices(
     }
 
     const userPunches = (punchesBy.get(u.id) ?? []) as PunchLite[];
+    const userRates = (ratesBy.get(u.id) ?? []) as RateChangeLite[];
     const coverage = computeCoverage({
       punches: userPunches,
       shiftMinByWeekday,
       overridesByDate,
+      rateCentAt: (at) => rateAt(userRates, at),
     });
     const items = shortfallPenalties({
       coverage,
-      rateChanges: (ratesBy.get(u.id) ?? []) as RateChangeLite[],
+      rateChanges: userRates,
       graceMin: graceByUser.get(u.id) ?? DEFAULT_GRACE_MIN,
       currentShiftDate: currentShiftDate(userPunches, now),
       waivers: waiversByKey,

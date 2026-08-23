@@ -2,18 +2,22 @@ import { describe, it, expect } from 'vitest';
 import { currentShiftDate, penaltyMinutes, shortfallPenalties, sumActivePenaltiesCent } from './penalty';
 import type { PenaltyDecisionLite } from './penalty';
 import { computeCoverage, type DayCoverage, type PunchLite } from './coverage';
+import { computePayoutFromRows, rateAt } from './payout';
 
-const RATE = [{ rate_cent: 60_000, effective_from: new Date('2020-01-01T00:00:00Z') }];
-// The owner's own numbers: $2.00/h against an 8-hour day.
-const REAL_RATE = [{ rate_cent: 200, effective_from: new Date('2020-01-01T00:00:00Z') }];
+// The owner's own numbers: $2.00/h against an 8-hour day. One rate throughout,
+// so a fixture's grossCent is derived from it and cannot drift away from the
+// rate the assertions are reasoning about.
+const RATE_CENT = 200;
+const REAL_RATE = [{ rate_cent: RATE_CENT, effective_from: new Date('2020-01-01T00:00:00Z') }];
 const SHIFT_MIN = 480;
 const GRACE = 15;
 // Every fixture day is 2026-08-17; judging happens on a later shift-day unless a
 // test says otherwise, so the fixture day is never the one being skipped.
 const LATER_DAY = '2026-08-18';
 
-// deltaMin is derived, never passed: a fixture that could disagree with its own
-// workedMin would let a ceiling assertion pass against a day that never existed.
+// deltaMin and grossCent are derived, never passed: a fixture that could
+// disagree with its own workedMin would let a ceiling assertion pass against a
+// day that never existed.
 function day(over: { workedMin: number; requiredMin?: number; date?: string; closed?: boolean }): DayCoverage {
   const requiredMin = over.requiredMin ?? SHIFT_MIN;
   return {
@@ -23,6 +27,7 @@ function day(over: { workedMin: number; requiredMin?: number; date?: string; clo
     deltaMin: over.workedMin - requiredMin,
     closed: over.closed ?? true,
     lastPunchAt: new Date('2026-08-17T14:00:00Z'),
+    grossCent: Math.floor((over.workedMin * RATE_CENT) / 60),
   };
 }
 
@@ -92,23 +97,21 @@ describe('shortfallPenalties', () => {
   it('never docks more than the day earned', () => {
     // The whole point of the ceiling: 4h at $2.00 grosses $8.00, and the
     // penalty is exactly that, so the day nets zero and no other day is touched.
-    const items = shortfallPenalties({
-      coverage: [day({ workedMin: 240 })],
-      rateChanges: REAL_RATE,
-      graceMin: GRACE,
-      currentShiftDate: LATER_DAY,
-      waivers: new Map(),
-    });
-    const grossCent = Math.floor((240 * 200) / 60);
-    expect(items[0]!.penaltyMin).toBe(240);
-    expect(items[0]!.amount_cent).toBe(grossCent);
-    expect(items[0]!.amount_cent).toBeLessThanOrEqual(grossCent);
+    // The comparison gross comes from payroll's own reckoning rather than a
+    // local multiplication - computing it here is how this test stayed green
+    // while the amount could still overshoot.
+    const worked = punches(['2026-08-17T05:00:00Z', 'IN'], ['2026-08-17T09:00:00Z', 'OUT']);
+    const grossCent = paidForCent(worked, REAL_RATE);
+    const item = judge(worked, new Date('2026-08-18T07:00:00Z'))[0]!;
+    expect(grossCent).toBe(800);
+    expect(item.penaltyMin).toBe(240);
+    expect(item.amount_cent).toBe(grossCent);
   });
 
   it('reports the shortfall and the minutes docked separately', () => {
     const items = shortfallPenalties({
       coverage: [day({ workedMin: 360 })],
-      rateChanges: RATE,
+      rateChanges: REAL_RATE,
       graceMin: GRACE,
       currentShiftDate: LATER_DAY,
       waivers: new Map(),
@@ -117,15 +120,15 @@ describe('shortfallPenalties', () => {
     expect(items[0]!.kind).toBe('SHORTFALL');
     expect(items[0]!.shortfallMin).toBe(120);
     expect(items[0]!.penaltyMin).toBe(240);
-    expect(items[0]!.rate_cent).toBe(60_000);
-    expect(items[0]!.amount_cent).toBe(240_000);
+    expect(items[0]!.rate_cent).toBe(RATE_CENT);
+    expect(items[0]!.amount_cent).toBe(800);
   });
 
   it('raises nothing for a day that worked about nothing', () => {
     expect(
       shortfallPenalties({
         coverage: [day({ workedMin: 0 })],
-        rateChanges: RATE,
+        rateChanges: REAL_RATE,
         graceMin: GRACE,
         currentShiftDate: LATER_DAY,
         waivers: new Map(),
@@ -137,7 +140,7 @@ describe('shortfallPenalties', () => {
     expect(
       shortfallPenalties({
         coverage: [day({ workedMin: SHIFT_MIN })],
-        rateChanges: RATE,
+        rateChanges: REAL_RATE,
         graceMin: GRACE,
         currentShiftDate: LATER_DAY,
         waivers: new Map(),
@@ -149,7 +152,7 @@ describe('shortfallPenalties', () => {
     expect(
       shortfallPenalties({
         coverage: [day({ workedMin: 600 })],
-        rateChanges: RATE,
+        rateChanges: REAL_RATE,
         graceMin: GRACE,
         currentShiftDate: LATER_DAY,
         waivers: new Map(),
@@ -161,7 +164,7 @@ describe('shortfallPenalties', () => {
     expect(
       shortfallPenalties({
         coverage: [day({ workedMin: 0, closed: false })],
-        rateChanges: RATE,
+        rateChanges: REAL_RATE,
         graceMin: GRACE,
         currentShiftDate: LATER_DAY,
         waivers: new Map(),
@@ -172,7 +175,7 @@ describe('shortfallPenalties', () => {
   it('marks a waived day', () => {
     const items = shortfallPenalties({
       coverage: [day({ workedMin: 360 })],
-      rateChanges: RATE,
+      rateChanges: REAL_RATE,
       graceMin: GRACE,
       currentShiftDate: LATER_DAY,
       waivers: waiverAt(240),
@@ -217,6 +220,9 @@ describe('a waiver keeps forgiving; only review depends on the figure', () => {
 
   it('deducts nothing for a stale waiver', () => {
     expect(sumActivePenaltiesCent(judgeWaived(330, waiverAt(240)))).toBe(0);
+    // The penalty itself is real - it is the waiver that is holding it off, not
+    // an amount that happens to be zero.
+    expect(judgeWaived(330, waiverAt(240))[0]!.amount_cent).toBeGreaterThan(0);
   });
 
   it('keeps forgiving on a waiver that recorded no amount, and flags that too', () => {
@@ -244,20 +250,43 @@ function punches(...pairs: Array<[string, 'IN' | 'OUT']>): PunchLite[] {
   return pairs.map(([iso, kind]) => ({ kind, at: new Date(iso) }));
 }
 
+interface RateLite {
+  rate_cent: number;
+  effective_from: Date;
+}
+
 // Exactly what penaltiesForUser does with what it loads: coverage, then the
 // current shift-day from the same punches, then the judgement.
-function judge(list: PunchLite[], now: Date) {
+function judgeAt(list: PunchLite[], rates: RateLite[], now: Date) {
   return shortfallPenalties({
     coverage: computeCoverage({
       punches: list,
       shiftMinByWeekday: ALL_DAYS_8H,
       overridesByDate: new Map(),
+      rateCentAt: (at) => rateAt(rates, at),
     }),
-    rateChanges: REAL_RATE,
+    rateChanges: rates,
     graceMin: GRACE,
     currentShiftDate: currentShiftDate(list, now),
     waivers: new Map(),
   });
+}
+
+function judge(list: PunchLite[], now: Date) {
+  return judgeAt(list, REAL_RATE, now);
+}
+
+// What payroll actually hands over for these punches. Taken from the payroll
+// entry point rather than multiplied out here, so a penalty bounded by "the
+// day's pay" is bounded by the number the employee is really paid.
+function paidForCent(list: PunchLite[], rates: RateLite[]): number {
+  return computePayoutFromRows({
+    userId: 'u1',
+    punches: list.map((pp, i) => ({ id: `p${i}`, user_id: 'u1', kind: pp.kind, at: pp.at })),
+    rateChanges: rates.map((r) => ({ user_id: 'u1', ...r })),
+    adjustments: [],
+    approvedAdvances: [],
+  }).grossCent;
 }
 
 // Mon 08:00-12:00 Beirut, out, back 17:00-20:00. 420 of 480 minutes covered.
@@ -317,5 +346,58 @@ describe('a day is only judged once it is over', () => {
     const items = judge(withTuesday, new Date('2026-08-18T07:00:00Z'));
     expect(items).toHaveLength(1);
     expect(items[0]!.date).toBe('2026-08-17');
+  });
+});
+
+describe('a penalty never reaches past the day it is for', () => {
+  // A RateChange is stamped effective_from the instant it is saved, so a raise
+  // entered during a shift splits that day across two rates.
+  const MIDDAY_RAISE: RateLite[] = [
+    { rate_cent: 200, effective_from: new Date('2020-01-01T00:00:00Z') },
+    { rate_cent: 250, effective_from: new Date('2026-08-17T11:00:00Z') }, // 14:00 Beirut
+  ];
+  // 08:00-12:00 and 15:00-16:00 Beirut: 300 of 480 minutes, either side of it.
+  const ACROSS_THE_RAISE = punches(
+    ['2026-08-17T05:00:00Z', 'IN'],
+    ['2026-08-17T09:00:00Z', 'OUT'],
+    ['2026-08-17T12:00:00Z', 'IN'],
+    ['2026-08-17T13:00:00Z', 'OUT'],
+  );
+  const NEXT_DAY = new Date('2026-08-18T07:00:00Z');
+
+  it('cannot exceed what payroll paid for a day split by a mid-shift raise', () => {
+    const gross = paidForCent(ACROSS_THE_RAISE, MIDDAY_RAISE);
+    expect(gross).toBe(1050); // 240 min at $2.00 plus 60 min at $2.50
+
+    const item = judgeAt(ACROSS_THE_RAISE, MIDDAY_RAISE, NEXT_DAY)[0]!;
+    expect(item.penaltyMin).toBe(300);
+
+    // Pricing the whole day at the closing rate - which is what the minute
+    // ceiling does on its own - takes $12.50 out of a day worth $10.50 and
+    // starts eating into the next one.
+    const wholeDayAtClosingRate = Math.floor((300 * 250) / 60);
+    expect(wholeDayAtClosingRate).toBe(1250);
+    expect(item.amount_cent).toBeLessThan(wholeDayAtClosingRate);
+    expect(item.amount_cent).toBe(gross);
+    expect(gross - item.amount_cent).toBe(0);
+  });
+
+  it('does not overshoot by the rounding on each session', () => {
+    // Sum-of-floors sits below floor-of-sum, so a ceiling-bound day priced as
+    // one block runs over by up to a cent per session even at a flat rate.
+    const flat: RateLite[] = [{ rate_cent: 100, effective_from: new Date('2020-01-01T00:00:00Z') }];
+    const twoShortSessions = punches(
+      ['2026-08-17T05:00:00Z', 'IN'],
+      ['2026-08-17T05:07:00Z', 'OUT'],
+      ['2026-08-17T06:00:00Z', 'IN'],
+      ['2026-08-17T06:07:00Z', 'OUT'],
+    );
+    const gross = paidForCent(twoShortSessions, flat);
+    expect(gross).toBe(22); // floor(7 * 100 / 60) twice, not floor(14 * 100 / 60)
+
+    const item = judgeAt(twoShortSessions, flat, NEXT_DAY)[0]!;
+    expect(item.penaltyMin).toBe(14);
+    expect(Math.floor((14 * 100) / 60)).toBe(23);
+    expect(item.amount_cent).toBe(22);
   });
 });
