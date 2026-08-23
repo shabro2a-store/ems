@@ -257,6 +257,13 @@ model PenaltyWaiver {
   user       User        @relation(fields: [user_id], references: [id])
   date       DateTime    @db.Date
   kind       PenaltyKind
+  // The minutes this day's penalty stood at when the owner ruled. One row per
+  // (user, day, kind), but the penalty moves whenever a punch is corrected -
+  // and the owner corrects punches by hand routinely - so the ruling has to
+  // name the amount it was made against: it only counts while this still
+  // equals the day's current penalty minutes. Null is treated as stale, which
+  // is what makes any pre-column row need no backfill.
+  penalty_min Int?
   reason     String?
   waived_by  String
   created_at DateTime    @default(now())
@@ -274,6 +281,13 @@ model PenaltyAck {
   user            User        @relation(fields: [user_id], references: [id])
   date            DateTime    @db.Date
   kind            PenaltyKind
+  // The minutes this day's penalty stood at when the owner ruled. One row per
+  // (user, day, kind), but the penalty moves whenever a punch is corrected -
+  // and the owner corrects punches by hand routinely - so the ruling has to
+  // name the amount it was made against: it only counts while this still
+  // equals the day's current penalty minutes. Null is treated as stale, which
+  // is what makes any pre-column row need no backfill.
+  penalty_min Int?
   acknowledged_by String
   created_at      DateTime    @default(now())
 

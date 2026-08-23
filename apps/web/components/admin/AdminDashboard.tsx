@@ -310,7 +310,9 @@ export default function AdminDashboard() {
                 ))}
                 {att.penalties.map((p) => {
                   const key = `${p.user_id}|${p.date}|${p.kind}`;
-                  const body = { userId: p.user_id, date: p.date, kind: p.kind };
+                  // penaltyMin is the amount this row is showing: the server
+                  // refuses the ruling if a correction has moved the day since.
+                  const body = { userId: p.user_id, date: p.date, kind: p.kind, penaltyMin: p.penaltyMin };
                   return (
                     <li key={key} className="flex items-start gap-3 px-4 py-3 sm:px-5">
                       <Badge tone="danger">Penalty</Badge>

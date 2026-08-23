@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
+import { penaltyMinForDay } from '@/lib/services/penalty';
 
 // The regex only checks shape. Round-tripping through a UTC Date catches a
 // string that is shaped like a date but names no real calendar day (e.g.
@@ -19,15 +20,28 @@ const Body = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, 'date must be a real calendar day'),
   kind: z.enum(['SHORTFALL']),
   waived: z.boolean(),
+  // The docked minutes the screen actually rendered. A comparison token only:
+  // it is never stored and never becomes money. The stored figure is always
+  // the server's own, and the two must agree or the ruling is refused -
+  // otherwise a punch corrected while the screen sits open turns a click on a
+  // $2.00 row into a ruling on $9.00.
+  penaltyMin: z.number().int().min(0),
   reason: z.string().max(500).optional(),
 });
+
+function formatMinutes(min: number): string {
+  const h = Math.floor(min / 60);
+  return h > 0 ? `${h}h ${min % 60}m` : `${min}m`;
+}
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
 // Remove ("waive") or re-apply an auto-computed penalty for one (user, day, kind).
-// This only ever touches PenaltyWaiver rows — never a manual Adjustment.
+// This only ever touches PenaltyWaiver rows — never a manual Adjustment. The
+// waiver records the minutes it was given against, so a punch corrected later
+// cannot leave a bigger penalty forgiven by a ruling that never saw it.
 export async function POST(req: Request) {
   const h = headers();
   const role = h.get('x-user-role');
@@ -46,27 +60,56 @@ export async function POST(req: Request) {
   const date = new Date(`${body.date}T00:00:00.000Z`);
   const key = { user_id_date_kind: { user_id: body.userId, date, kind: body.kind } };
 
+  // Always the server's own figure - the request cannot name what gets stored.
+  // Both directions move money against the amount the screen was showing, so
+  // both are confirmed first: waiving hands back what the row says, restoring
+  // takes back what the row says.
+  const penaltyMin = await penaltyMinForDay(body.userId, body.date, body.kind, prisma);
+  if (body.penaltyMin !== penaltyMin) {
+    return jsonError(
+      'PENALTY_CHANGED',
+      `This day's penalty changed from ${formatMinutes(body.penaltyMin)} to ${formatMinutes(penaltyMin)} while the screen was open. Nothing was changed - check the new figure and decide again.`,
+      409,
+    );
+  }
+
   if (body.waived) {
     await prisma.penaltyWaiver.upsert({
       where: key,
-      create: { user_id: body.userId, date, kind: body.kind, reason: body.reason ?? null, waived_by: adminId },
-      update: { reason: body.reason ?? null, waived_by: adminId },
+      create: {
+        user_id: body.userId,
+        date,
+        kind: body.kind,
+        penalty_min: penaltyMin,
+        reason: body.reason ?? null,
+        waived_by: adminId,
+      },
+      update: { penalty_min: penaltyMin, reason: body.reason ?? null, waived_by: adminId },
     });
     await writeAuditLog({
       actorId: adminId,
       action: 'penalty.waive',
       entity: 'PenaltyWaiver',
       entityId: `${body.userId}:${body.date}:${body.kind}`,
-      after: { user_id: body.userId, date: body.date, kind: body.kind, reason: body.reason ?? null },
+      after: {
+        user_id: body.userId,
+        date: body.date,
+        kind: body.kind,
+        penalty_min: penaltyMin,
+        reason: body.reason ?? null,
+      },
     });
   } else {
+    const existing = await prisma.penaltyWaiver.findUnique({ where: key });
     await prisma.penaltyWaiver.deleteMany({ where: { user_id: body.userId, date, kind: body.kind } });
     await writeAuditLog({
       actorId: adminId,
       action: 'penalty.unwaive',
       entity: 'PenaltyWaiver',
       entityId: `${body.userId}:${body.date}:${body.kind}`,
-      before: { user_id: body.userId, date: body.date, kind: body.kind },
+      before: existing
+        ? { user_id: body.userId, date: body.date, kind: body.kind, penalty_min: existing.penalty_min }
+        : null,
     });
   }
 

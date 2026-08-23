@@ -242,13 +242,22 @@ raises no shortfall between its sessions. Unclosed days stay out too.
 - **GET /api/admin/penalties?userId=&month=YYYY-MM** → `{ penalties: [{ date, kind:
   "SHORTFALL", shortfallMin, penaltyMin, rate_cent, amount_cent, waived }] }`.
 - **POST /api/admin/penalties/waive** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:
-  "SHORTFALL", waived: bool, reason? }` — removes (`waived:true`) or
+  "SHORTFALL", waived: bool, penaltyMin, reason? }` — removes (`waived:true`) or
   re-applies (`waived:false`) one auto-penalty. Only ever writes `PenaltyWaiver`
   rows; never a manual adjustment. → `{ waived }`.
 - **POST /api/admin/penalties/ack** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:
-  "SHORTFALL" }` — upholds one auto-penalty: writes a `PenaltyAck` so the
+  "SHORTFALL", penaltyMin }` — upholds one auto-penalty: writes a `PenaltyAck` so the
   attention queue stops recomputing it. **Changes no money** — `waive` is the one
   that refunds. Audited. → `{ acknowledged: true }`.
+- `penaltyMin` is **required** on both: it is the amount the screen was showing. The
+  route computes the day's true docked minutes **server-side** and compares. They must
+  match — otherwise `409 PENALTY_CHANGED`, naming both figures, and **nothing is
+  written**. On a match the row is stamped with the **server's** value, so the body
+  never supplies money. If the day's penalty changes *after* a ruling, the ruling goes
+  stale: an ack stops holding the day off the attention queue and a waiver stops
+  forgiving it, the day reappears at the new amount, and the automatic penalty applies
+  at that amount until the owner rules on it. A null `penalty_min` (any row predating
+  the column) is stale the same way.
 
 ### Overtime
 A day that ran past its required hours by more than the branch's shift grace

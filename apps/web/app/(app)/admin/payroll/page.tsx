@@ -335,10 +335,17 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
     const id = `${p.date}|${p.kind}`;
     setBusy(id); setErr(null);
     const res = await apiSend('/api/admin/penalties/waive', {
-      body: { userId: row.user_id, date: p.date, kind: p.kind, waived: !p.waived },
+      // This modal does not poll, so a punch corrected while it sits open can
+      // move the figure on screen. Sending it lets the server refuse a ruling
+      // made against an amount the day no longer has.
+      body: { userId: row.user_id, date: p.date, kind: p.kind, waived: !p.waived, penaltyMin: p.penaltyMin },
     });
     setBusy(null);
-    if (!res.ok) { setErr(errorMessage(res)); return; }
+    if (!res.ok) {
+      setErr(errorMessage(res));
+      await load(); // the refused ruling means the list is out of date - show the new figure
+      return;
+    }
     setItems((prev) => prev?.map((x) => (x.date === p.date && x.kind === p.kind ? { ...x, waived: !x.waived } : x)) ?? null);
     onChanged();
   }

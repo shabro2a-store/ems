@@ -50,6 +50,28 @@ interface RateChangeLite {
   effective_from: Date;
 }
 
+/** A stored ruling on one day's penalty plus the figure it was made against. */
+export interface PenaltyDecisionLite {
+  penalty_min: number | null;
+}
+
+/**
+ * Whether a stored waiver or ack still applies to the day in front of it.
+ *
+ * A ruling applies to the day as it stood when it was made. One row per
+ * (user, day, kind), but the penalty moves whenever a punch is corrected - and
+ * this owner corrects punches by hand routinely - so an ack given against 30
+ * docked minutes must not silently uphold 300, and a waiver given against 30
+ * must not silently forgive 300. When the figures disagree the ruling is stale
+ * and the day reads as undecided again: back on the review queue at the full
+ * new amount, for the owner to rule on the amount that is actually there. A
+ * null recorded figure predates the column and is stale for the same reason.
+ */
+function ruledOn(stored: PenaltyDecisionLite | undefined, penaltyMin: number): boolean {
+  if (!stored) return false;
+  return stored.penalty_min === penaltyMin;
+}
+
 /**
  * The shift-day the employee is on right now, which is the day a shortfall must
  * not be judged on yet. Delegated to currentShiftDayMinutes so there is one
@@ -81,7 +103,7 @@ export function shortfallPenalties(args: {
   rateChanges: RateChangeLite[];
   graceMin: number;
   currentShiftDate: string;
-  waivedKeys: Set<string>; // `${date}|SHORTFALL`
+  waivers: Map<string, PenaltyDecisionLite>; // keyed `${date}|SHORTFALL`
 }): PenaltyItem[] {
   const items: PenaltyItem[] = [];
   for (const day of args.coverage) {
@@ -99,7 +121,7 @@ export function shortfallPenalties(args: {
       penaltyMin,
       rate_cent: rate,
       amount_cent: Math.floor((penaltyMin * rate) / 60),
-      waived: args.waivedKeys.has(`${day.date}|SHORTFALL`),
+      waived: ruledOn(args.waivers.get(`${day.date}|SHORTFALL`), penaltyMin),
     });
   }
   items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -135,7 +157,7 @@ export async function penaltiesForUser(
     }),
     db.penaltyWaiver.findMany({
       where: { user_id: userId, date: { gte: start, lt: end } },
-      select: { date: true, kind: true },
+      select: { date: true, kind: true, penalty_min: true },
     }),
     db.user.findUnique({
       where: { id: userId },
@@ -155,8 +177,10 @@ export async function penaltiesForUser(
     });
   }
 
-  const waivedKeys = new Set<string>();
-  for (const w of waivers) waivedKeys.add(`${w.date.toISOString().slice(0, 10)}|${w.kind}`);
+  const waiversByKey = new Map<string, PenaltyDecisionLite>();
+  for (const w of waivers) {
+    waiversByKey.set(`${w.date.toISOString().slice(0, 10)}|${w.kind}`, { penalty_min: w.penalty_min });
+  }
 
   const coverage = computeCoverage({
     punches: punches as PunchLite[],
@@ -168,8 +192,25 @@ export async function penaltiesForUser(
     rateChanges: rateChanges as RateChangeLite[],
     graceMin: user?.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN,
     currentShiftDate: currentShiftDate(punches as PunchLite[], opts.now ?? new Date()),
-    waivedKeys,
+    waivers: waiversByKey,
   });
+}
+
+/**
+ * The day's docked minutes as they stand right now, for stamping onto a ruling.
+ * Read through penaltiesForUser rather than recomputed here, so the figure a
+ * decision is stamped with cannot disagree with the figure every reader sees.
+ * A day with no penalty (inside the grace, still open, or the current
+ * shift-day) is zero, which never matches a real notice.
+ */
+export async function penaltyMinForDay(
+  userId: string,
+  date: string,
+  kind: PenaltyKind,
+  db: PrismaClient,
+): Promise<number> {
+  const items = await penaltiesForUser(userId, date.slice(0, 7), db);
+  return items.find((i) => i.date === date && i.kind === kind)?.penaltyMin ?? 0;
 }
 
 export function sumActivePenaltiesCent(items: PenaltyItem[]): number {
@@ -217,11 +258,11 @@ export async function pendingPenaltyNotices(
     }),
     db.penaltyWaiver.findMany({
       where: { user_id: { in: ids }, date: { gte: start, lt: end } },
-      select: { user_id: true, date: true, kind: true },
+      select: { user_id: true, date: true, kind: true, penalty_min: true },
     }),
     db.penaltyAck.findMany({
       where: { user_id: { in: ids }, date: { gte: start, lt: end } },
-      select: { user_id: true, date: true, kind: true },
+      select: { user_id: true, date: true, kind: true, penalty_min: true },
     }),
     db.user.findMany({
       where: { id: { in: ids } },
@@ -244,8 +285,10 @@ export async function pendingPenaltyNotices(
   const ratesBy = by(rateChanges);
   const waiversBy = by(waivers);
 
-  const ackedKeys = new Set<string>();
-  for (const a of acks) ackedKeys.add(`${a.user_id}|${a.date.toISOString().slice(0, 10)}|${a.kind}`);
+  const acksByKey = new Map<string, PenaltyDecisionLite>();
+  for (const a of acks) {
+    acksByKey.set(`${a.user_id}|${a.date.toISOString().slice(0, 10)}|${a.kind}`, { penalty_min: a.penalty_min });
+  }
 
   const graceByUser = new Map<string, number>();
   for (const u of userBranches) graceByUser.set(u.id, u.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN);
@@ -264,9 +307,9 @@ export async function pendingPenaltyNotices(
         shift_min: o.shift_min,
       });
     }
-    const waivedKeys = new Set<string>();
+    const waiversByKey = new Map<string, PenaltyDecisionLite>();
     for (const w of waiversBy.get(u.id) ?? []) {
-      waivedKeys.add(`${w.date.toISOString().slice(0, 10)}|${w.kind}`);
+      waiversByKey.set(`${w.date.toISOString().slice(0, 10)}|${w.kind}`, { penalty_min: w.penalty_min });
     }
 
     const userPunches = (punchesBy.get(u.id) ?? []) as PunchLite[];
@@ -280,13 +323,16 @@ export async function pendingPenaltyNotices(
       rateChanges: (ratesBy.get(u.id) ?? []) as RateChangeLite[],
       graceMin: graceByUser.get(u.id) ?? DEFAULT_GRACE_MIN,
       currentShiftDate: currentShiftDate(userPunches, now),
-      waivedKeys,
+      waivers: waiversByKey,
     });
 
     for (const p of items) {
+      // p.waived is already the live reading: a waiver stamped against a
+      // different figure does not cover this penalty, so the day is applied
+      // and unreviewed and belongs back here.
       if (p.waived) continue;
       if (p.date < opts.since) continue;
-      if (ackedKeys.has(`${u.id}|${p.date}|${p.kind}`)) continue;
+      if (ruledOn(acksByKey.get(`${u.id}|${p.date}|${p.kind}`), p.penaltyMin)) continue;
       notices.push({ ...p, user_id: u.id, username: u.username });
     }
   }

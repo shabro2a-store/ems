@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { currentShiftDate, penaltyMinutes, shortfallPenalties } from './penalty';
+import type { PenaltyDecisionLite } from './penalty';
 import { computeCoverage, type DayCoverage, type PunchLite } from './coverage';
 
 const RATE = [{ rate_cent: 60_000, effective_from: new Date('2020-01-01T00:00:00Z') }];
@@ -31,7 +32,7 @@ function amountFor(workedMin: number): number {
     rateChanges: REAL_RATE,
     graceMin: GRACE,
     currentShiftDate: LATER_DAY,
-    waivedKeys: new Set(),
+    waivers: new Map(),
   });
   return items[0]?.amount_cent ?? 0;
 }
@@ -96,7 +97,7 @@ describe('shortfallPenalties', () => {
       rateChanges: REAL_RATE,
       graceMin: GRACE,
       currentShiftDate: LATER_DAY,
-      waivedKeys: new Set(),
+      waivers: new Map(),
     });
     const grossCent = Math.floor((240 * 200) / 60);
     expect(items[0]!.penaltyMin).toBe(240);
@@ -110,7 +111,7 @@ describe('shortfallPenalties', () => {
       rateChanges: RATE,
       graceMin: GRACE,
       currentShiftDate: LATER_DAY,
-      waivedKeys: new Set(),
+      waivers: new Map(),
     });
     expect(items).toHaveLength(1);
     expect(items[0]!.kind).toBe('SHORTFALL');
@@ -127,7 +128,7 @@ describe('shortfallPenalties', () => {
         rateChanges: RATE,
         graceMin: GRACE,
         currentShiftDate: LATER_DAY,
-        waivedKeys: new Set(),
+        waivers: new Map(),
       }),
     ).toHaveLength(0);
   });
@@ -139,7 +140,7 @@ describe('shortfallPenalties', () => {
         rateChanges: RATE,
         graceMin: GRACE,
         currentShiftDate: LATER_DAY,
-        waivedKeys: new Set(),
+        waivers: new Map(),
       }),
     ).toHaveLength(0);
   });
@@ -151,7 +152,7 @@ describe('shortfallPenalties', () => {
         rateChanges: RATE,
         graceMin: GRACE,
         currentShiftDate: LATER_DAY,
-        waivedKeys: new Set(),
+        waivers: new Map(),
       }),
     ).toHaveLength(0);
   });
@@ -163,7 +164,7 @@ describe('shortfallPenalties', () => {
         rateChanges: RATE,
         graceMin: GRACE,
         currentShiftDate: LATER_DAY,
-        waivedKeys: new Set(),
+        waivers: new Map(),
       }),
     ).toHaveLength(0);
   });
@@ -174,9 +175,44 @@ describe('shortfallPenalties', () => {
       rateChanges: RATE,
       graceMin: GRACE,
       currentShiftDate: LATER_DAY,
-      waivedKeys: new Set(['2026-08-17|SHORTFALL']),
+      waivers: waiverAt(240),
     });
     expect(items[0]!.waived).toBe(true);
+  });
+});
+
+// A stored waiver on the fixture day, recorded against `penaltyMin` minutes.
+function waiverAt(penaltyMin: number | null): Map<string, PenaltyDecisionLite> {
+  return new Map([['2026-08-17|SHORTFALL', { penalty_min: penaltyMin }]]);
+}
+
+describe('a penalty ruling only covers the figure it was made against', () => {
+  function judgeWaived(workedMin: number, waivers: Map<string, PenaltyDecisionLite>) {
+    return shortfallPenalties({
+      coverage: [day({ workedMin })],
+      rateChanges: REAL_RATE,
+      graceMin: GRACE,
+      currentShiftDate: LATER_DAY,
+      waivers,
+    });
+  }
+
+  it('keeps a waiver that still names the figure the day has', () => {
+    // 360 worked, 120 short, 240 docked - the amount the waiver was given for.
+    expect(judgeWaived(360, waiverAt(240))[0]!.waived).toBe(true);
+  });
+
+  it('drops a waiver once a correction moves the day', () => {
+    // The owner forgave 240 docked minutes. A corrected punch makes it 300, an
+    // amount nobody has ruled on, so the old waiver does not cover it.
+    expect(judgeWaived(330, waiverAt(240))[0]!.penaltyMin).toBe(300);
+    expect(judgeWaived(330, waiverAt(240))[0]!.waived).toBe(false);
+  });
+
+  it('treats a waiver recorded against nothing as stale', () => {
+    // Any row written before penalty_min existed. It named no amount, so it
+    // cannot be said to cover this one.
+    expect(judgeWaived(360, waiverAt(null))[0]!.waived).toBe(false);
   });
 });
 
@@ -199,7 +235,7 @@ function judge(list: PunchLite[], now: Date) {
     rateChanges: REAL_RATE,
     graceMin: GRACE,
     currentShiftDate: currentShiftDate(list, now),
-    waivedKeys: new Set(),
+    waivers: new Map(),
   });
 }
 
