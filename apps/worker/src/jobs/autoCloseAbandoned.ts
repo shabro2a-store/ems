@@ -20,6 +20,23 @@ import { resolveRequiredMin } from './requiredMin';
  */
 export const MAX_OPEN_SESSION_MIN = 30 * 60;
 
+/**
+ * When a check-in nobody closed is deemed to have ended: arrival + the hours
+ * that day owed, floored at one minute.
+ *
+ * The worker's copy of systemCheckoutAt in apps/web/lib/services/autoClose.ts,
+ * which is the definition of record and which the blocked-check-in path uses
+ * too. The worker is a separate pnpm package and cannot import from apps/web;
+ * autoCloseAbandoned.test.ts pins the two against the same table of cases.
+ *
+ * The one-minute floor is the difference between a checkout and a lockout -
+ * see the original for why. Do not remove it here without removing it there,
+ * and do not remove it there.
+ */
+export function systemCheckoutAt(arrivalAt: Date, requiredMin: number): Date {
+  return new Date(arrivalAt.getTime() + Math.max(requiredMin, 1) * 60_000);
+}
+
 export interface AutoCloseAbandonedOpts {
   db?: PrismaClient;
   now?: Date;
@@ -51,6 +68,10 @@ export async function runAutoCloseAbandoned(
   const cutoff = new Date(now.getTime() - MAX_OPEN_SESSION_MIN * 60_000);
 
   const users = await db.user.findMany({
+    // Deliberately not filtered on is_active. A deactivated employee cannot
+    // punch again, so no lockout is at stake - but their last session may still
+    // be open, and payroll still has to pay that month correctly. Leaving it
+    // open is what pays a runaway span whenever somebody eventually closes it.
     where: { role: { in: ['EMPLOYEE', 'DRIVER'] } },
     select: { id: true },
   });
@@ -84,13 +105,14 @@ export async function runAutoCloseAbandoned(
         select: { kind: true, shift_min: true },
       }),
     ]);
-    // A day that owed nothing closes at the check-in itself: zero minutes, zero
-    // pay. That is the same ruling applied to a day whose required minutes
-    // happen to be zero, and it is deliberately not a reason to leave the
-    // session open - an open session is what blocks the employee's next
-    // check-in, which is the failure this job exists to end.
+    // A day that owed nothing still has to close - an open session is what
+    // blocks the employee's next check-in, which is the failure this job exists
+    // to end - and it closes one minute after the arrival rather than at it.
+    // See systemCheckoutAt: a zero-length checkout is invisible to every guard
+    // that asks for an OUT strictly after the IN, so the session would stay
+    // open and this job would write another one every ten minutes forever.
     const requiredMin = resolveRequiredMin(override, schedule?.shift_min ?? null);
-    const closeAt = new Date(lastIn.at.getTime() + requiredMin * 60_000);
+    const closeAt = systemCheckoutAt(lastIn.at, requiredMin);
     const openMin = Math.floor((now.getTime() - lastIn.at.getTime()) / 60_000);
 
     const wrote = await db.$transaction(async (tx) => {

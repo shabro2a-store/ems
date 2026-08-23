@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MAX_OPEN_SESSION_MIN as WEB_MAX_OPEN_SESSION_MIN } from '@/lib/services/coverage';
+import { systemCheckoutAt as webSystemCheckoutAt } from '@/lib/services/autoClose';
 import { computePayoutFromRows } from '@/lib/services/payout';
 
 type UserRow = { id: string; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER' };
@@ -25,7 +26,7 @@ const store: {
   seq: number;
 } = { users: [], punches: [], schedules: [], overrides: [], audits: [], branches: new Map(), seq: 0 };
 
-import { runAutoCloseAbandoned, MAX_OPEN_SESSION_MIN } from './autoCloseAbandoned';
+import { runAutoCloseAbandoned, MAX_OPEN_SESSION_MIN, systemCheckoutAt } from './autoCloseAbandoned';
 
 function resetStore() {
   store.users.length = 0;
@@ -124,6 +125,22 @@ describe('runAutoCloseAbandoned', () => {
     expect(MAX_OPEN_SESSION_MIN).toBe(WEB_MAX_OPEN_SESSION_MIN);
   });
 
+  it('writes the checkout at the same instant the web rule says, including the one-minute floor', () => {
+    // The blocked-check-in path in punch.ts closes a stale session with the web
+    // copy of this rule. Two closes of the same shape landing on different
+    // instants would mean the same forgotten shift paid differently depending
+    // on which one got there first.
+    const arrival = new Date('2026-07-12T09:00:00+03:00');
+    for (const requiredMin of [0, 1, 15, 240, 480, 720, 1440]) {
+      expect(systemCheckoutAt(arrival, requiredMin).toISOString()).toBe(
+        webSystemCheckoutAt(arrival, requiredMin).toISOString(),
+      );
+    }
+    // Zero required must not land on the arrival itself - every "is this
+    // session still open" guard asks for an OUT strictly after the IN.
+    expect(systemCheckoutAt(arrival, 0).getTime()).toBeGreaterThan(arrival.getTime());
+  });
+
   it('closes an abandoned check-in at check-in plus required, and pays exactly the shift', async () => {
     seedEmployee({ 0: 480 });
     punchIn(CHECK_IN);
@@ -203,10 +220,18 @@ describe('runAutoCloseAbandoned', () => {
     expect(out.at.toISOString()).toBe(new Date('2026-07-12T13:00:00+03:00').toISOString());
   });
 
-  it('closes a day that owed nothing at the check-in itself, rather than leaving it open', async () => {
+  it('closes a day that owed nothing, and closing it actually ends the session', async () => {
     // Staff may clock in on a day off to help during a rush. Nothing was owed,
-    // so nothing is paid - but the session still has to close, because an open
-    // session is what blocks their next check-in.
+    // so essentially nothing is paid - but the session still has to close,
+    // because an open session is what blocks their next check-in.
+    //
+    // This runs TWICE on purpose. The first version of this job wrote the
+    // checkout at exactly the arrival on a 0-required day, and every guard in
+    // the codebase asks for an OUT strictly AFTER the arrival - so the session
+    // stayed open, this job wrote another checkout every ten minutes forever,
+    // and punch.ts refused the employee's next check-in for good. Nothing
+    // alerted: missedCheckout skips days requiring nothing. The single-run
+    // version of this test passed throughout.
     seedEmployee({ 0: 480 });
     store.overrides.push({
       user_id: 'u1',
@@ -216,10 +241,45 @@ describe('runAutoCloseAbandoned', () => {
     });
     punchIn(CHECK_IN);
 
-    const r = await runAutoCloseAbandoned({ db: makeDb() as never, now: new Date('2026-07-14T09:00:00+03:00') });
-    expect(r.closed).toBe(1);
-    expect(store.punches.find((p) => p.kind === 'OUT')!.at.toISOString()).toBe(CHECK_IN.toISOString());
-    expect(grossCentOfStore()).toBe(0);
+    const db = makeDb();
+    const now = new Date('2026-07-14T09:00:00+03:00');
+    expect((await runAutoCloseAbandoned({ db: db as never, now })).closed).toBe(1);
+
+    const out = store.punches.find((p) => p.kind === 'OUT')!;
+    expect(out.at.getTime()).toBeGreaterThan(CHECK_IN.getTime());
+    expect(out.at.toISOString()).toBe(new Date(CHECK_IN.getTime() + 60_000).toISOString());
+    // A minute at $2.00/h floors to 3 cents. The ruling says zero; three cents
+    // is what a record visible to the guards costs.
+    expect(grossCentOfStore()).toBe(3);
+
+    // The session is now genuinely closed: nothing more to do, ever.
+    expect((await runAutoCloseAbandoned({ db: db as never, now })).closed).toBe(0);
+    expect(
+      (await runAutoCloseAbandoned({ db: db as never, now: new Date('2026-07-20T09:00:00+03:00') })).closed,
+    ).toBe(0);
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
+    expect(store.audits).toHaveLength(1);
+  });
+
+  it('leaves a 0-required session closed so the employee can clock in again', async () => {
+    // The lockout was the real damage: with the session still open, punch.ts
+    // answers ALREADY_PUNCHED_IN to every future check-in.
+    seedEmployee({ 0: 480 });
+    store.overrides.push({
+      user_id: 'u1',
+      date: new Date('2026-07-12T00:00:00.000Z'),
+      kind: 'DAY_OFF',
+      shift_min: null,
+    });
+    punchIn(CHECK_IN);
+    const db = makeDb();
+    await runAutoCloseAbandoned({ db: db as never, now: new Date('2026-07-14T09:00:00+03:00') });
+
+    // The exact query every open-session guard runs.
+    const laterOut = await db.punch.findFirst({
+      where: { user_id: 'u1', kind: 'OUT', at: { gt: CHECK_IN } },
+    });
+    expect(laterOut).not.toBeNull();
   });
 
   it('writes one checkout and stops: a second run finds nothing to close', async () => {
