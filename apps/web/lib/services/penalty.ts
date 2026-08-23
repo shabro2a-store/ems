@@ -2,27 +2,40 @@ import type { PrismaClient } from '@prisma/client';
 import { rateAt, monthRangeUtc } from './payout';
 import { computeCoverage, type DayCoverage, type OverrideLite, type PunchLite } from './coverage';
 
-// Shortfall penalty: covering fewer minutes than the day required.
-//   penalty hours = min(4, floor(shortfallMinutes / 15))
-// i.e. under 15 min short is free (grace), then 1 hour docked per 15-min block,
-// capped at 4 hours.
-const BLOCK_MIN = 15;
-const MAX_HOURS = 4;
-
-export function penaltyHours(minutes: number): number {
-  if (minutes < BLOCK_MIN) return 0;
-  return Math.min(MAX_HOURS, Math.floor(minutes / BLOCK_MIN));
+/**
+ * Minutes docked for covering fewer than the day required.
+ *
+ *   shortfall <= grace -> nothing
+ *   otherwise            min(2 * shortfall, workedMin)
+ *
+ * The grace is a threshold, not forgiveness: past it the whole shortfall is
+ * doubled, exactly as an overrun past the same grace is reported in full. 16
+ * minutes short of a 15-minute grace docks 32, not 2.
+ *
+ * The ceiling is the point. Doubling alone can exceed what the day earned and
+ * start eating other days' pay, which the owner ruled unethical: the worst a
+ * day can cost is the day itself, never more. It also means somebody who
+ * punches in and straight back out has worked ~0 minutes and so is docked ~0 -
+ * consistent with a no-show being a notice with no automatic penalty, and not
+ * a hole to plug.
+ */
+export function penaltyMinutes(shortfallMin: number, workedMin: number, graceMin: number): number {
+  if (shortfallMin <= graceMin) return 0;
+  return Math.min(2 * shortfallMin, Math.max(0, workedMin));
 }
+
+// Only reached by a user with no branch; mirrors Branch.shift_grace_min's default.
+const DEFAULT_GRACE_MIN = 15;
 
 export type PenaltyKind = 'SHORTFALL';
 
 export interface PenaltyItem {
   date: string; // YYYY-MM-DD (Beirut)
   kind: PenaltyKind;
-  minutes: number; // minutes short of the required coverage
-  hours: number; // penalty hours (1..4)
+  shortfallMin: number; // minutes short of the required coverage
+  penaltyMin: number; // minutes docked for it
   rate_cent: number; // hourly rate applied
-  amount_cent: number; // hours * rate_cent
+  amount_cent: number; // floor(penaltyMin * rate_cent / 60)
   waived: boolean;
 }
 
@@ -38,23 +51,24 @@ interface RateChangeLite {
 export function shortfallPenalties(args: {
   coverage: DayCoverage[];
   rateChanges: RateChangeLite[];
+  graceMin: number;
   waivedKeys: Set<string>; // `${date}|SHORTFALL`
 }): PenaltyItem[] {
   const items: PenaltyItem[] = [];
   for (const day of args.coverage) {
     if (!day.closed) continue;
     if (day.deltaMin >= 0) continue;
-    const minutes = -day.deltaMin;
-    const hours = penaltyHours(minutes);
-    if (hours === 0) continue;
+    const shortfallMin = -day.deltaMin;
+    const penaltyMin = penaltyMinutes(shortfallMin, day.workedMin, args.graceMin);
+    if (penaltyMin === 0) continue;
     const rate = rateAt(args.rateChanges, day.lastPunchAt);
     items.push({
       date: day.date,
       kind: 'SHORTFALL',
-      minutes,
-      hours,
+      shortfallMin,
+      penaltyMin,
       rate_cent: rate,
-      amount_cent: hours * rate,
+      amount_cent: Math.floor((penaltyMin * rate) / 60),
       waived: args.waivedKeys.has(`${day.date}|SHORTFALL`),
     });
   }
@@ -69,7 +83,7 @@ export async function penaltiesForUser(
   db: PrismaClient,
 ): Promise<PenaltyItem[]> {
   const { start, end } = monthRangeUtc(month);
-  const [punches, schedules, overrides, rateChanges, waivers] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, waivers, user] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -91,6 +105,10 @@ export async function penaltiesForUser(
     db.penaltyWaiver.findMany({
       where: { user_id: userId, date: { gte: start, lt: end } },
       select: { date: true, kind: true },
+    }),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { branch: { select: { shift_grace_min: true } } },
     }),
   ]);
 
@@ -117,6 +135,7 @@ export async function penaltiesForUser(
   return shortfallPenalties({
     coverage,
     rateChanges: rateChanges as RateChangeLite[],
+    graceMin: user?.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN,
     waivedKeys,
   });
 }
@@ -144,7 +163,7 @@ export async function pendingPenaltyNotices(
   const ids = users.map((u) => u.id);
   const { start, end } = monthRangeUtc(month);
 
-  const [punches, schedules, overrides, rateChanges, waivers, acks] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, waivers, acks, userBranches] = await Promise.all([
     db.punch.findMany({
       where: { user_id: { in: ids }, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -171,6 +190,10 @@ export async function pendingPenaltyNotices(
       where: { user_id: { in: ids }, date: { gte: start, lt: end } },
       select: { user_id: true, date: true, kind: true },
     }),
+    db.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, branch: { select: { shift_grace_min: true } } },
+    }),
   ]);
 
   const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
@@ -190,6 +213,9 @@ export async function pendingPenaltyNotices(
 
   const ackedKeys = new Set<string>();
   for (const a of acks) ackedKeys.add(`${a.user_id}|${a.date.toISOString().slice(0, 10)}|${a.kind}`);
+
+  const graceByUser = new Map<string, number>();
+  for (const u of userBranches) graceByUser.set(u.id, u.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN);
 
   const notices: PenaltyNotice[] = [];
   for (const u of users) {
@@ -218,6 +244,7 @@ export async function pendingPenaltyNotices(
     const items = shortfallPenalties({
       coverage,
       rateChanges: (ratesBy.get(u.id) ?? []) as RateChangeLite[],
+      graceMin: graceByUser.get(u.id) ?? DEFAULT_GRACE_MIN,
       waivedKeys,
     });
 

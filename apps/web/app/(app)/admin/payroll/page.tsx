@@ -312,8 +312,8 @@ function AdjustModal({ row, onClose, onSaved }: { row: Row; onClose: () => void;
 interface PenaltyItem {
   date: string;
   kind: 'SHORTFALL';
-  minutes: number;
-  hours: number;
+  shortfallMin: number;
+  penaltyMin: number;
   rate_cent: number;
   amount_cent: number;
   waived: boolean;
@@ -346,8 +346,9 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
   return (
     <Modal title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
       <p className="mb-3 text-sm text-muted">
-        Automatic penalties for covering fewer hours than the day required. Remove one when the employee
-        gave notice — this never affects manual adjustments.
+        Automatic penalties for covering fewer hours than the day required: double the shortfall is
+        docked, never more than the day itself earned. Remove one when the employee gave notice —
+        this never affects manual adjustments.
       </p>
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
       {items === null ? (
@@ -362,11 +363,11 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
               <li key={id} className="flex items-center justify-between gap-3 py-2.5">
                 <div className={p.waived ? 'opacity-50' : ''}>
                   <div className="text-sm font-medium">
-                    Hours short · <span className="tabular">{p.minutes} min</span>
+                    Hours short · <span className="tabular">{p.shortfallMin} min</span>
                     {p.waived && <span className="ml-2 text-xs font-normal text-muted">(removed)</span>}
                   </div>
                   <div className="text-xs text-muted">
-                    {p.date} · {p.hours}h × {centsToUsd(p.rate_cent)} = <span className="text-danger">−{centsToUsd(p.amount_cent)}</span>
+                    {p.date} · {p.penaltyMin} min docked × {centsToUsd(p.rate_cent)}/h = <span className="text-danger">−{centsToUsd(p.amount_cent)}</span>
                   </div>
                 </div>
                 <Button size="sm" variant={p.waived ? 'secondary' : 'ghost'} loading={busy === id} onClick={() => toggle(p)}>

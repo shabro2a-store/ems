@@ -128,8 +128,8 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   driversOver, tripsToday, hoursToday, laborTodayCent }, people[] (drivers include
   trips_today), attention{ lateDrivers, flags, penalties, overtime, pendingAdvances,
   pendingLeaves } }`.
-  - `penalties[]` — `{ user_id, username, date, kind: SHORTFALL, minutes, hours,
-    amount_cent }`. Computed on the fly, last 7 days, excluding any already waived or
+  - `penalties[]` — `{ user_id, username, date, kind: SHORTFALL, shortfallMin,
+    penaltyMin, amount_cent }`. Computed on the fly, last 7 days, excluding any already waived or
     acknowledged. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
   - `overtime[]` — `{ user_id, username, date, overtimeMin, amount_cent }`. Same
     on-the-fly computation and 7-day lookback as `penalties[]`; only days past the
@@ -229,11 +229,15 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   `{ id, status, overrides_created }` (approval materializes ScheduleOverrides).
 
 ### Penalties
-Shortfall penalties are **computed** from hours owed vs hours covered
-(`min(4, floor(shortfallMinutes / 15))` hours × rate), not stored. They surface in
-payroll as `penalties_cent` and reduce `net_cent`.
+Shortfall penalties are **computed** from hours owed vs hours covered, not stored:
+past the branch's `shift_grace_min` the docked minutes are `min(2 × shortfallMin,
+workedMin)` and the amount is `floor(penaltyMin × rate / 60)`. The grace is a
+threshold, not forgiveness — the whole shortfall is doubled once it is crossed —
+and the ceiling at the day's own worked minutes means a penalty can zero a day's
+pay but never reach into another day's. They surface in payroll as
+`penalties_cent` and reduce `net_cent`.
 - **GET /api/admin/penalties?userId=&month=YYYY-MM** → `{ penalties: [{ date, kind:
-  "SHORTFALL", minutes, hours, rate_cent, amount_cent, waived }] }`.
+  "SHORTFALL", shortfallMin, penaltyMin, rate_cent, amount_cent, waived }] }`.
 - **POST /api/admin/penalties/waive** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:
   "SHORTFALL", waived: bool, reason? }` — removes (`waived:true`) or
   re-applies (`waived:false`) one auto-penalty. Only ever writes `PenaltyWaiver`

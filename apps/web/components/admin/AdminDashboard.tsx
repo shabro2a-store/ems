@@ -24,7 +24,7 @@ interface Overview {
   attention: {
     lateDrivers: { trip_id: string; driver_username: string; branch_name: string; since_min: number; threshold_min: number }[];
     flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null; reason: string }[];
-    penalties: { user_id: string; username: string; date: string; kind: 'SHORTFALL'; minutes: number; hours: number; amount_cent: number }[];
+    penalties: { user_id: string; username: string; date: string; kind: 'SHORTFALL'; shortfallMin: number; penaltyMin: number; amount_cent: number }[];
     overtime: { user_id: string; username: string; date: string; overtimeMin: number; amount_cent: number }[];
     pendingAdvances: { id: string; username: string; amount_cent: number; reason: string | null }[];
     pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; off_min: number | null; note: string | null }[];
@@ -319,7 +319,7 @@ export default function AdminDashboard() {
                           {p.username} · {centsToUsd(p.amount_cent)} docked
                         </div>
                         <div className="text-xs text-muted">
-                          {p.date} · short {formatMinutes(p.minutes)} · {p.hours}h docked
+                          {p.date} · short {formatMinutes(p.shortfallMin)} · {formatMinutes(p.penaltyMin)} docked
                         </div>
                         <div className="mt-1 text-xs text-muted">
                           Already applied. Accept to file it, or revoke it if they gave notice.

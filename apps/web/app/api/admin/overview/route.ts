@@ -245,8 +245,8 @@ export async function GET(req: Request) {
     username: p.username,
     date: p.date,
     kind: p.kind,
-    minutes: p.minutes,
-    hours: p.hours,
+    shortfallMin: p.shortfallMin,
+    penaltyMin: p.penaltyMin,
     amount_cent: p.amount_cent,
   }));
 

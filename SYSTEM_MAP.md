@@ -156,11 +156,15 @@ Full request/response detail is in [API.md](API.md). Summary:
   session pays nothing. `net = gross + Σadjustments − ΣapprovedAdvances(month) − Σpenalties(month)
   − ΣrevokedOvertime(month)`. Can go negative.
 - **Penalties (`penalty.ts`)**: covering fewer minutes than the day required (SHORTFALL), docked
-  from pay. `penaltyHours = min(4, floor(shortfallMinutes / 15))` — under 15 min short is free
-  (grace), then 1 hour per 15-min block, capped at 4h. Measured from the day's covered minutes vs
-  the employee's `shift_min` (respecting overrides; DAY_OFF and unscheduled days are skipped;
-  unclosed days are skipped until the missing punch is corrected). Computed on the fly (not
-  stored); an admin **waiver** removes one. Penalty amount = hours × rate-at-shift.
+  from pay. `penaltyMin = min(2 × shortfallMin, workedMin)` once the shortfall passes the branch's
+  `shift_grace_min`; amount = `floor(penaltyMin × rate-at-shift / 60)`. The grace is a **threshold,
+  not forgiveness** — exactly as it is for overtime: 16 min short of a 15-min grace docks 32, not 2.
+  The ceiling at the day's own worked minutes is why doubling is safe: the worst a day can cost is
+  that day's pay, never other days'. It also means punching in and straight out (`workedMin ≈ 0`)
+  docks ≈ 0, which is intended — a no-show is a notice, not an automatic penalty. Measured from the
+  day's covered minutes vs the employee's `shift_min` (respecting overrides; DAY_OFF and unscheduled
+  days are skipped; unclosed days are skipped until the missing punch is corrected). Computed on the
+  fly (not stored); an admin **waiver** removes one.
 - **Overtime (`overtime.ts`)**: covering more than the day required by more than the branch's
   `shift_grace_min` (default 15) raises a notice — the same `DayCoverage` as a shortfall,
   just `deltaMin` positive past the grace instead of negative. The grace only decides whether
