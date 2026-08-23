@@ -16,6 +16,7 @@ interface Punch {
   accuracy_m: number;
   corrected: boolean;
   correction_reason: string | null;
+  system_generated: boolean;
   user: { username: string };
   branch: { name: string };
 }
@@ -128,9 +129,16 @@ export default function AdminPunchesPage() {
                     <td className="px-4 py-2.5">
                       <Badge tone={p.kind === 'IN' ? 'success' : 'neutral'}>{p.kind}</Badge>
                       {p.corrected && <span className="ml-1"><Badge tone="warning">corrected</Badge></span>}
+                      {p.system_generated && (
+                        <span className="ml-1" title="Written by the system to close a forgotten check-in at that day's shift hours. Correct it if the real hours differ.">
+                          <Badge tone="warning">auto</Badge>
+                        </span>
+                      )}
                     </td>
                     <td className="tabular px-4 py-2.5 text-xs">{formatBeirut(p.at)}</td>
-                    <td className="tabular px-4 py-2.5 text-xs text-muted">{p.lat.toFixed(5)}, {p.lng.toFixed(5)}</td>
+                    <td className="tabular px-4 py-2.5 text-xs text-muted">
+                      {p.system_generated ? 'no GPS - system punch' : `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`}
+                    </td>
                     <td className="tabular px-4 py-2.5 text-xs">{p.accuracy_m}m</td>
                     <td className="px-4 py-2.5 text-right">
                       <Button size="sm" variant="secondary" onClick={() => openCorrect(p)}>Correct</Button>

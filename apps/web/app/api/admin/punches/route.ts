@@ -67,6 +67,9 @@ export async function GET(req: Request) {
         device_fp: p.device_fp,
         corrected: p.corrected,
         correction_reason: p.correction_reason,
+        // Its lat/lng are the branch's own, so without this the row reads as a
+        // person standing at the shop pressing a button. Nobody did.
+        system_generated: p.system_generated,
         user: p.user,
         branch: p.branch,
       })),

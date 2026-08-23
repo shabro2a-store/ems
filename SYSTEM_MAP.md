@@ -68,7 +68,11 @@ cuid PKs, money = Int cents.
 - **Branch** — name, lat, lng, gps_radius_m(50), gps_accuracy_max_m(100), shift_grace_min(15),
   trip_threshold_min(30), is_active.
 - **Punch** — user, branch, kind(IN/OUT), at, evidence(lat/lng/accuracy_m/device_fp/ip),
-  correction(corrected/corrected_by/correction_reason). Indexed by (user,at),(branch,at).
+  correction(corrected/corrected_by/correction_reason), **system_generated** (no human made
+  this punch — set only by `autoCloseAbandoned`, which writes the checkout a forgotten
+  check-in never got; its lat/lng are the branch's own, so the marker is what stops the row
+  reading as somebody standing at the shop. Pays and corrects like any other punch, and the
+  admin punch log shows it as `auto`). Indexed by (user,at),(branch,at).
 - **RateChange** — point-in-time hourly rate history (payroll uses the rate in effect at each shift).
 - **Schedule** — one row per (user, weekday 0=Sun..6=Sat): `shift_min`, the hours owed that day.
 - **ScheduleOverride** — one per (user, date): DAY_OFF or HOURS_CHANGE. DAY_OFF blocks punching.
@@ -232,10 +236,21 @@ Full request/response detail is in [API.md](API.md). Summary:
   first instead of restarting it. Read by the admin dashboard and `GET /api/me/today`,
   both of which query punches two days back so a previous-day arrival is visible.
   An open check-in older than **30h** (`MAX_OPEN_SESSION_MIN`) is a forgotten checkout,
-  not a shift — `missedCheckout` flags one but never closes the punch — so it contributes
-  nothing and the person is not shown as present. Above a full 24h `shift_min` so a real
-  shift is never truncated, and the MISSED_CHECKOUT flag in the attention queue is where
-  a forgotten checkout belongs rather than the hours column.
+  not a shift — so it contributes nothing and the person is not shown as present. Above a
+  full 24h `shift_min` so a real shift is never truncated, and the MISSED_CHECKOUT flag in
+  the attention queue is where a forgotten checkout belongs rather than the hours column.
+- **An abandoned check-in is closed at the shift hours** (`autoCloseAbandoned`, worker):
+  past the same **30h** `MAX_OPEN_SESSION_MIN`, the job writes the OUT the employee never
+  made, at `check-in + requiredMinFor(that day)` — one notion of "abandoned", mirrored in
+  the worker and pinned to the web constant by `autoCloseAbandoned.test.ts`. The trigger
+  deliberately is **not** `missedCheckout`'s `required + grace`: that is the moment
+  legitimate overtime begins, and closing there would truncate every real overrun into the
+  plain shift. Overtime genuinely worked that night is **not** paid by this and is the
+  owner's to add as a bonus — his explicit ruling, since a punch nobody made cannot say
+  how long they stayed. A day owing 0 minutes closes at the check-in itself (zero pay);
+  leaving it open is not an option, because an open session is what blocks the next
+  check-in. The row is `system_generated`, audited under `punch.auto_close` with an actor
+  of `system` and the full reasoning, and corrects like any other punch.
 - **One answer to "what did this day require"** (`requiredMinFor` in `coverage.ts`): a
   `DAY_OFF` override is 0, an `HOURS_CHANGE` override with an explicit `shift_min` beats the
   weekly pattern, otherwise the weekday's `Schedule.shift_min`, otherwise 0. Payroll, the
@@ -326,6 +341,7 @@ Full request/response detail is in [API.md](API.md). Summary:
 |---|---|---|
 | 00:10 daily | watchedDetector | Judges the Beirut day that just closed: the day required more than 0 minutes (`requiredMinFor`, so an approved full day off is skipped whether it is a `DAY_OFF` or an `HOURS_CHANGE` to 0) and there were zero punches → WATCHED flag (absence notice, no automatic penalty) |
 | every 1 min | missedCheckout | Open check-in whose elapsed time exceeds that date's required minutes (`requiredMinFor`, so approved time off shortens the threshold) + the branch's shift grace → MISSED_CHECKOUT flag + notify. A date requiring 0 minutes is skipped, not measured against zero |
+| every 10 min | autoCloseAbandoned | Open check-in past **30h** (`MAX_OPEN_SESSION_MIN`) → write the missing OUT at `check-in + requiredMinFor(that day)`, marked `system_generated` and audited. Re-checks for a real checkout inside the transaction, so a live punch always wins |
 | every 1 min | tripThreshold | Open trip past branch threshold → set over_threshold + notify |
 | every 30 min | driverStale | Trip open ≥ 4h → notify |
 | 23:30 daily | endOfDayWatcher | Unresolved WATCHED flags → notify + close |

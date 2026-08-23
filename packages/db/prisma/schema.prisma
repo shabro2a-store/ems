@@ -129,6 +129,13 @@ model Punch {
   corrected         Boolean   @default(false)
   corrected_by      String?
   correction_reason String?
+  // No human made this punch. Set only by the auto-close job, which writes the
+  // checkout an abandoned check-in never got. Everything downstream treats it
+  // as a normal punch on purpose - it has to pay and to be correctable like
+  // any other - so this exists to stop it being read as evidence that somebody
+  // stood at the branch and pressed a button, which the lat/lng of a system
+  // punch (the branch's own coordinates) would otherwise imply.
+  system_generated  Boolean   @default(false)
   created_at        DateTime  @default(now())
 
   @@index([user_id, at])
