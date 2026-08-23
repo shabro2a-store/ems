@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { currentShiftDate, penaltyMinutes, shortfallPenalties } from './penalty';
+import { currentShiftDate, penaltyMinutes, shortfallPenalties, sumActivePenaltiesCent } from './penalty';
 import type { PenaltyDecisionLite } from './penalty';
 import { computeCoverage, type DayCoverage, type PunchLite } from './coverage';
 
@@ -186,7 +186,7 @@ function waiverAt(penaltyMin: number | null): Map<string, PenaltyDecisionLite> {
   return new Map([['2026-08-17|SHORTFALL', { penalty_min: penaltyMin }]]);
 }
 
-describe('a penalty ruling only covers the figure it was made against', () => {
+describe('a waiver keeps forgiving; only review depends on the figure', () => {
   function judgeWaived(workedMin: number, waivers: Map<string, PenaltyDecisionLite>) {
     return shortfallPenalties({
       coverage: [day({ workedMin })],
@@ -197,22 +197,43 @@ describe('a penalty ruling only covers the figure it was made against', () => {
     });
   }
 
-  it('keeps a waiver that still names the figure the day has', () => {
+  it('forgives, and asks for nothing, while the waiver names the figure the day has', () => {
     // 360 worked, 120 short, 240 docked - the amount the waiver was given for.
-    expect(judgeWaived(360, waiverAt(240))[0]!.waived).toBe(true);
+    const item = judgeWaived(360, waiverAt(240))[0]!;
+    expect(item.waived).toBe(true);
+    expect(item.waiverStale).toBe(false);
   });
 
-  it('drops a waiver once a correction moves the day', () => {
-    // The owner forgave 240 docked minutes. A corrected punch makes it 300, an
-    // amount nobody has ruled on, so the old waiver does not cover it.
-    expect(judgeWaived(330, waiverAt(240))[0]!.penaltyMin).toBe(300);
-    expect(judgeWaived(330, waiverAt(240))[0]!.waived).toBe(false);
+  it('keeps forgiving once a correction moves the day, and flags it for review', () => {
+    // The owner removed a penalty of 240 docked minutes. A corrected punch makes
+    // it 300. Dropping the removal here would take back money he had already
+    // decided to give: an undecided shortfall is docked, so ignoring the stale
+    // row robs the employee rather than protecting them.
+    const item = judgeWaived(330, waiverAt(240))[0]!;
+    expect(item.penaltyMin).toBe(300);
+    expect(item.waived).toBe(true);
+    expect(item.waiverStale).toBe(true);
   });
 
-  it('treats a waiver recorded against nothing as stale', () => {
-    // Any row written before penalty_min existed. It named no amount, so it
-    // cannot be said to cover this one.
-    expect(judgeWaived(360, waiverAt(null))[0]!.waived).toBe(false);
+  it('deducts nothing for a stale waiver', () => {
+    expect(sumActivePenaltiesCent(judgeWaived(330, waiverAt(240)))).toBe(0);
+  });
+
+  it('keeps forgiving on a waiver that recorded no amount, and flags that too', () => {
+    // Any row written before penalty_min existed. It names no amount, so it can
+    // never match - but it is still the owner's removal, so the money stays put
+    // and nothing needs backfilling.
+    const item = judgeWaived(360, waiverAt(null))[0]!;
+    expect(item.waived).toBe(true);
+    expect(item.waiverStale).toBe(true);
+    expect(sumActivePenaltiesCent([item])).toBe(0);
+  });
+
+  it('docks a day with no waiver at all', () => {
+    const item = judgeWaived(360, new Map())[0]!;
+    expect(item.waived).toBe(false);
+    expect(item.waiverStale).toBe(false);
+    expect(sumActivePenaltiesCent([item])).toBe(item.amount_cent);
   });
 });
 

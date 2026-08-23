@@ -317,6 +317,7 @@ interface PenaltyItem {
   rate_cent: number;
   amount_cent: number;
   waived: boolean;
+  waiverStale: boolean;
 }
 
 function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: string; onClose: () => void; onChanged: () => void }) {
@@ -331,14 +332,14 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  async function toggle(p: PenaltyItem) {
+  async function setWaived(p: PenaltyItem, waived: boolean) {
     const id = `${p.date}|${p.kind}`;
     setBusy(id); setErr(null);
     const res = await apiSend('/api/admin/penalties/waive', {
       // This modal does not poll, so a punch corrected while it sits open can
       // move the figure on screen. Sending it lets the server refuse a ruling
       // made against an amount the day no longer has.
-      body: { userId: row.user_id, date: p.date, kind: p.kind, waived: !p.waived, penaltyMin: p.penaltyMin },
+      body: { userId: row.user_id, date: p.date, kind: p.kind, waived, penaltyMin: p.penaltyMin },
     });
     setBusy(null);
     if (!res.ok) {
@@ -346,7 +347,7 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
       await load(); // the refused ruling means the list is out of date - show the new figure
       return;
     }
-    setItems((prev) => prev?.map((x) => (x.date === p.date && x.kind === p.kind ? { ...x, waived: !x.waived } : x)) ?? null);
+    setItems((prev) => prev?.map((x) => (x.date === p.date && x.kind === p.kind ? { ...x, waived, waiverStale: false } : x)) ?? null);
     onChanged();
   }
 
@@ -355,7 +356,8 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
       <p className="mb-3 text-sm text-muted">
         Automatic penalties for covering fewer hours than the day required: double the shortfall is
         docked, never more than the day itself earned. Remove one when the employee gave notice —
-        this never affects manual adjustments.
+        this never affects manual adjustments. A removal keeps holding even after a punch is
+        corrected; it is flagged here for a second look rather than quietly undone.
       </p>
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
       {items === null ? (
@@ -376,10 +378,23 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
                   <div className="text-xs text-muted">
                     {p.date} · {p.penaltyMin} min docked × {centsToUsd(p.rate_cent)}/h = <span className="text-danger">−{centsToUsd(p.amount_cent)}</span>
                   </div>
+                  {p.waived && p.waiverStale && (
+                    <div className="mt-1 text-xs text-warning">
+                      This day has changed since you removed it. Still nothing docked — confirm the removal at
+                      this figure, or restore the penalty.
+                    </div>
+                  )}
                 </div>
-                <Button size="sm" variant={p.waived ? 'secondary' : 'ghost'} loading={busy === id} onClick={() => toggle(p)}>
-                  {p.waived ? 'Restore' : 'Remove'}
-                </Button>
+                <div className="flex shrink-0 gap-2">
+                  {p.waived && p.waiverStale && (
+                    <Button size="sm" variant="secondary" loading={busy === id} onClick={() => setWaived(p, true)}>
+                      Confirm removal
+                    </Button>
+                  )}
+                  <Button size="sm" variant={p.waived ? 'secondary' : 'ghost'} loading={busy === id} onClick={() => setWaived(p, !p.waived)}>
+                    {p.waived ? 'Restore' : 'Remove'}
+                  </Button>
+                </div>
               </li>
             );
           })}

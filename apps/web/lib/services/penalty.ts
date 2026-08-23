@@ -42,7 +42,8 @@ export interface PenaltyItem {
   penaltyMin: number; // minutes docked for it
   rate_cent: number; // hourly rate applied
   amount_cent: number; // floor(penaltyMin * rate_cent / 60)
-  waived: boolean;
+  waived: boolean; // money: a waiver row exists, so nothing is docked for this day
+  waiverStale: boolean; // review: that waiver was given against a different figure
 }
 
 interface RateChangeLite {
@@ -56,16 +57,23 @@ export interface PenaltyDecisionLite {
 }
 
 /**
- * Whether a stored waiver or ack still applies to the day in front of it.
+ * Whether a stored ruling still names the figure the day currently has.
  *
- * A ruling applies to the day as it stood when it was made. One row per
- * (user, day, kind), but the penalty moves whenever a punch is corrected - and
- * this owner corrects punches by hand routinely - so an ack given against 30
- * docked minutes must not silently uphold 300, and a waiver given against 30
- * must not silently forgive 300. When the figures disagree the ruling is stale
- * and the day reads as undecided again: back on the review queue at the full
- * new amount, for the owner to rule on the amount that is actually there. A
- * null recorded figure predates the column and is stale for the same reason.
+ * A ruling was made on the day as it stood at the time, and the penalty moves
+ * whenever a punch is corrected - which this owner does by hand routinely. When
+ * the figures disagree the ruling no longer describes the day, so the day is
+ * unreviewed and belongs back on the attention queue at its new amount. A null
+ * recorded figure predates the column and is unreviewed for the same reason.
+ *
+ * This decides REVIEW only, never money. Whether a penalty is docked is decided
+ * by the presence of a waiver row, because the two possible mistakes are not
+ * equal: keeping a stale forgiveness leaves the employee holding money the owner
+ * may have wanted back, while dropping it takes money the owner had already
+ * decided to give them. The owner settled that tension for overtime - a stale
+ * ruling moves nothing until he rules again - and the same answer applies here.
+ * It has to be spelled out because the safe default is inverted between the two:
+ * an undecided overtime day is paid, an undecided shortfall is docked, so
+ * "ignore the stale row" protects the employee there and robs them here.
  */
 function ruledOn(stored: PenaltyDecisionLite | undefined, penaltyMin: number): boolean {
   if (!stored) return false;
@@ -114,6 +122,7 @@ export function shortfallPenalties(args: {
     const penaltyMin = penaltyMinutes(shortfallMin, day.workedMin, args.graceMin);
     if (penaltyMin === 0) continue;
     const rate = rateAt(args.rateChanges, day.lastPunchAt);
+    const waiver = args.waivers.get(`${day.date}|SHORTFALL`);
     items.push({
       date: day.date,
       kind: 'SHORTFALL',
@@ -121,7 +130,12 @@ export function shortfallPenalties(args: {
       penaltyMin,
       rate_cent: rate,
       amount_cent: Math.floor((penaltyMin * rate) / 60),
-      waived: ruledOn(args.waivers.get(`${day.date}|SHORTFALL`), penaltyMin),
+      // The row itself stops the money, whatever figure it names - the owner
+      // decided this employee keeps this day's pay, and a correction he made
+      // afterwards must not quietly reverse that. The recorded figure only
+      // decides whether he is asked to look at the day again.
+      waived: waiver !== undefined,
+      waiverStale: waiver !== undefined && !ruledOn(waiver, penaltyMin),
     });
   }
   items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -213,6 +227,10 @@ export async function penaltyMinForDay(
   return items.find((i) => i.date === date && i.kind === kind)?.penaltyMin ?? 0;
 }
 
+// A waived day contributes nothing, stale waiver included: `waived` is the
+// presence of the owner's removal, not its currency. `waiverStale` is what puts
+// the day back in front of him, and until he rules again the employee keeps the
+// money he already gave them.
 export function sumActivePenaltiesCent(items: PenaltyItem[]): number {
   return items.reduce((s, p) => (p.waived ? s : s + p.amount_cent), 0);
 }
@@ -327,12 +345,17 @@ export async function pendingPenaltyNotices(
     });
 
     for (const p of items) {
-      // p.waived is already the live reading: a waiver stamped against a
-      // different figure does not cover this penalty, so the day is applied
-      // and unreviewed and belongs back here.
-      if (p.waived) continue;
       if (p.date < opts.since) continue;
-      if (ruledOn(acksByKey.get(`${u.id}|${p.date}|${p.kind}`), p.penaltyMin)) continue;
+      if (p.waived) {
+        // Forgiven either way. While the waiver still names this figure the
+        // owner has seen exactly this penalty and there is nothing to show him;
+        // once a correction moves the day, the removal he granted covers an
+        // amount that no longer exists, so he is asked about the new one - with
+        // the money left where he put it in the meantime.
+        if (!p.waiverStale) continue;
+      } else if (ruledOn(acksByKey.get(`${u.id}|${p.date}|${p.kind}`), p.penaltyMin)) {
+        continue;
+      }
       notices.push({ ...p, user_id: u.id, username: u.username });
     }
   }

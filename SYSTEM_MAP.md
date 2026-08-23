@@ -87,11 +87,15 @@ cuid PKs, money = Int cents.
   day's docked minutes at the moment the owner ruled, stamped server-side. Penalties
   themselves are **computed on the fly** (schedule vs punches, see §4), not stored; a waiver
   is the admin "remove penalty" for one (user, day, kind) and can never touch an Adjustment.
+  **The row's existence is what stops the money**, whatever figure it recorded; `penalty_min`
+  only decides whether the owner is asked to look at the day again.
 - **PenaltyAck** — (user, date, kind) unique, plus the same **`penalty_min?`**. The admin saw
   an auto-penalty and let it stand. Changes **no money** — it exists only so the attention
-  queue stops recomputing a penalty the admin has already reviewed. Waiver = revoked; ack =
-  reviewed and upheld. Either only counts while `penalty_min` still equals the day's current
-  penalty — see "Stale penalty rulings" in §4.
+  queue stops recomputing a penalty the admin has already reviewed, and it **deletes any
+  waiver** for that day, since "this stands" is the opposite of "this is removed". Waiver =
+  revoked; ack = reviewed and upheld; at most one of the two exists. Either stops holding the
+  day off the queue once `penalty_min` no longer equals the day's current penalty — see
+  "Stale penalty rulings" in §4.
 - **OvertimeDecision** — (user, date) unique, `decision` ACCEPTED/REVOKED, plus
   **`overtime_min?`** — the day's overtime at the moment the owner ruled, stamped
   server-side. Mirrors the waiver/ack pattern: no row means pending, and pending
@@ -232,21 +236,31 @@ Full request/response detail is in [API.md](API.md). Summary:
 - **Correcting a punch clears its penalty**: penalties are computed from `punch.at` vs the hours
   owed, so an admin correcting a punch that restores the missing coverage makes the shortfall zero
   → the penalty disappears automatically (no stored penalty to reverse).
-- **Stale penalty rulings**: a waiver or an ack applies to the day **as it stood when it was
-  made**, and a ruling is a confirmation of what was displayed. Both requests carry the
-  `penaltyMin` the screen rendered; the routes recompute the day's true docked minutes
-  (`penaltyMinForDay`, which reads through `penaltiesForUser` so the stamp cannot disagree with
-  the reader) and **refuse** the ruling with `409 PENALTY_CHANGED` if they differ, writing
-  nothing. On a match the row stores the **server's** figure — the client's number is a
-  comparison token, never money. The stored `penalty_min` then only counts while it still equals
-  the day's current penalty. This owner corrects punches by hand routinely, and a correction is
-  exactly what moves a day out from under a ruling: past that point an **ack** no longer holds
-  the day off the queue (the larger penalty was still being applied, silently, with no second
-  notice) and a **waiver** no longer forgives it. Either way the day returns to the attention
-  queue at its new figure for a fresh ruling. A null `penalty_min` (any row predating the column)
-  is stale for the same reason, so nothing needs backfilling — but note the direction: unlike
-  overtime, where stale means the employee keeps the money, a stale **waiver** means the penalty
-  applies again.
+- **Stale penalty rulings**: a ruling is a confirmation of what was displayed, and it covers the
+  day **as it stood when it was made**. Both requests carry the `penaltyMin` the screen rendered;
+  the routes recompute the day's true docked minutes (`penaltyMinForDay`, which reads through
+  `penaltiesForUser` so the stamp cannot disagree with the reader) and **refuse** the ruling with
+  `409 PENALTY_CHANGED` if they differ, writing nothing. On a match the row stores the
+  **server's** figure — the client's number is a comparison token, never money. This owner
+  corrects punches by hand routinely, and a correction is exactly what moves a day out from
+  under a ruling already made on it. Past that point the ruling is stale, and staleness decides
+  **review, never money**:
+  - a stale **ack** stops holding the day off the attention queue. Nothing about the money
+    changes (an ack never moved any); what was broken is that the larger penalty went on being
+    applied with no second notice.
+  - a stale **waiver** goes on forgiving. `PenaltyItem.waived` is the presence of the row and is
+    what `sumActivePenaltiesCent` skips; `waiverStale` is the separate review flag that puts the
+    day back on the queue. Dropping the forgiveness instead would take back money the owner had
+    already decided to give, on an amount he has never seen.
+
+  The safe default is **inverted** between overtime and penalties — an undecided overtime day is
+  paid, an undecided shortfall is docked — so "ignore the stale row" protects the employee there
+  and robs them here. Both land on the same rule the owner set for overtime: a stale ruling moves
+  no money until he rules again. From the queue he then either **revokes** (re-confirms the
+  removal at the new figure, still nothing docked) or **accepts** (clears the waiver and applies
+  the penalty at the new figure). A null `penalty_min` (any row predating the column) is
+  unreviewed the same way, so nothing needs backfilling and no forgiven day is re-docked by the
+  deploy.
 - **Caller dispatch gate**: a driver can only go "out on order" (start a trip) after the caller
   rings them — the trip requires a `DriverCall` from the last 30 min with no trip yet; starting
   the trip consumes that call (`trip_id`). Prevents undispatched trips and ties each trip to its
@@ -353,7 +367,7 @@ indistinguishable from a button that does nothing, which is exactly how this fai
 |---|---|---|
 | **Late** driver | none | Informational; clears itself when the driver presses Back. |
 | **Flag** | Dismiss (+ Fix punch) | Dismiss is an acknowledgement only — no record changes. `MISSED_CHECKOUT` also links to `/admin/punches`, where the punch can actually be corrected. Absence (`WATCHED`) surfaces here too — notice only, no automatic penalty. |
-| **Penalty** | Accept · Revoke | Accept upholds (no money moves); Revoke waives and returns the money. Both send the figure the row is showing and are refused if the day has moved since. |
+| **Penalty** | Accept · Revoke | Accept upholds (no money moves, and clears any earlier removal); Revoke waives and returns the money. Both send the figure the row is showing and are refused if the day has moved since. A day whose removal has gone stale appears here too, saying so — nothing is docked while it waits. |
 | **Overtime** | Accept · Revoke | Already paid either way — Accept leaves it that way; Revoke deducts that day's excess from payroll. |
 | **Advance** | Approve · Reject | Approve deducts from this month's pay. |
 | **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`; for `HOURS_CHANGE`, the requested hours are **subtracted** from that weekday's scheduled hours (floored at 0). The row shows the requested hours so the admin is not approving blind. |

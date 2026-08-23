@@ -248,6 +248,9 @@ export async function GET(req: Request) {
     shortfallMin: p.shortfallMin,
     penaltyMin: p.penaltyMin,
     amount_cent: p.amount_cent,
+    // Only ever true for a day whose waiver has gone stale: nothing is docked
+    // while it stands, and the row has to say so rather than claim a deduction.
+    waived: p.waived,
   }));
 
   const overtime = mergeNotices(overtimeBatches).map((o) => ({

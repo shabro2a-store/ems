@@ -129,8 +129,10 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   trips_today), attention{ lateDrivers, flags, penalties, overtime, pendingAdvances,
   pendingLeaves } }`.
   - `penalties[]` — `{ user_id, username, date, kind: SHORTFALL, shortfallMin,
-    penaltyMin, amount_cent }`. Computed on the fly, last 7 days, excluding any already waived or
-    acknowledged. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
+    penaltyMin, amount_cent, waived }`. Computed on the fly, last 7 days, excluding any day
+    whose waiver or ack still names its current figure. `waived: true` marks a day whose
+    removal has gone stale: **nothing is docked** for it, and it is here for a second look
+    rather than a deduction. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
   - `overtime[]` — `{ user_id, username, date, overtimeMin, amount_cent }`. Same
     on-the-fly computation and 7-day lookback as `penalties[]`; only days past the
     branch's shift grace with no *live* decision yet appear — a decision whose
@@ -240,7 +242,9 @@ A day is only judged once it is over: the employee's **current shift-day** (the
 Beirut day of their open check-in, else today) never appears, so a split shift
 raises no shortfall between its sessions. Unclosed days stay out too.
 - **GET /api/admin/penalties?userId=&month=YYYY-MM** → `{ penalties: [{ date, kind:
-  "SHORTFALL", shortfallMin, penaltyMin, rate_cent, amount_cent, waived }] }`.
+  "SHORTFALL", shortfallMin, penaltyMin, rate_cent, amount_cent, waived, waiverStale }] }`.
+  `waived` is the money (a waiver row exists, so nothing is docked); `waiverStale` says that
+  row named a different figure and the day wants a second look.
 - **POST /api/admin/penalties/waive** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:
   "SHORTFALL", waived: bool, penaltyMin, reason? }` — removes (`waived:true`) or
   re-applies (`waived:false`) one auto-penalty. Only ever writes `PenaltyWaiver`
@@ -249,15 +253,21 @@ raises no shortfall between its sessions. Unclosed days stay out too.
   "SHORTFALL", penaltyMin }` — upholds one auto-penalty: writes a `PenaltyAck` so the
   attention queue stops recomputing it. **Changes no money** — `waive` is the one
   that refunds. Audited. → `{ acknowledged: true }`.
+  `ack` also **deletes any waiver** for that day — "this penalty stands" is the opposite
+  of "this penalty is removed", so at most one of the two rows exists.
 - `penaltyMin` is **required** on both: it is the amount the screen was showing. The
   route computes the day's true docked minutes **server-side** and compares. They must
   match — otherwise `409 PENALTY_CHANGED`, naming both figures, and **nothing is
-  written**. On a match the row is stamped with the **server's** value, so the body
-  never supplies money. If the day's penalty changes *after* a ruling, the ruling goes
-  stale: an ack stops holding the day off the attention queue and a waiver stops
-  forgiving it, the day reappears at the new amount, and the automatic penalty applies
-  at that amount until the owner rules on it. A null `penalty_min` (any row predating
-  the column) is stale the same way.
+  written**. A refusal deletes nothing either, so an existing waiver keeps suppressing
+  the penalty across it: the check can never be what starts a deduction. On a match the
+  row is stamped with the **server's** value, so the body never supplies money.
+- If the day's penalty changes *after* a ruling, that ruling goes stale, and staleness
+  decides **review, not money**: the day reappears on the attention queue at the new
+  amount. A stale **ack** stops suppressing the notice (the penalty was applying all
+  along); a stale **waiver** goes on forgiving — `waived` stays true and nothing is
+  docked — because dropping it would take back money the owner had already given, on an
+  amount he has never seen. A null `penalty_min` (any row predating the column) is
+  unreviewed the same way, so no forgiven day is re-docked by the deploy.
 
 ### Overtime
 A day that ran past its required hours by more than the branch's shift grace

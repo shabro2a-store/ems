@@ -63,7 +63,9 @@ export async function POST(req: Request) {
   // Always the server's own figure - the request cannot name what gets stored.
   // Both directions move money against the amount the screen was showing, so
   // both are confirmed first: waiving hands back what the row says, restoring
-  // takes back what the row says.
+  // takes back what the row says. A refusal writes nothing and deletes nothing,
+  // so an existing waiver keeps suppressing the penalty across it - the check
+  // can never be what starts a deduction.
   const penaltyMin = await penaltyMinForDay(body.userId, body.date, body.kind, prisma);
   if (body.penaltyMin !== penaltyMin) {
     return jsonError(

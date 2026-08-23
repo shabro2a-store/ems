@@ -27,6 +27,17 @@ const OUT_AT = new Date('2026-07-01T11:00:00Z');
 // 360, the ceiling says 300, so 300 docked - $10.00.
 const OUT_CORRECTED = new Date('2026-07-01T10:00:00Z');
 
+// The owner's worst case, and the one that would have shipped: a 30-minute
+// shortfall waived, then a correction that turns the day into a 4-hour one.
+// Out 15:30 Beirut: 450 worked, 30 short -> 60 docked, $2.00.
+const OUT_SMALL = new Date('2026-07-01T12:30:00Z');
+// Out 12:00 Beirut: 240 worked, 240 short -> ceilinged to 240 docked, $8.00.
+const OUT_BIG = new Date('2026-07-01T09:00:00Z');
+const SMALL_MIN = 60;
+const SMALL_CENT = 200;
+const BIG_MIN = 240;
+const BIG_CENT = 800;
+
 const PEN_1_MIN = 240;
 const PEN_1_CENT = 800; // what the owner actually ruled on
 const PEN_2_MIN = 300;
@@ -48,6 +59,7 @@ interface PenaltyRow {
   penaltyMin: number;
   amount_cent: number;
   waived: boolean;
+  waiverStale: boolean;
 }
 
 async function setup() {
@@ -65,13 +77,17 @@ async function setup() {
 
 // The owner corrects a punch by hand, which is routine here and is exactly what
 // moves a day out from under a ruling already made on it.
-async function correctTheCheckout(userId: string) {
+async function setCheckout(userId: string, at: Date) {
   const db = getTestPrisma();
   const out = await db.punch.findFirst({ where: { user_id: userId, kind: 'OUT' }, orderBy: { at: 'desc' } });
   await db.punch.update({
     where: { id: out!.id },
-    data: { at: OUT_CORRECTED, corrected: true, correction_reason: 'left earlier than punched' },
+    data: { at, corrected: true, correction_reason: 'left earlier than punched' },
   });
+}
+
+async function correctTheCheckout(userId: string) {
+  await setCheckout(userId, OUT_CORRECTED);
 }
 
 function headersFor(session: { cookies: string; csrf: string }) {
@@ -194,33 +210,102 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     expect(row.penalties_cent).toBe(PEN_2_CENT);
   });
 
-  it('stops a waiver forgiving an amount it was never given for', async () => {
+  it('keeps forgiving a grown shortfall and puts the day back for review', async () => {
+    // The case that would have shipped. $2.00 removed, then a correction turns
+    // the day into a $8.00 one. Docking that would take back money the owner
+    // had already decided to give, on an amount he has never seen.
     const { emp, admin } = await setup();
     const aSession = await loginAs(admin.username, 'change-me');
+    await setCheckout(emp.id, OUT_SMALL);
 
-    expect((await waive(aSession, emp.id, true, PEN_1_MIN)).status).toBe(200);
+    const before = await listedPenalties(aSession, emp.id);
+    expect(before[0]!.penaltyMin).toBe(SMALL_MIN);
+    expect(before[0]!.amount_cent).toBe(SMALL_CENT);
+    expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
     expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(0);
-    expect((await listedPenalties(aSession, emp.id))[0]!.waived).toBe(true);
     expect(await pendingFor(emp.id, emp.username)).toHaveLength(0);
 
-    await correctTheCheckout(emp.id);
+    await setCheckout(emp.id, OUT_BIG);
+
+    // Money first: nothing is docked, and that is the whole point.
+    expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(0);
 
     const listed = await listedPenalties(aSession, emp.id);
-    expect(listed[0]!.penaltyMin).toBe(PEN_2_MIN);
-    expect(listed[0]!.waived).toBe(false);
-    expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(PEN_2_CENT);
-    expect((await pendingFor(emp.id, emp.username))[0]!.penaltyMin).toBe(PEN_2_MIN);
+    expect(listed[0]!.penaltyMin).toBe(BIG_MIN);
+    expect(listed[0]!.amount_cent).toBe(BIG_CENT);
+    expect(listed[0]!.waived).toBe(true);
+    expect(listed[0]!.waiverStale).toBe(true);
+
+    // And the owner is asked about the new figure.
+    const queued = await pendingFor(emp.id, emp.username);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.penaltyMin).toBe(BIG_MIN);
+    expect(queued[0]!.amount_cent).toBe(BIG_CENT);
+    expect(queued[0]!.waived).toBe(true);
   });
 
-  it('treats a ruling that recorded no amount as stale', async () => {
-    // Any row written before penalty_min existed. It named no figure, so it
-    // cannot be read as covering this one, and no backfill is needed.
+  it('leaves the queue once the removal is confirmed at the new figure, still docking nothing', async () => {
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    await setCheckout(emp.id, OUT_SMALL);
+    expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
+    await setCheckout(emp.id, OUT_BIG);
+
+    expect((await waive(aSession, emp.id, true, BIG_MIN)).status).toBe(200);
+
+    expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(0);
+    expect(await pendingFor(emp.id, emp.username)).toHaveLength(0);
+    const listed = await listedPenalties(aSession, emp.id);
+    expect(listed[0]!.waived).toBe(true);
+    expect(listed[0]!.waiverStale).toBe(false);
+    const rows = await getTestPrisma().penaltyWaiver.findMany({ where: { user_id: emp.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.penalty_min).toBe(BIG_MIN);
+  });
+
+  it('applies the penalty at the new figure when the owner accepts it instead', async () => {
+    // Accept means "this penalty stands", which is the opposite of a removal -
+    // so the waiver goes, and only then does money start moving.
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    await setCheckout(emp.id, OUT_SMALL);
+    expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
+    await setCheckout(emp.id, OUT_BIG);
+
+    expect((await ack(aSession, emp.id, BIG_MIN)).status).toBe(200);
+
+    expect(await getTestPrisma().penaltyWaiver.findMany({ where: { user_id: emp.id } })).toHaveLength(0);
+    expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(BIG_CENT);
+    expect(await pendingFor(emp.id, emp.username)).toHaveLength(0);
+    const audit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'PenaltyAck', entity_id: `${emp.id}:${DAY}:SHORTFALL`, action: 'penalty.acknowledge' },
+    });
+    expect(audit?.after_json).toMatchObject({ penalty_min: BIG_MIN, cleared_waiver: true });
+  });
+
+  it('keeps forgiving on a waiver that recorded no amount, and still asks about it', async () => {
+    // Any row written before penalty_min existed. It names no figure so it can
+    // never match - but it is still the owner's removal, so the money stays
+    // where he put it and no backfill is needed.
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    expect((await waive(aSession, emp.id, true, PEN_1_MIN)).status).toBe(200);
+    await getTestPrisma().penaltyWaiver.updateMany({ where: { user_id: emp.id }, data: { penalty_min: null } });
+
+    const listed = await listedPenalties(aSession, emp.id);
+    expect(listed[0]!.waived).toBe(true);
+    expect(listed[0]!.waiverStale).toBe(true);
+    expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(0);
+    expect((await pendingFor(emp.id, emp.username))[0]!.penaltyMin).toBe(PEN_1_MIN);
+  });
+
+  it('treats an ack that recorded no amount as unreviewed', async () => {
+    // An ack moves no money, so here the pre-column row simply returns the day
+    // to the queue - and the automatic penalty was applying all along.
     const { emp, admin } = await setup();
     const aSession = await loginAs(admin.username, 'change-me');
     expect((await ack(aSession, emp.id, PEN_1_MIN)).status).toBe(200);
-    expect((await waive(aSession, emp.id, true, PEN_1_MIN)).status).toBe(200);
     await getTestPrisma().penaltyAck.updateMany({ where: { user_id: emp.id }, data: { penalty_min: null } });
-    await getTestPrisma().penaltyWaiver.updateMany({ where: { user_id: emp.id }, data: { penalty_min: null } });
 
     expect((await listedPenalties(aSession, emp.id))[0]!.waived).toBe(false);
     expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(PEN_1_CENT);
@@ -272,6 +357,23 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     expect((await res.json()).error.code).toBe('PENALTY_CHANGED');
     expect(await getTestPrisma().penaltyWaiver.findMany({ where: { user_id: emp.id } })).toHaveLength(0);
     expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(PEN_2_CENT);
+  });
+
+  it('cannot start a deduction by refusing a restore', async () => {
+    // The refusal writes nothing and deletes nothing, so the removal the owner
+    // granted is still standing on the other side of it. A guard that dropped
+    // the waiver on its way to saying no would be worse than no guard.
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    await setCheckout(emp.id, OUT_SMALL);
+    expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
+    await setCheckout(emp.id, OUT_BIG);
+
+    // The screen still shows the old figure, and the owner clicks Restore.
+    const res = await waive(aSession, emp.id, false, SMALL_MIN);
+    expect(res.status).toBe(409);
+    expect(await getTestPrisma().penaltyWaiver.findMany({ where: { user_id: emp.id } })).toHaveLength(1);
+    expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(0);
   });
 
   it('refuses a ruling that names no amount at all', async () => {

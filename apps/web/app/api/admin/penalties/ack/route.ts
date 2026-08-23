@@ -69,6 +69,15 @@ export async function POST(req: Request) {
     );
   }
 
+  // "This penalty stands" is the exact opposite of "this penalty is removed",
+  // and a waiver row is what stops the money whatever figure it names. Leaving
+  // one in place would make an ack change nothing at all - which is precisely
+  // the choice the owner is offered on a day whose waiver has gone stale: keep
+  // it removed, or apply it at the amount the day actually has now.
+  const clearedWaiver = await prisma.penaltyWaiver.deleteMany({
+    where: { user_id: body.userId, date, kind: body.kind },
+  });
+
   await prisma.penaltyAck.upsert({
     where: { user_id_date_kind: { user_id: body.userId, date, kind: body.kind } },
     create: { user_id: body.userId, date, kind: body.kind, penalty_min: penaltyMin, acknowledged_by: adminId },
@@ -80,7 +89,13 @@ export async function POST(req: Request) {
     action: 'penalty.acknowledge',
     entity: 'PenaltyAck',
     entityId: `${body.userId}:${body.date}:${body.kind}`,
-    after: { user_id: body.userId, date: body.date, kind: body.kind, penalty_min: penaltyMin },
+    after: {
+      user_id: body.userId,
+      date: body.date,
+      kind: body.kind,
+      penalty_min: penaltyMin,
+      cleared_waiver: clearedWaiver.count > 0,
+    },
   });
 
   return NextResponse.json({ ok: true, data: { acknowledged: true } });
