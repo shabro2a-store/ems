@@ -405,11 +405,22 @@ requires a short-lived code shown only to a logged-in admin.
 
 ## 9. Known issues
 
-One left:
+Two left:
 
 1. **`driverStale` re-alerts every 30 min.** No per-trip guard, unlike `tripThreshold`'s
    `threshold_alerted_at`. A driver out 8h generates ~9 identical messages. → Add
    `stale_alerted_at` on `Trip` and gate on it.
+2. **A split shift that straddles midnight is judged as two days.** Each IN/OUT pair belongs
+   to its own check-in day (`computeCoverage`), so in 21:00, out 02:00, back in 05:00 puts the
+   first session on day 1 and the second on day 2 — two part-days, each measured against a
+   full `shift_min`, so both can raise a shortfall for one night's work. The current
+   shift-day skip does not help: it holds back one day, and here the two sessions are on
+   different ones. Not the owner's pattern — his night staff work one continuous
+   evening-to-morning shift, which `computeCoverage` already attributes wholly to the
+   check-in day — so this is written up rather than built for. → If it ever arises, the fix
+   is a session-chaining rule (a new IN within some gap of the previous OUT continues the
+   same shift-day) applied in `computeCoverage`, where every day-attribution question in this
+   codebase already resolves; it must not be re-derived in `penalty.ts`.
 
 *(The `Flag.notified_at` overload is fixed — `resolved_at` now exists. It had been causing
 two visible bugs: dismissed flags reappearing within a minute, and the 23:30 sweep silently
