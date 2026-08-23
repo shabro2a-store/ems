@@ -87,8 +87,9 @@ export async function punchEmployee(
   // blocks the punch. The trouble was that a trip had no end but a BACK press
   // the driver had to remember, and nothing else in the system could write one
   // - so a press that never came was an attendance lockout, escapable only by
-  // pressing BACK hours later and recording a return that did not happen, and
-  // not escapable at all once the trip's branch was deactivated.
+  // pressing BACK the next morning and recording a return that did not happen.
+  // A driver who never came back at all - quit, on leave, phone gone - left it
+  // open for good; see tripClose.ts for what that cost.
   //
   // Past MAX_OPEN_TRIP_MIN the trip is not a delivery, so it is closed here at
   // the dispatching branch's own delivery time and the punch goes through. A

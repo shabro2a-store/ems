@@ -9,10 +9,17 @@ import type { PrismaClient, Trip } from '@prisma/client';
  * `tripThreshold` send Telegram alerts and write no `back_at`, the abandoned
  * sweep closes punches and not trips, and no admin route touches a Trip at
  * all. A driver who forgot to press BACK could therefore neither clock in nor
- * clock out, and their only way out was to press BACK hours later - writing a
- * return time they did not make - or, if their branch had since been
- * deactivated, nothing at all, because verifyWithinGeofence drops inactive
- * branches and then reports TOO_FAR.
+ * clock out, and their only way through was to press BACK the next morning -
+ * writing a return time they did not make - after being told to "press Back,
+ * then clock out" while they were trying to clock in.
+ *
+ * The trip nobody ever comes back to had no way through at all. A driver who
+ * quits, goes on leave or loses the phone leaves it open forever: the unique
+ * partial index trip_one_open means they can never be given another order,
+ * caller.ts reports them out on a delivery for good so the counter stops
+ * ringing them, the owner's dashboard shows a driver permanently out, and
+ * driverStale - which has no dedupe - re-alerts every thirty minutes until
+ * somebody edits the database.
  *
  * The number sits deliberately between two that already exist:
  *
