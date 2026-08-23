@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => ({
   schedule: { findMany: vi.fn() },
   scheduleOverride: { findMany: vi.fn() },
   penaltyWaiver: { findMany: vi.fn() },
+  blockedPunchAttempt: { findMany: vi.fn() },
+  blockedCreditDecision: { findMany: vi.fn() },
 }));
 
 vi.mock('@/lib/db/prisma', () => ({
@@ -123,6 +125,8 @@ beforeEach(() => {
   mocks.schedule.findMany.mockImplementation(async () => []);
   mocks.scheduleOverride.findMany.mockImplementation(async () => []);
   mocks.penaltyWaiver.findMany.mockImplementation(async () => []);
+  mocks.blockedPunchAttempt.findMany.mockImplementation(async () => []);
+  mocks.blockedCreditDecision.findMany.mockImplementation(async () => []);
 });
 
 describe('requestAdvance', () => {

@@ -1,12 +1,12 @@
 import type { PrismaClient } from '@prisma/client';
 import { rateAt, monthRangeUtc } from './payout';
 import {
-  computeCoverage,
   currentShiftDayMinutes,
   type DayCoverage,
   type OverrideLite,
   type PunchLite,
 } from './coverage';
+import { coverageWithBlockedCredit, loadBlockedCreditInputs } from './blockedCredit';
 
 /**
  * Minutes docked for covering fewer than the day required.
@@ -172,7 +172,7 @@ export async function penaltiesForUser(
   opts: { now?: Date } = {},
 ): Promise<PenaltyItem[]> {
   const { start, end } = monthRangeUtc(month);
-  const [punches, schedules, overrides, rateChanges, waivers, user] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, waivers, user, blocked] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -199,6 +199,7 @@ export async function penaltiesForUser(
       where: { id: userId },
       select: { branch: { select: { shift_grace_min: true } } },
     }),
+    loadBlockedCreditInputs([userId], start, end, db),
   ]);
 
   const shiftMinByWeekday = new Map<number, number>();
@@ -218,11 +219,16 @@ export async function penaltiesForUser(
     waiversByKey.set(`${w.date.toISOString().slice(0, 10)}|${w.kind}`, { penalty_min: w.penalty_min });
   }
 
-  const coverage = computeCoverage({
+  // Blocked-time credit is folded in here, which is the whole point of it: an
+  // employee held at the door by somebody else's forgotten checkout must not
+  // then be docked for the hours they could not clock.
+  const { coverage } = coverageWithBlockedCredit({
     punches: punches as PunchLite[],
     shiftMinByWeekday,
     overridesByDate,
     rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
+    attempts: blocked.attemptsByUser.get(userId) ?? [],
+    decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
   });
   return shortfallPenalties({
     coverage,
@@ -278,7 +284,7 @@ export async function pendingPenaltyNotices(
   const now = opts.now ?? new Date();
   const { start, end } = monthRangeUtc(month);
 
-  const [punches, schedules, overrides, rateChanges, waivers, acks, userBranches] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, waivers, acks, userBranches, blocked] = await Promise.all([
     db.punch.findMany({
       where: { user_id: { in: ids }, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -309,6 +315,7 @@ export async function pendingPenaltyNotices(
       where: { id: { in: ids } },
       select: { id: true, branch: { select: { shift_grace_min: true } } },
     }),
+    loadBlockedCreditInputs(ids, start, end, db),
   ]);
 
   const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
@@ -355,11 +362,13 @@ export async function pendingPenaltyNotices(
 
     const userPunches = (punchesBy.get(u.id) ?? []) as PunchLite[];
     const userRates = (ratesBy.get(u.id) ?? []) as RateChangeLite[];
-    const coverage = computeCoverage({
+    const { coverage } = coverageWithBlockedCredit({
       punches: userPunches,
       shiftMinByWeekday,
       overridesByDate,
       rateCentAt: (at) => rateAt(userRates, at),
+      attempts: blocked.attemptsByUser.get(u.id) ?? [],
+      decisionsByDate: blocked.decisionsByUser.get(u.id) ?? new Map(),
     });
     const items = shortfallPenalties({
       coverage,

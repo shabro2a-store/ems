@@ -26,6 +26,7 @@ interface Overview {
     flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null; reason: string }[];
     penalties: { user_id: string; username: string; date: string; kind: 'SHORTFALL'; shortfallMin: number; penaltyMin: number; amount_cent: number; waived: boolean }[];
     overtime: { user_id: string; username: string; date: string; overtimeMin: number; amount_cent: number }[];
+    blockedCredits: { user_id: string; username: string; date: string; blocked_at: string; clocked_in_at: string; waitedMin: number; creditedMin: number; amount_cent: number }[];
     pendingAdvances: { id: string; username: string; amount_cent: number; reason: string | null }[];
     pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; off_min: number | null; note: string | null }[];
   };
@@ -145,6 +146,7 @@ export default function AdminDashboard() {
     att.flags.length +
     att.penalties.length +
     att.overtime.length +
+    att.blockedCredits.length +
     att.pendingAdvances.length +
     att.pendingLeaves.length;
   const maxPresent = Math.max(1, ...trends.map((p) => p.present));
@@ -425,6 +427,65 @@ export default function AdminDashboard() {
                             }}
                           >
                             {confirming === `ot-no:${key}` ? 'Tap again to confirm' : 'Revoke'}
+                          </Button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+                {att.blockedCredits.map((c) => {
+                  const key = `${c.user_id}|${c.date}`;
+                  // creditedMin is what this row is showing: the server refuses
+                  // the ruling if a correction has moved the day since.
+                  const body = { userId: c.user_id, date: c.date, creditedMin: c.creditedMin };
+                  const capped = c.creditedMin < c.waitedMin;
+                  return (
+                    <li key={key} className="flex items-start gap-3 px-4 py-3 sm:px-5">
+                      <Badge tone="primary">Blocked</Badge>
+                      <div className="min-w-0 flex-1 text-sm">
+                        <div className="font-medium">
+                          {c.username} · {centsToUsd(c.amount_cent)} credited for time they could not clock
+                        </div>
+                        <div className="text-xs text-muted">
+                          {c.date} · turned away {formatBeirutTime(c.blocked_at)}, clocked in{' '}
+                          {formatBeirutTime(c.clocked_in_at)} · {formatMinutes(c.creditedMin)} paid
+                          {capped ? ` (waited ${formatMinutes(c.waitedMin)}, capped at the day's hours)` : ''}
+                        </div>
+                        <div className="mt-1 text-xs text-muted">
+                          Their previous shift was still open, so the app refused the check-in. GPS put them at
+                          the branch the whole time. Already paid, and it cancels the day's shortfall. Accept to
+                          leave it, or revoke it to pay only what they clocked.
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            loading={busy === `bc-ok:${key}`}
+                            onClick={() =>
+                              act(`bc-ok:${key}`, '/api/admin/blocked-credit/decision', {
+                                body: { ...body, decision: 'ACCEPTED' },
+                                success: `Credit stands — ${centsToUsd(c.amount_cent)} stays in ${c.username}'s pay.`,
+                              })
+                            }
+                          >
+                            Accept
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={confirming === `bc-no:${key}` ? 'danger' : 'ghost'}
+                            loading={busy === `bc-no:${key}`}
+                            onClick={() => {
+                              if (confirming !== `bc-no:${key}`) {
+                                setConfirming(`bc-no:${key}`);
+                                return;
+                              }
+                              void act(`bc-no:${key}`, '/api/admin/blocked-credit/decision', {
+                                body: { ...body, decision: 'REVOKED' },
+                                success: `Credit revoked — ${centsToUsd(c.amount_cent)} removed from ${c.username}'s pay, and the day is judged on their punches alone.`,
+                              });
+                            }}
+                          >
+                            {confirming === `bc-no:${key}` ? 'Tap again to confirm' : 'Revoke'}
                           </Button>
                         </div>
                       </div>

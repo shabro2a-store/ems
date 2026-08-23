@@ -89,6 +89,13 @@ cuid PKs, money = Int cents.
   trip_id?). The driver's app polls for an unacknowledged ring in the last 2 min and raises the
   alarm. `trip_id` links the ring to the trip it dispatched; a driver can only start a trip against
   a recent ring with no `trip_id` yet.
+- **BlockedCreditDecision** — (user, date) unique, `decision` ACCEPTED/REVOKED, plus
+  **`credited_min?`** — the day's credited minutes at the moment the owner ruled, stamped
+  server-side. Mirrors `OvertimeDecision` including the safe default: no row means pending,
+  and pending credit is **already granted**. `ACCEPTED` changes no money; `REVOKED` **withholds**
+  the credit rather than clawing it back, so there is no deduction line for it anywhere — the
+  day simply reverts to what the punches alone say, shortfall included. A ruling counts only
+  while `credited_min` still equals the day's current credit.
 - **PushSubscription** — a device's Web Push subscription (user, endpoint unique, p256dh, auth);
   lets a ring reach a locked/closed phone. Dead endpoints (404/410) are auto-pruned.
 - **PenaltyWaiver** — (user, date, kind SHORTFALL) unique, plus **`penalty_min?`** — the
@@ -159,6 +166,9 @@ Full request/response detail is in [API.md](API.md). Summary:
   (uphold one; clears it from the attention queue without changing pay).
 - Overtime: `POST overtime/decision` (upserts one `OvertimeDecision` row per user/date;
   `ACCEPTED` upholds and changes no money, `REVOKED` deducts that day's excess from payroll).
+- Blocked-time credit: `POST blocked-credit/decision` (upserts one `BlockedCreditDecision` per
+  user/date; `ACCEPTED` upholds and changes no money, `REVOKED` withholds the credit, `PENDING`
+  deletes the row and is the undo).
 - Flags: `POST flags/[id]/resolve`.
 - Telegram: `GET telegram/code` (the 6-digit bind code + whether a bot/chat is configured).
 
@@ -170,8 +180,10 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 - **Payroll (`payout.ts`)**: pairs each IN with next OUT; `minutes = floor((out-in)/60000)`;
   interval gross = `floor(minutes * rate_at_shift / 60)` (respects RateChange history). Open
-  session pays nothing. `net = gross + Σadjustments − ΣapprovedAdvances(month) − Σpenalties(month)
-  − ΣrevokedOvertime(month)`. Can go negative.
+  session pays nothing. **Blocked-time credit is inside gross**, priced by the same
+  per-interval floor and added from the same objects `computeCoverage` folded into those days —
+  it is hours worked, not an adjustment. `net = gross + Σadjustments − ΣapprovedAdvances(month)
+  − Σpenalties(month) − ΣrevokedOvertime(month)`. Can go negative.
 - **Penalties (`penalty.ts`)**: covering fewer minutes than the day required (SHORTFALL), docked
   from pay. `penaltyMin = min(2 × shortfallMin, workedMin)` once the shortfall passes the branch's
   `shift_grace_min`; amount = `floor(penaltyMin × rate-at-shift / 60)`. The grace is a **threshold,
@@ -323,6 +335,35 @@ Full request/response detail is in [API.md](API.md). Summary:
   writes a `BlockedPunchAttempt`, and why the row can be trusted to pay. An attempt from home
   fails earlier as `OUT_OF_GEOFENCE` and is never recorded; nor is the open-trip block, which
   runs before the geofence; nor is `punch/dev`, which has no geofence at all.
+- **Blocked time is paid (`blockedCredit.ts`)**: the day's work starts at the **first
+  `BlockedPunchAttempt` of that Beirut day**, not at the punch that eventually landed. GPS put
+  them at the branch and the shop was open, so they were working with no clock running — the
+  owner ruled it paid. Applied **automatically**, so nobody carries a penalty for the system
+  blocking them, and shown on the attention queue with what was credited and why.
+  - **Capped** so `worked + credited` never exceeds the day's required minutes. Not the owner's
+    ruling — a judgement call, flagged as one: credit must erase a shortfall, never manufacture
+    overtime, or being blocked becomes worth money and waiting generates overtime notices. The
+    cap also makes credit and overtime mutually exclusive by construction (a credited day has
+    `deltaMin <= 0`), so no day can be both.
+  - **Where it enters the money path.** One function prices it once, and the identical
+    `WorkInterval` objects go to **both** sides: `computeCoverage` folds them into that day's
+    `workedMin` and `intervals` (at the front — credited time is the start of the day, so
+    `centsForLastMinutes` keeps slicing real worked minutes off the end), and
+    `computePayoutFromRows` adds the same set to `pairHours`'s gross through `sumIntervalsCent`,
+    which is `centsForLastMinutes` again. Same pairing, same per-interval flooring, same rate
+    instant (the rate in force when the wait ended, mirroring a worked interval's closing
+    punch) — so month gross still equals the sum of per-day `grossCent` to the cent, and the
+    penalty ceiling clamped to `grossCent` still makes "a day can never go negative" exact.
+    `blockedCredit.test.ts` pins that equality over a 2000-day sweep; `penalty-bound.test.ts`
+    still pins the bound over 4000.
+  - **Two passes, in one place.** The cap needs the day's required and worked minutes, which
+    only coverage knows, and coverage needs the credit — so `coverageWithBlockedCredit` builds
+    uncredited coverage, sizes the credit, then rebuilds. Every reader of a day (penalties,
+    overtime, the payslip, the attention queue, the advance cap) goes through it, so they
+    cannot see different days.
+  - A blocked attempt with no successful check-in **that same Beirut day** credits nothing —
+    there is no day's work for it to start. Nor does one whose blocking session began that
+    same day, since those minutes are already counted from their own check-in.
 - **A blocked employee is told what happened.** The refusal message names the open shift, says
   the manager closes it, and says the arrival is already recorded — the employee cannot fix
   yesterday themselves, and "Punch rejected: ALREADY_PUNCHED_IN" left them standing there
@@ -409,7 +450,7 @@ an "Open in app" deep link) — all actions happen in the web app.
 
 ### Needs attention (the admin's work queue)
 
-Six row types. Every action reports what it changed — a row that merely vanishes is
+Seven row types. Every action reports what it changed — a row that merely vanishes is
 indistinguishable from a button that does nothing, which is exactly how this failed before.
 
 | Row | Actions | What they do |
@@ -418,6 +459,7 @@ indistinguishable from a button that does nothing, which is exactly how this fai
 | **Flag** | Dismiss (+ Fix punch) | Dismiss is an acknowledgement only — no record changes. `MISSED_CHECKOUT` also links to `/admin/punches`, where the punch can actually be corrected. Absence (`WATCHED`) surfaces here too — notice only, no automatic penalty. |
 | **Penalty** | Accept · Revoke | Accept upholds (no money moves, and clears any earlier removal); Revoke waives and returns the money. Both send the figure the row is showing and are refused if the day has moved since. A day whose removal has gone stale appears here too, saying so — nothing is docked while it waits. |
 | **Overtime** | Accept · Revoke | Already paid either way — Accept leaves it that way; Revoke deducts that day's excess from payroll. |
+| **Blocked** | Accept · Revoke | Time credited because the app refused their check-in while they stood at the branch. Already paid and already cancelling that day's shortfall — Accept leaves it; Revoke withholds the credit, and the day goes back to being judged on the punches alone. Both send the figure the row is showing and are refused if the day has moved since. |
 | **Advance** | Approve · Reject | Approve deducts from this month's pay. |
 | **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`; for `HOURS_CHANGE`, the requested hours are **subtracted** from that weekday's scheduled hours (floored at 0). The row shows the requested hours so the admin is not approving blind. |
 

@@ -58,6 +58,40 @@ export interface WorkInterval {
 }
 
 /**
+ * Minutes a day is owed with no punch pair behind them, already priced.
+ *
+ * The only source today is blocked-time credit (blockedCredit.ts): the wait
+ * between an employee arriving at the branch and the system finally letting
+ * them clock in, which the owner ruled is paid. The minutes are priced by the
+ * producer, not here, and the identical objects are handed to computeCoverage
+ * and to computePayoutFromRows - that is what keeps a day's grossCent and the
+ * month's pairHours gross reconciling to the cent. Two places computing "what
+ * is this credit worth" would be two places to get it differently wrong.
+ */
+export interface CreditedTime {
+  date: string; // YYYY-MM-DD (Beirut)
+  minutes: number;
+  rateCent: number;
+}
+
+/** Total minutes in a set of priced intervals. */
+export function sumIntervalMinutes(intervals: WorkInterval[]): number {
+  return intervals.reduce((s, i) => s + i.minutes, 0);
+}
+
+/**
+ * What a set of priced intervals is worth, floored per interval.
+ *
+ * Expressed through centsForLastMinutes on purpose: the day's gross is built
+ * by that function, so anything summed this way is priced by the same
+ * arithmetic - sum-of-floors, never floor-of-sum - and cannot come out a cent
+ * away from the day it is being added to.
+ */
+export function sumIntervalsCent(intervals: WorkInterval[]): number {
+  return centsForLastMinutes(intervals, sumIntervalMinutes(intervals));
+}
+
+/**
  * What the last `minutes` worked minutes of a day were paid.
  *
  * Each interval is floored on its own, exactly as payout.ts floors it, and a
@@ -94,6 +128,11 @@ export function computeCoverage(args: {
   shiftMinByWeekday: Map<number, number>;
   overridesByDate: Map<string, OverrideLite>;
   rateCentAt: (at: Date) => number;
+  // Minutes owed with no punch behind them, already priced by their producer.
+  // Folded into workedMin and into the day's intervals, so a day's coverage,
+  // its gross and its shortfall all see the same day. Optional because most
+  // callers have none, and a caller that omits it gets exactly the old answer.
+  credited?: CreditedTime[];
 }): DayCoverage[] {
   const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
 
@@ -131,6 +170,23 @@ export function computeCoverage(args: {
     if (!workedByDate.has(date)) workedByDate.set(date, 0);
     lastPunchByDate.set(date, openIn.at);
     if (!arrivalByDate.has(date)) arrivalByDate.set(date, openIn.at);
+  }
+
+  // Credited minutes are the front of the day - the employee was already at the
+  // branch before the first punch landed - so the interval goes first. Ordering
+  // matters to centsForLastMinutes, which slices from the end: "what did the
+  // last n minutes pay" must keep answering with real worked minutes.
+  //
+  // A credit whose date has no punches at all is dropped. Blocked time is the
+  // start of a day's work, so a day with no work is a day with nothing to start.
+  for (const c of args.credited ?? []) {
+    if (c.minutes <= 0) continue;
+    if (!workedByDate.has(c.date)) continue;
+    workedByDate.set(c.date, (workedByDate.get(c.date) ?? 0) + c.minutes);
+    const existing = intervalsByDate.get(c.date);
+    const interval: WorkInterval = { minutes: c.minutes, rateCent: c.rateCent };
+    if (existing) existing.unshift(interval);
+    else intervalsByDate.set(c.date, [interval]);
   }
 
   const days: DayCoverage[] = [];

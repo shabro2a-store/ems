@@ -58,6 +58,7 @@ const TABLES = [
   'PenaltyWaiver',
   'PenaltyAck',
   'OvertimeDecision',
+  'BlockedCreditDecision',
   'IdempotencyKey',
   'RateLimitBucket',
   'Branch',

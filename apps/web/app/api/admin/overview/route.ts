@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db/prisma';
 import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
 import { pendingOvertimeNotices } from '@/lib/services/overtime';
+import { pendingBlockedCreditNotices } from '@/lib/services/blockedCredit';
 import { requiredMinFor, currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
 import { lookbackMonths, mergeNotices } from '@/lib/services/noticeWindow';
 
@@ -235,9 +236,10 @@ export async function GET(req: Request) {
   // has to be asked for month by month or it stops at the 1st.
   const months = lookbackMonths(since, todayStr);
 
-  const [penaltyBatches, overtimeBatches] = await Promise.all([
+  const [penaltyBatches, overtimeBatches, blockedCreditBatches] = await Promise.all([
     Promise.all(months.map((m) => pendingPenaltyNotices(penaltyUsers, m, prisma, { since, now: nowDate }))),
     Promise.all(months.map((m) => pendingOvertimeNotices(penaltyUsers, m, prisma, { since }))),
+    Promise.all(months.map((m) => pendingBlockedCreditNotices(penaltyUsers, m, prisma, { since }))),
   ]);
 
   const penalties = mergeNotices(penaltyBatches).map((p) => ({
@@ -259,6 +261,20 @@ export async function GET(req: Request) {
     date: o.date,
     overtimeMin: o.overtimeMin,
     amount_cent: o.amount_cent,
+  }));
+
+  // Paid automatically, so this is a review row like the other two: the times
+  // are what the row has to show, because "credited 1h 48m" without "blocked
+  // at 06:12, in at 08:00" gives the owner nothing to judge.
+  const blockedCredits = mergeNotices(blockedCreditBatches).map((c) => ({
+    user_id: c.user_id,
+    username: c.username,
+    date: c.date,
+    blocked_at: c.blockedAt.toISOString(),
+    clocked_in_at: c.clockedInAt.toISOString(),
+    waitedMin: c.waitedMin,
+    creditedMin: c.creditedMin,
+    amount_cent: c.amount_cent,
   }));
 
   const pendingAdvances = pendingAdv
@@ -304,6 +320,7 @@ export async function GET(req: Request) {
         flags,
         penalties,
         overtime,
+        blockedCredits,
         pendingAdvances,
         pendingLeaves,
       },

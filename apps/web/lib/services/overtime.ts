@@ -2,11 +2,11 @@ import type { PrismaClient } from '@prisma/client';
 import { rateAt, monthRangeUtc } from './payout';
 import {
   centsForLastMinutes,
-  computeCoverage,
   type DayCoverage,
   type OverrideLite,
   type PunchLite,
 } from './coverage';
+import { coverageWithBlockedCredit, loadBlockedCreditInputs } from './blockedCredit';
 
 interface RateChangeLite {
   rate_cent: number;
@@ -90,7 +90,7 @@ export async function overtimeForUser(
   db: PrismaClient,
 ): Promise<OvertimeItem[]> {
   const { start, end } = monthRangeUtc(month);
-  const [punches, schedules, overrides, rateChanges, decisions, user] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, decisions, user, blocked] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -117,6 +117,7 @@ export async function overtimeForUser(
       where: { id: userId },
       select: { branch: { select: { shift_grace_min: true } } },
     }),
+    loadBlockedCreditInputs([userId], start, end, db),
   ]);
 
   const shiftMinByWeekday = new Map<number, number>();
@@ -141,11 +142,17 @@ export async function overtimeForUser(
 
   const graceMin = user?.branch?.shift_grace_min ?? 15;
 
-  const coverage = computeCoverage({
+  // The same day every other reader sees. Credit is capped so worked +
+  // credited never exceeds the day's required minutes, so it can never raise
+  // an overtime notice - but reading a different coverage here would leave
+  // that as an argument rather than a fact.
+  const { coverage } = coverageWithBlockedCredit({
     punches: punches as PunchLite[],
     shiftMinByWeekday,
     overridesByDate,
     rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
+    attempts: blocked.attemptsByUser.get(userId) ?? [],
+    decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
   });
   return computeOvertime({
     coverage,
@@ -199,7 +206,7 @@ export async function pendingOvertimeNotices(
   const ids = users.map((u) => u.id);
   const { start, end } = monthRangeUtc(month);
 
-  const [punches, schedules, overrides, rateChanges, decisions, userBranches] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, decisions, userBranches, blocked] = await Promise.all([
     db.punch.findMany({
       where: { user_id: { in: ids }, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -226,6 +233,7 @@ export async function pendingOvertimeNotices(
       where: { id: { in: ids } },
       select: { id: true, branch: { select: { shift_grace_min: true } } },
     }),
+    loadBlockedCreditInputs(ids, start, end, db),
   ]);
 
   const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
@@ -270,11 +278,13 @@ export async function pendingOvertimeNotices(
     }
 
     const userRates = (ratesBy.get(u.id) ?? []) as RateChangeLite[];
-    const coverage = computeCoverage({
+    const { coverage } = coverageWithBlockedCredit({
       punches: (punchesBy.get(u.id) ?? []) as PunchLite[],
       shiftMinByWeekday,
       overridesByDate,
       rateCentAt: (at) => rateAt(userRates, at),
+      attempts: blocked.attemptsByUser.get(u.id) ?? [],
+      decisionsByDate: blocked.decisionsByUser.get(u.id) ?? new Map(),
     });
     const items = computeOvertime({
       coverage,

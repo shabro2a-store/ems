@@ -56,6 +56,11 @@ enum OvertimeDecisionKind {
   REVOKED
 }
 
+enum CreditDecisionKind {
+  ACCEPTED
+  REVOKED
+}
+
 model User {
   id                   String             @id @default(cuid())
   username             String             @unique
@@ -86,6 +91,7 @@ model User {
   penalty_waivers      PenaltyWaiver[]
   penalty_acks         PenaltyAck[]
   overtimeDecisions    OvertimeDecision[]
+  blockedCreditDecisions BlockedCreditDecision[]
   calls_received       DriverCall[]       @relation("CallsReceived")
   calls_made           DriverCall[]       @relation("CallsMade")
   push_subscriptions   PushSubscription[]
@@ -354,6 +360,30 @@ model OvertimeDecision {
   reason     String?
   decided_by String
   created_at DateTime             @default(now())
+
+  @@unique([user_id, date])
+  @@index([user_id, date])
+}
+
+// The owner has reviewed one day's blocked-time credit. No row means pending,
+// and pending credit is already granted - it is inside gross and it has already
+// cancelled that day's shortfall. ACCEPTED changes no money and only clears the
+// notice; REVOKED withholds the credit, which is why there is no deduction line
+// anywhere for it - nothing was paid out that has to be taken back.
+model BlockedCreditDecision {
+  id           String             @id @default(cuid())
+  user_id      String
+  user         User               @relation(fields: [user_id], references: [id])
+  date         DateTime           @db.Date
+  decision     CreditDecisionKind
+  // The day's credited minutes at the moment the owner ruled. One row per
+  // calendar day, but a punch correction moves what the day is owed and so
+  // moves the credit with it; a ruling has to name the amount it was made
+  // against. Null is treated as stale, so any pre-column row needs no backfill.
+  credited_min Int?
+  reason       String?
+  decided_by   String
+  created_at   DateTime           @default(now())
 
   @@unique([user_id, date])
   @@index([user_id, date])

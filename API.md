@@ -138,8 +138,8 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **GET /api/admin/overview?branchId=all|<id>** → live KPIs + per-employee status +
   attention queue: `{ branches, branchId, kpis{ present, absent, driversOut,
   driversOver, tripsToday, hoursToday, laborTodayCent }, people[] (drivers include
-  trips_today), attention{ lateDrivers, flags, penalties, overtime, pendingAdvances,
-  pendingLeaves } }`.
+  trips_today), attention{ lateDrivers, flags, penalties, overtime, blockedCredits,
+  pendingAdvances, pendingLeaves } }`.
   - `penalties[]` — `{ user_id, username, date, kind: SHORTFALL, shortfallMin,
     penaltyMin, amount_cent, waived }`. Computed on the fly, last 7 days, excluding any day
     whose waiver or ack still names its current figure. `waived: true` marks a day whose
@@ -150,7 +150,12 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     branch's shift grace with no *live* decision yet appear — a decision whose
     recorded minutes no longer match the day reads as pending and reappears here.
     Resolved with `overtime/decision` (see below).
-  - Both lists are loaded once per calendar month the 7-day lookback touches, so
+  - `blockedCredits[]` — `{ user_id, username, date, blocked_at, clocked_in_at, waitedMin,
+    creditedMin, amount_cent }`. Time paid because the app refused their check-in while they
+    stood at the branch. Same on-the-fly computation and 7-day lookback; only days with no
+    *live* decision appear. `waitedMin` above `creditedMin` means the cap trimmed it to the
+    day's required hours. Resolved with `blocked-credit/decision` (see below).
+  - All three lists are loaded once per calendar month the 7-day lookback touches, so
     the window still reaches back over a month boundary. It matters most for
     overtime, where a day with no decision is already paid: a month-end overrun
     that never surfaced would auto-approve.
@@ -324,6 +329,25 @@ so it surfaces in payroll only if revoked.
   deduction. If the day's overtime changes *after* a decision, that decision goes stale:
   `decision` reads `null` everywhere, the day returns to the attention queue at the new
   amount, and nothing is deducted until the owner rules again.
+
+### Blocked-time credit
+- **POST /api/admin/blocked-credit/decision** *(CSRF, Idempotent)* `{ userId, date:
+  "YYYY-MM-DD", decision: "ACCEPTED"|"REVOKED"|"PENDING", creditedMin, reason? }` — upserts the
+  one `BlockedCreditDecision` row for that (user, date). The credit is granted automatically,
+  so `ACCEPTED` **changes no money** and only takes the notice off the queue; `REVOKED`
+  **withholds** it, which drops the minutes out of gross and puts that day's shortfall back.
+  Nothing is clawed back, so there is no deduction line for it. `PENDING` is the undo: the
+  absence of a row *is* pending, so it **deletes** the row and the credit returns. Audited as
+  `blocked_credit.accepted` / `.revoked` / `.undecided`. → `{ decision }`.
+  `creditedMin` is **required** for `ACCEPTED`/`REVOKED` (not for `PENDING`, which only hands
+  money back): it is the amount the screen was showing. The route recomputes the day's true
+  credit server-side and compares — mismatch is `409 CREDIT_CHANGED`, naming both figures, and
+  **nothing is written**. On a match the row stores the **server's** value. A day with no
+  credit at all cannot be ruled on (`400 INVALID_INPUT`), because a ruling stamped with 0 would
+  match every future 0 and quietly cover whatever the day grows into. A ruling goes stale the
+  moment its `credited_min` stops matching, and a stale ruling reads as pending — the credit is
+  granted again and the day returns to the queue, erring towards paying the employee exactly as
+  overtime does.
 
 ### Flags
 - **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag

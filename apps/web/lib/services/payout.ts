@@ -1,6 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
+import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
+import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval } from './coverage';
 
 export interface PayoutForUserResult {
   hours: number;
@@ -56,7 +58,7 @@ export function rateAt(rateChanges: { rate_cent: number; effective_from: Date }[
   return 0;
 }
 
-function pairHours(punches: PunchRow[], rateChanges: RateChangeRow[]): { hours: number; grossCent: number } {
+function pairHours(punches: PunchRow[], rateChanges: RateChangeRow[]): { minutes: number; grossCent: number } {
   const sorted = [...punches].sort((a, b) => a.at.getTime() - b.at.getTime());
   let totalMinutes = 0;
   let grossCent = 0;
@@ -74,7 +76,30 @@ function pairHours(punches: PunchRow[], rateChanges: RateChangeRow[]): { hours: 
       }
     }
   }
-  return { hours: Math.round((totalMinutes / 60) * 100) / 100, grossCent };
+  return { minutes: totalMinutes, grossCent };
+}
+
+/**
+ * Worked minutes plus any credited minutes, priced the same way.
+ *
+ * The credited intervals are the very objects computeCoverage folded into
+ * those days, produced once by blockedCredit.ts, and they are summed here by
+ * the same per-interval floor coverage prices them with. That is what keeps
+ * this month total equal to the sum of each day's grossCent: one pairing, one
+ * flooring, one rate instant, and one set of credit figures - never two
+ * implementations that have to be kept agreeing by hand.
+ */
+function grossWithCredit(
+  punches: PunchRow[],
+  rateChanges: RateChangeRow[],
+  creditedIntervals: WorkInterval[],
+): { hours: number; grossCent: number } {
+  const paired = pairHours(punches, rateChanges);
+  const minutes = paired.minutes + sumIntervalMinutes(creditedIntervals);
+  return {
+    hours: Math.round((minutes / 60) * 100) / 100,
+    grossCent: paired.grossCent + sumIntervalsCent(creditedIntervals),
+  };
 }
 
 export function computePayoutFromRows(args: {
@@ -85,6 +110,12 @@ export function computePayoutFromRows(args: {
   approvedAdvances: AdvanceRow[];
   penaltiesCent?: number;
   overtimeDeductionCent?: number;
+  // Blocked-time credit, already priced, exactly as computeCoverage received
+  // it. Paid time with no punch behind it, so it belongs in gross rather than
+  // in adjustments: it is hours worked, and the day's own gross already counts
+  // it - the two would disagree otherwise, and the penalty ceiling is clamped
+  // to that per-day figure.
+  creditedIntervals?: WorkInterval[];
 }): PayoutForUserResult {
   const adjustmentsCent = args.adjustments.reduce((s, a) => {
     return s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent);
@@ -94,7 +125,7 @@ export function computePayoutFromRows(args: {
     .reduce((s, a) => s + a.amount_cent, 0);
   const penaltiesCent = args.penaltiesCent ?? 0;
   const overtimeDeductionCent = args.overtimeDeductionCent ?? 0;
-  const { hours, grossCent } = pairHours(args.punches, args.rateChanges);
+  const { hours, grossCent } = grossWithCredit(args.punches, args.rateChanges, args.creditedIntervals ?? []);
   const netCent = grossCent + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
   return { hours, grossCent, adjustmentsCent, advancesCent, penaltiesCent, overtimeDeductionCent, netCent };
 }
@@ -105,7 +136,7 @@ export async function payoutForUser(
   db: PrismaClient,
 ): Promise<PayoutForUserResult> {
   const { start, end } = monthRangeUtc(month);
-  const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent] = await Promise.all([
+  const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent, credits] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -126,6 +157,7 @@ export async function payoutForUser(
     }),
     penaltiesForUser(userId, month, db),
     overtimeDeductionForUser(userId, month, db),
+    blockedCreditForUser(userId, month, db),
   ]);
   return computePayoutFromRows({
     userId,
@@ -135,6 +167,7 @@ export async function payoutForUser(
     approvedAdvances: approvedAdvances as AdvanceRow[],
     penaltiesCent: sumActivePenaltiesCent(penalties),
     overtimeDeductionCent,
+    creditedIntervals: grantedIntervals(credits),
   });
 }
 
@@ -144,7 +177,7 @@ export async function accruedEarningsThisMonth(
   db: PrismaClient,
 ): Promise<{ hours: number; grossCent: number }> {
   const { start, end } = monthRangeUtc(month);
-  const [punches, rateChanges] = await Promise.all([
+  const [punches, rateChanges, credits] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -155,6 +188,10 @@ export async function accruedEarningsThisMonth(
       orderBy: { effective_from: 'asc' },
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),
+    // The advance cap is "everything earned this month", and blocked-time
+    // credit is earned - leaving it out would lend against a smaller month
+    // than payroll is about to pay.
+    blockedCreditForUser(userId, month, db),
   ]);
-  return pairHours(punches as PunchRow[], rateChanges as RateChangeRow[]);
+  return grossWithCredit(punches as PunchRow[], rateChanges as RateChangeRow[], grantedIntervals(credits));
 }
