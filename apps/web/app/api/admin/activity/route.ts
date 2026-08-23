@@ -27,11 +27,14 @@ export async function GET(req: Request) {
       where: branchId ? { branch_id: branchId } : {},
       orderBy: { out_at: 'desc' },
       take: 25,
-      select: { id: true, out_at: true, back_at: true, driver: { select: { username: true } } },
+      select: { id: true, out_at: true, back_at: true, system_generated: true, driver: { select: { username: true } } },
     }),
   ]);
 
-  type Ev = { id: string; type: 'IN' | 'OUT' | 'TRIP_OUT' | 'TRIP_BACK'; username: string; at: string };
+  // `system` marks a return the system wrote because the driver never pressed
+  // BACK. Without it the feed reports "returned from a trip" at a time nobody
+  // returned, which is the one thing an activity feed must not do.
+  type Ev = { id: string; type: 'IN' | 'OUT' | 'TRIP_OUT' | 'TRIP_BACK'; username: string; at: string; system?: true };
   const events: Ev[] = [];
   for (const p of punches) {
     events.push({ id: `p-${p.id}`, type: p.kind === 'IN' ? 'IN' : 'OUT', username: p.user.username, at: p.at.toISOString() });
@@ -39,7 +42,13 @@ export async function GET(req: Request) {
   for (const t of trips) {
     events.push({ id: `to-${t.id}`, type: 'TRIP_OUT', username: t.driver.username, at: t.out_at.toISOString() });
     if (t.back_at) {
-      events.push({ id: `tb-${t.id}`, type: 'TRIP_BACK', username: t.driver.username, at: t.back_at.toISOString() });
+      events.push({
+        id: `tb-${t.id}`,
+        type: 'TRIP_BACK',
+        username: t.driver.username,
+        at: t.back_at.toISOString(),
+        ...(t.system_generated ? { system: true as const } : {}),
+      });
     }
   }
   events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));

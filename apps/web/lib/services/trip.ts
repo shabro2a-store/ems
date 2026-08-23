@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
+import { abandonedTripClose } from './tripClose';
 
 export type TripErrorCode =
   | 'USER_NOT_FOUND'
@@ -175,6 +176,15 @@ export interface CurrentTripInfo {
   open: boolean;
   since_min?: number;
   threshold_min: number;
+  /**
+   * The open trip is past MAX_OPEN_TRIP_MIN and no longer blocks a punch - the
+   * next clock press closes it. Computed server-side with the same predicate
+   * punchEmployee uses, for the same reason open_session_stale is: the driver's
+   * screen decides whether to offer the clock button from this, and a screen
+   * that disagrees with the server about what is blocked is how the lockout
+   * looked to the driver in the first place.
+   */
+  stale: boolean;
 }
 
 export async function currentTrip(
@@ -191,7 +201,10 @@ export async function currentTrip(
     where: { driver_id: userId, back_at: null },
     orderBy: { out_at: 'desc' },
   });
-  if (!open) return { open: false, threshold_min };
-  const since_min = Math.max(0, Math.floor((Date.now() - open.out_at.getTime()) / 60_000));
-  return { open: true, since_min, threshold_min };
+  if (!open) return { open: false, threshold_min, stale: false };
+  const now = new Date();
+  const since_min = Math.max(0, Math.floor((now.getTime() - open.out_at.getTime()) / 60_000));
+  const stale =
+    abandonedTripClose({ outAt: open.out_at, now, thresholdMin: threshold_min }) !== null;
+  return { open: true, since_min, threshold_min, stale };
 }

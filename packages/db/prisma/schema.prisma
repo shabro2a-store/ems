@@ -256,6 +256,12 @@ model Trip {
   back_lng             Float?
   over_threshold       Boolean   @default(false)
   threshold_alerted_at DateTime?
+  // Closed by the system rather than by a BACK the driver pressed - see
+  // tripClose.ts. An open trip blocks every driver punch and nothing but the
+  // driver's own geofenced BACK used to close one, so a forgotten press was an
+  // attendance lockout; this marks the close that ends it, and keeps the
+  // activity feed from reporting a return nobody made.
+  system_generated     Boolean   @default(false)
   // Raw SQL in migration:
   //   CREATE UNIQUE INDEX trip_one_open ON "Trip"(driver_id) WHERE back_at IS NULL;
   //   CREATE INDEX trip_open_by_branch ON "Trip"(branch_id) WHERE back_at IS NULL;  -- supports /api/admin/now

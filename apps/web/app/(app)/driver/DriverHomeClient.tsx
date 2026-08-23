@@ -16,7 +16,11 @@ interface TodayPayload {
   // screen offers CLOCK IN instead and says what will happen.
   open_session_stale: boolean;
 }
-interface TripInfo { open: boolean; since_min?: number; threshold_min: number }
+// `stale`: the order has been open past the point where it is still a delivery,
+// so it no longer blocks clocking - the next clock press closes it at this
+// branch's delivery time. Computed on the server, never here, so the button
+// this drives cannot disagree with what the server will actually do.
+interface TripInfo { open: boolean; since_min?: number; threshold_min: number; stale?: boolean }
 type Status =
   | { kind: 'idle' }
   | { kind: 'locating' }
@@ -140,6 +144,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
   const stale = Boolean(today?.open_session_stale);
   const isIn = Boolean(today?.in_at) && !stale;
   const open = trip?.open ?? false;
+  const tripStale = open && Boolean(trip?.stale);
   const since = trip?.since_min ?? 0;
   const over = open && since > branch.trip_threshold_min;
   const ready = status.kind === 'ready';
@@ -159,6 +164,14 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         <Alert tone="warning">
           Your shift from {formatBeirutTime(today.in_at)} was never closed. Clock in for today and it will be
           closed automatically at the hours it was scheduled for. Tell your manager if you worked later than that.
+        </Alert>
+      )}
+
+      {tripStale && (
+        <Alert tone="warning">
+          An order from earlier was never ended. It no longer blocks your clock — clock in or out and it will be
+          closed automatically at the {branch.trip_threshold_min} minutes this branch allows for a delivery.
+          Tell your manager if you were still out after that.
         </Alert>
       )}
 
@@ -238,13 +251,13 @@ export default function DriverHomeClient({ username, branch }: { username: strin
       <div>
         <button
           onClick={() => punch(isIn ? 'OUT' : 'IN')}
-          disabled={busy || !ready || (isIn && open)}
+          disabled={busy || !ready || (isIn && open && !tripStale)}
           aria-label={isIn ? 'Clock out' : 'Clock in'}
           className={`h-20 w-full rounded-2xl text-xl font-bold text-white shadow-sm transition-colors disabled:opacity-40 ${isIn ? 'bg-danger hover:brightness-95' : 'bg-success hover:brightness-95'}`}
         >
           {busy ? 'Please wait…' : isIn ? 'CLOCK OUT' : 'CLOCK IN'}
         </button>
-        {isIn && open && (
+        {isIn && open && !tripStale && (
           <p className="mt-1.5 text-center text-xs text-muted">End your order before clocking out.</p>
         )}
       </div>

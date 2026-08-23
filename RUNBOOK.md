@@ -225,6 +225,14 @@ Run once on the VPS after first deploy:
   trip-threshold alerts, or daily summary run.
 - Restart with `docker compose start worker`.
 - The owner dashboard stays available; only cron-side alerts pause.
+- Two of the halted jobs write rather than alert: `autoCloseAbandoned` closes a
+  check-in left open past 30h, and `autoCloseAbandonedTrips` closes a delivery
+  left open past 6h. Neither is load-bearing for staff — an employee's next
+  check-in closes their own stale session, and a driver's next punch closes
+  their own stale trip, both without the worker. What only the worker does is
+  clear the sessions and trips of people who do not come back at all, so a long
+  worker outage shows up as drivers the counter cannot ring and a payroll month
+  with open sessions in it. Both jobs are idempotent; they catch up on restart.
 
 ### Check what the containers actually received
 Env vars must be listed in `docker-compose.yml`, not just present in `.env`:

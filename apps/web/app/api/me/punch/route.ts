@@ -28,7 +28,11 @@ const PunchBody = z.object({
 const ERROR_MAP: Record<string, { code: string; status: number; message: string }> = {
   USER_NOT_FOUND: { code: 'UNAUTHORIZED', status: 401, message: 'Your account is not active. Ask your manager.' },
   BRANCH_NOT_FOUND: { code: 'FORBIDDEN', status: 403, message: 'You are not assigned to a branch yet. Ask your manager.' },
-  OPEN_TRIP_EXISTS: { code: 'OPEN_TRIP_EXISTS', status: 409, message: 'You are out on an order. Press Back from the trip first, then clock out.' },
+  // Only a delivery that is still plausibly running reaches this now - an
+  // abandoned one is closed and the punch goes through - so the instruction is
+  // the true one, and it no longer says "then clock out" to a driver who is
+  // trying to clock in.
+  OPEN_TRIP_EXISTS: { code: 'OPEN_TRIP_EXISTS', status: 409, message: 'You are still out on an order. Tap BACK at the branch first, then clock in or out.' },
   LOW_GPS_ACCURACY: { code: 'LOW_GPS_ACCURACY', status: 422, message: 'GPS is too weak to confirm you are at the branch. Step outside and try again.' },
   OUT_OF_GEOFENCE: { code: 'OUT_OF_GEOFENCE', status: 422, message: 'You are too far from your branch to clock in. Move closer and try again.' },
   ALREADY_PUNCHED_IN: { code: 'ALREADY_PUNCHED_IN', status: 409, message: 'You are already checked in. Clock out of that shift before starting a new one.' },
@@ -59,6 +63,17 @@ function systemClosedMessage(closedAt: Date, kind: 'IN' | 'OUT'): string {
   return kind === 'IN'
     ? `${what} You are now checked in. Tell your manager if you worked later than that.`
     : `${what} You are not clocked in now. Tell your manager if you worked later than that.`;
+}
+
+// The system ended a delivery the driver never closed. Their screen still says
+// "Out on an order" until it refreshes, and the trip they see disappear is one
+// they may believe is still theirs to end - so say what happened and when.
+function systemClosedTripMessage(closedAt: Date): string {
+  const at = inBeirut(closedAt);
+  return (
+    `Your order from earlier was never ended, so it was closed automatically at ` +
+    `${at.date} ${at.hhmm}. Tell your manager if you were still out after that.`
+  );
 }
 
 function jsonError(code: string, message: string, status: number) {
@@ -161,6 +176,13 @@ export async function POST(req: Request) {
 
   await reissueDriverSession(h.get('x-user-role'), userId, h.get('x-user-branch-id'), body.kind);
 
+  // Both closes can land on one punch: a driver who forgot BACK last night and
+  // forgot to clock out too. One `notice` field feeds one banner on the phone,
+  // so the sentences are joined rather than one of them being dropped.
+  const notices: string[] = [];
+  if (result.systemClosedAt) notices.push(systemClosedMessage(result.systemClosedAt, body.kind));
+  if (result.systemClosedTripAt) notices.push(systemClosedTripMessage(result.systemClosedTripAt));
+
   const response = {
     ok: true,
     data: {
@@ -174,9 +196,12 @@ export async function POST(req: Request) {
             // rather than a punch the employee made. Saying so is the
             // difference between an honest record and a silent substitution.
             system_closed_instead_of_punch: result.systemClosedInsteadOfPunch ?? false,
-            notice: systemClosedMessage(result.systemClosedAt, body.kind),
           }
         : {}),
+      ...(result.systemClosedTripAt
+        ? { system_closed_trip_at: result.systemClosedTripAt.toISOString() }
+        : {}),
+      ...(notices.length ? { notice: notices.join(' ') } : {}),
     },
   };
 

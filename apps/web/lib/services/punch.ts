@@ -1,4 +1,4 @@
-import type { PrismaClient, Punch } from '@prisma/client';
+import type { PrismaClient, Punch, Trip } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
 import { MAX_OPEN_SESSION_MIN } from './coverage';
@@ -9,6 +9,7 @@ import {
   staleSessionClose,
   writeSystemCheckout,
 } from './autoClose';
+import { abandonedTripClose, writeSystemTripClose, MAX_OPEN_TRIP_MIN } from './tripClose';
 import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
@@ -54,6 +55,11 @@ export interface PunchOk {
   // True only on a clock-out that resolved into a system close: `punch` is the
   // system's checkout, not the employee's.
   systemClosedInsteadOfPunch?: boolean;
+  // A trip left open past MAX_OPEN_TRIP_MIN was closed by the system as part
+  // of serving this request, at the dispatching branch's delivery time. The
+  // driver's screen shows "Out on an order" until it refreshes, so it has to
+  // be told the order was ended for them and when.
+  systemClosedTripAt?: Date;
 }
 
 export type PunchResult = PunchOk | PunchError;
@@ -77,12 +83,55 @@ export async function punchEmployee(
   // on a day off to help during a rush. Day-offs still affect attendance status
   // and suppress "absent" alerts, just not the ability to clock in.
 
+  // A driver out on a delivery is not at the branch to clock, so an open trip
+  // blocks the punch. The trouble was that a trip had no end but a BACK press
+  // the driver had to remember, and nothing else in the system could write one
+  // - so a press that never came was an attendance lockout, escapable only by
+  // pressing BACK hours later and recording a return that did not happen, and
+  // not escapable at all once the trip's branch was deactivated.
+  //
+  // Past MAX_OPEN_TRIP_MIN the trip is not a delivery, so it is closed here at
+  // the dispatching branch's own delivery time and the punch goes through. A
+  // live delivery is still refused, and this stays ABOVE the geofence check:
+  // whether a six-hour-old trip is over does not depend on where the driver is
+  // standing, and keeping the refusal here is what keeps a driver stopped by
+  // it out of recordBlockedAttempt, whose rows are paid.
+  let systemClosedTrip: Trip | null = null;
   if (user.role === 'DRIVER') {
     const openTrip = await db.trip.findFirst({
       where: { driver_id: user.id, back_at: null },
-      select: { id: true },
+      select: {
+        id: true,
+        out_at: true,
+        // The threshold of the branch the order was dispatched from, not of
+        // whatever branch the driver belongs to today.
+        branch: { select: { lat: true, lng: true, trip_threshold_min: true } },
+      },
     });
-    if (openTrip) return { code: 'OPEN_TRIP_EXISTS' };
+    if (openTrip) {
+      const abandoned = abandonedTripClose({
+        outAt: openTrip.out_at,
+        now,
+        thresholdMin: openTrip.branch.trip_threshold_min,
+      });
+      if (!abandoned) return { code: 'OPEN_TRIP_EXISTS' };
+      systemClosedTrip = await writeSystemTripClose(db, {
+        tripId: openTrip.id,
+        driverId: user.id,
+        outAt: openTrip.out_at,
+        branchLat: openTrip.branch.lat,
+        branchLng: openTrip.branch.lng,
+        closeAt: abandoned.closeAt,
+        thresholdMin: abandoned.thresholdMin,
+        now,
+        trigger: 'driver_punch',
+        reason:
+          `${user.username} punched ${input.kind} with the trip opened ${openTrip.out_at.toISOString()} ` +
+          `still out. It had been open past the ${MAX_OPEN_TRIP_MIN} min abandoned threshold and is no ` +
+          `longer a delivery, so it was closed at out plus the ${abandoned.thresholdMin} min this ` +
+          `branch allows for one rather than blocking the punch. No BACK of theirs was recorded.`,
+      });
+    }
   }
 
   const geo = verifyWithinGeofence(
@@ -224,6 +273,7 @@ export async function punchEmployee(
         minutes_since_in: Math.max(0, Math.floor((closed.at.getTime() - openIn!.at.getTime()) / 60_000)),
         systemClosedAt: closed.at,
         systemClosedInsteadOfPunch: true,
+        ...(systemClosedTrip?.back_at ? { systemClosedTripAt: systemClosedTrip.back_at } : {}),
       };
     }
     return { code: 'NOT_PUNCHED_IN' };
@@ -273,6 +323,7 @@ export async function punchEmployee(
     punch,
     minutes_since_in,
     ...(systemClosed ? { systemClosedAt: systemClosed.at } : {}),
+    ...(systemClosedTrip?.back_at ? { systemClosedTripAt: systemClosedTrip.back_at } : {}),
   };
 }
 

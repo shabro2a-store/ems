@@ -32,7 +32,7 @@ interface Overview {
   };
 }
 interface TrendPoint { date: string; label: string; present: number; hours: number }
-type ActivityEvent = { id: string; type: 'IN' | 'OUT' | 'TRIP_OUT' | 'TRIP_BACK'; username: string; at: string };
+type ActivityEvent = { id: string; type: 'IN' | 'OUT' | 'TRIP_OUT' | 'TRIP_BACK'; username: string; at: string; system?: boolean };
 
 const POLL_MS = 10_000;
 
@@ -589,7 +589,8 @@ export default function AdminDashboard() {
                   <li key={e.id} className="flex items-center gap-3 px-4 py-2 sm:px-5">
                     <span className={`h-2 w-2 flex-none rounded-full ${ACT_DOT[e.type]}`} />
                     <span className="flex-1 text-sm">
-                      <span className="font-medium">{e.username}</span> {ACT_TEXT[e.type]}
+                      <span className="font-medium">{e.username}</span>{' '}
+                      {e.system ? 'had an unfinished order closed by the system' : ACT_TEXT[e.type]}
                     </span>
                     <span className="tabular text-xs text-muted">{formatBeirutTime(e.at)}</span>
                   </li>
