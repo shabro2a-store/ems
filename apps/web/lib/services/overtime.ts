@@ -100,7 +100,7 @@ export async function overtimeForUser(
     }),
     db.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { overtime_grace_min: true } } },
+      select: { branch: { select: { shift_grace_min: true } } },
     }),
   ]);
 
@@ -124,7 +124,7 @@ export async function overtimeForUser(
     });
   }
 
-  const graceMin = user?.branch?.overtime_grace_min ?? 15;
+  const graceMin = user?.branch?.shift_grace_min ?? 15;
 
   const coverage = computeCoverage({
     punches: punches as PunchLite[],
@@ -208,7 +208,7 @@ export async function pendingOvertimeNotices(
     }),
     db.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, branch: { select: { overtime_grace_min: true } } },
+      select: { id: true, branch: { select: { shift_grace_min: true } } },
     }),
   ]);
 
@@ -236,7 +236,7 @@ export async function pendingOvertimeNotices(
   }
 
   const graceByUser = new Map<string, number>();
-  for (const u of userBranches) graceByUser.set(u.id, u.branch?.overtime_grace_min ?? 15);
+  for (const u of userBranches) graceByUser.set(u.id, u.branch?.shift_grace_min ?? 15);
 
   const notices: OvertimeNotice[] = [];
   for (const u of users) {

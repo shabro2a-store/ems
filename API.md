@@ -133,7 +133,7 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     acknowledged. Resolved with `penalties/ack` (uphold) or `penalties/waive` (revoke).
   - `overtime[]` — `{ user_id, username, date, overtimeMin, amount_cent }`. Same
     on-the-fly computation and 7-day lookback as `penalties[]`; only days past the
-    branch's overtime grace with no *live* decision yet appear — a decision whose
+    branch's shift grace with no *live* decision yet appear — a decision whose
     recorded minutes no longer match the day reads as pending and reappears here.
     Resolved with `overtime/decision` (see below).
   - Both lists are loaded once per calendar month the 7-day lookback touches, so
@@ -199,7 +199,7 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 ### Branches
 - **GET /api/admin/branches** → `{ branches: [...] }`.
 - **POST /api/admin/branches** *(CSRF)* `{ name, lat?, lng?, gpsRadiusM?,
-  gpsAccuracyMaxM?, overtimeGraceMin?, tripThresholdMin? }` → `{ branch }`.
+  gpsAccuracyMaxM?, shiftGraceMin?, tripThresholdMin? }` → `{ branch }`.
 - **PATCH /api/admin/branches/[id]** *(CSRF)* any of the above fields + `isActive`.
 - **DELETE /api/admin/branches/[id]** *(CSRF)* → `{ deleted, archived }`. Hard-deletes
   an empty branch; archives (is_active=false) one that has staff/punch/trip history.
@@ -244,7 +244,7 @@ payroll as `penalties_cent` and reduce `net_cent`.
   that refunds. Audited. → `{ acknowledged: true }`.
 
 ### Overtime
-A day that ran past its required hours by more than the branch's overtime grace
+A day that ran past its required hours by more than the branch's shift grace
 is **computed**, not stored, until the owner decides it (see `overtimeForUser`).
 A pending day (no decision) is already paid — pairHours pays every worked minute —
 so it surfaces in payroll only if revoked.

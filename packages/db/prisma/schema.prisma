@@ -100,7 +100,11 @@ model Branch {
   lng                Float
   gps_radius_m       Int     @default(50)
   gps_accuracy_max_m Int     @default(100)
-  overtime_grace_min Int     @default(15)
+  // The tolerance either side of a day's required hours: an overrun smaller
+  // than this raises no overtime notice, a shortfall smaller than this incurs
+  // no penalty. Named for the shift, not for one direction of missing it -
+  // it governs both.
+  shift_grace_min    Int     @default(15)
   trip_threshold_min Int     @default(30)
   is_active          Boolean @default(true)
   users              User[]

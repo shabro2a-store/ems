@@ -66,7 +66,7 @@ export async function runMissedCheckout(
     const requiredMin = resolveRequiredMin(override, shiftMin);
     if (requiredMin === 0) continue;
 
-    const graceMin = s.user.branch?.overtime_grace_min ?? 15;
+    const graceMin = s.user.branch?.shift_grace_min ?? 15;
     const elapsedMin = Math.floor((now.getTime() - lastIn.at.getTime()) / 60_000);
     if (elapsedMin <= requiredMin + graceMin) continue;
 

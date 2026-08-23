@@ -14,7 +14,7 @@ type Store = {
       lng: number;
       gps_radius_m: number;
       gps_accuracy_max_m: number;
-      overtime_grace_min: number;
+      shift_grace_min: number;
       trip_threshold_min: number;
       is_active: boolean;
     };
@@ -32,7 +32,7 @@ type Store = {
     lng: number;
     gps_radius_m: number;
     gps_accuracy_max_m: number;
-    overtime_grace_min: number;
+    shift_grace_min: number;
     trip_threshold_min: number;
     is_active: boolean;
   }>;
@@ -107,7 +107,7 @@ function makeBranch(partial: Record<string, unknown> = {}) {
     lng: 35.4827,
     gps_radius_m: 50,
     gps_accuracy_max_m: 100,
-    overtime_grace_min: 15,
+    shift_grace_min: 15,
     trip_threshold_min: 30,
     is_active: true,
     ...partial,

@@ -11,7 +11,7 @@ const Patch = z.object({
   lng: z.number().min(-180).max(180).optional(),
   gpsRadiusM: z.number().int().min(1).max(10_000).optional(),
   gpsAccuracyMaxM: z.number().int().min(1).max(10_000).optional(),
-  overtimeGraceMin: z.number().int().min(0).max(120).optional(),
+  shiftGraceMin: z.number().int().min(0).max(120).optional(),
   tripThresholdMin: z.number().int().min(1).max(240).optional(),
   isActive: z.boolean().optional(),
 });
@@ -55,7 +55,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       ...(body.lng !== undefined ? { lng: body.lng } : {}),
       ...(body.gpsRadiusM !== undefined ? { gps_radius_m: body.gpsRadiusM } : {}),
       ...(body.gpsAccuracyMaxM !== undefined ? { gps_accuracy_max_m: body.gpsAccuracyMaxM } : {}),
-      ...(body.overtimeGraceMin !== undefined ? { overtime_grace_min: body.overtimeGraceMin } : {}),
+      ...(body.shiftGraceMin !== undefined ? { shift_grace_min: body.shiftGraceMin } : {}),
       ...(body.tripThresholdMin !== undefined ? { trip_threshold_min: body.tripThresholdMin } : {}),
       ...(body.isActive !== undefined ? { is_active: body.isActive } : {}),
     },
@@ -66,8 +66,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     action: 'branch.update',
     entity: 'Branch',
     entityId: branch.id,
-    before: { name: before.name, lat: before.lat, lng: before.lng, gps_radius_m: before.gps_radius_m, gps_accuracy_max_m: before.gps_accuracy_max_m, overtime_grace_min: before.overtime_grace_min, trip_threshold_min: before.trip_threshold_min, is_active: before.is_active },
-    after: { name: branch.name, lat: branch.lat, lng: branch.lng, gps_radius_m: branch.gps_radius_m, gps_accuracy_max_m: branch.gps_accuracy_max_m, overtime_grace_min: branch.overtime_grace_min, trip_threshold_min: branch.trip_threshold_min, is_active: branch.is_active },
+    before: { name: before.name, lat: before.lat, lng: before.lng, gps_radius_m: before.gps_radius_m, gps_accuracy_max_m: before.gps_accuracy_max_m, shift_grace_min: before.shift_grace_min, trip_threshold_min: before.trip_threshold_min, is_active: before.is_active },
+    after: { name: branch.name, lat: branch.lat, lng: branch.lng, gps_radius_m: branch.gps_radius_m, gps_accuracy_max_m: branch.gps_accuracy_max_m, shift_grace_min: branch.shift_grace_min, trip_threshold_min: branch.trip_threshold_min, is_active: branch.is_active },
   });
 
   return NextResponse.json({ ok: true, data: { branch } });

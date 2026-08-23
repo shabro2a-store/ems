@@ -33,14 +33,14 @@ describe('admin-branches integration', () => {
       },
       body: JSON.stringify({
         gpsRadiusM: 75,
-        overtimeGraceMin: 20,
+        shiftGraceMin: 20,
       }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as { ok: boolean; data?: { branch: { gps_radius_m: number; overtime_grace_min: number } } };
+    const body = await res.json() as { ok: boolean; data?: { branch: { gps_radius_m: number; shift_grace_min: number } } };
     expect(body.ok).toBe(true);
     expect(body.data?.branch.gps_radius_m).toBe(75);
-    expect(body.data?.branch.overtime_grace_min).toBe(20);
+    expect(body.data?.branch.shift_grace_min).toBe(20);
   });
 
   it('rejects out-of-range radius', async () => {

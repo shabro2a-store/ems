@@ -65,7 +65,7 @@ cuid PKs, money = Int cents.
   hourly_rate_cent, **expected_monthly_salary_cent?** (owner's reference figure, editable
   any time on `/admin/payroll`; display only — never read by payout.ts or any calculation),
   is_active, telegram_chat_id?, notify_daily_summary, notify_routine_pings.
-- **Branch** — name, lat, lng, gps_radius_m(50), gps_accuracy_max_m(100), overtime_grace_min(15),
+- **Branch** — name, lat, lng, gps_radius_m(50), gps_accuracy_max_m(100), shift_grace_min(15),
   trip_threshold_min(30), is_active.
 - **Punch** — user, branch, kind(IN/OUT), at, evidence(lat/lng/accuracy_m/device_fp/ip),
   correction(corrected/corrected_by/correction_reason). Indexed by (user,at),(branch,at).
@@ -162,7 +162,7 @@ Full request/response detail is in [API.md](API.md). Summary:
   unclosed days are skipped until the missing punch is corrected). Computed on the fly (not
   stored); an admin **waiver** removes one. Penalty amount = hours × rate-at-shift.
 - **Overtime (`overtime.ts`)**: covering more than the day required by more than the branch's
-  `overtime_grace_min` (default 15) raises a notice — the same `DayCoverage` as a shortfall,
+  `shift_grace_min` (default 15) raises a notice — the same `DayCoverage` as a shortfall,
   just `deltaMin` positive past the grace instead of negative. The grace only decides whether
   the owner is told; a reported overrun is reported in full, never grace-trimmed. Every worked
   minute is already paid by `payout.ts` regardless of `shift_min`, so a pending notice changes
@@ -260,7 +260,7 @@ Full request/response detail is in [API.md](API.md). Summary:
 | Schedule | Job | Does |
 |---|---|---|
 | 00:10 daily | watchedDetector | Judges the Beirut day that just closed: the day required more than 0 minutes (`requiredMinFor`, so an approved full day off is skipped whether it is a `DAY_OFF` or an `HOURS_CHANGE` to 0) and there were zero punches → WATCHED flag (absence notice, no automatic penalty) |
-| every 1 min | missedCheckout | Open check-in whose elapsed time exceeds that date's required minutes (`requiredMinFor`, so approved time off shortens the threshold) + the branch's overtime grace → MISSED_CHECKOUT flag + notify. A date requiring 0 minutes is skipped, not measured against zero |
+| every 1 min | missedCheckout | Open check-in whose elapsed time exceeds that date's required minutes (`requiredMinFor`, so approved time off shortens the threshold) + the branch's shift grace → MISSED_CHECKOUT flag + notify. A date requiring 0 minutes is skipped, not measured against zero |
 | every 1 min | tripThreshold | Open trip past branch threshold → set over_threshold + notify |
 | every 30 min | driverStale | Trip open ≥ 4h → notify |
 | 23:30 daily | endOfDayWatcher | Unresolved WATCHED flags → notify + close |

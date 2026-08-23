@@ -16,7 +16,7 @@ type UserRow = {
   is_active: boolean;
   role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
   branch_id: string | null;
-  branch: { id: string; name: string; overtime_grace_min: number } | null;
+  branch: { id: string; name: string; shift_grace_min: number } | null;
 };
 type PunchRow = { id: string; user_id: string; kind: 'IN' | 'OUT'; at: Date };
 
@@ -124,7 +124,7 @@ const CHECK_IN = new Date('2026-07-12T09:00:00+03:00');
 describe('runMissedCheckout', () => {
   it('fires once elapsed exceeds shift_min plus branch grace', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', shift_grace_min: 15 },
     });
     store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
     store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
@@ -140,7 +140,7 @@ describe('runMissedCheckout', () => {
 
   it('does not fire at or before shift_min plus grace', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', shift_grace_min: 15 },
     });
     store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
     store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
@@ -153,7 +153,7 @@ describe('runMissedCheckout', () => {
 
   it('does not fire once the employee has punched OUT', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', shift_grace_min: 15 },
     });
     store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
     store.punches.push(
@@ -168,7 +168,7 @@ describe('runMissedCheckout', () => {
 
   it('does not duplicate a flag on second run the same day', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', shift_grace_min: 15 },
     });
     store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
     store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
@@ -204,7 +204,7 @@ describe('runMissedCheckout', () => {
     // weekly 480 instead would stay silent until 495 - the employee is nearly
     // four hours past the day they were actually owed before anyone is told.
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', shift_grace_min: 15 },
     });
     store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
     store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
@@ -223,7 +223,7 @@ describe('runMissedCheckout', () => {
     // against zero would alert one grace period after they walked in - staff
     // are explicitly allowed to come in on a day off to help during a rush.
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', shift_grace_min: 15 },
     });
     store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
     store.punches.push({ id: 'p1', user_id: 'u1', kind: 'IN', at: CHECK_IN });
@@ -237,7 +237,7 @@ describe('runMissedCheckout', () => {
 
   it('judges elapsed against the schedule for the weekday the check-in started, not a different weekday row', async () => {
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', overtime_grace_min: 15 },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra', shift_grace_min: 15 },
     });
     // Sunday shift_min is generous (480); Monday's is short (60). The check-in
     // is Sunday, so only Sunday's threshold (495) should ever apply to it.

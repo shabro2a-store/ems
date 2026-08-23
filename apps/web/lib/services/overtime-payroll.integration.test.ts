@@ -46,7 +46,7 @@ function idemKey(): string {
 }
 
 async function setup() {
-  const branch = await seedTestBranch({ name: 'Hamra', overtime_grace_min: 15 });
+  const branch = await seedTestBranch({ name: 'Hamra', shift_grace_min: 15 });
   const emp = await seedTestUser({ username: 'otp-emp', branch_id: branch.id, hourly_rate_cent: RATE_CENT });
   const admin = await seedTestUser({ username: 'otp-admin', role: Role.ADMIN });
   // seedTestUser's own RateChange starts "now", which is after the month under
