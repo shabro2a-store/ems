@@ -29,6 +29,10 @@ export type PunchErrorCode =
 
 export interface PunchError {
   code: PunchErrorCode;
+  // ALREADY_PUNCHED_IN only: the check-in still open from an earlier shift.
+  // The caller needs it to tell the employee which shift is in the way -
+  // "you are still checked in" with no time attached is not actionable.
+  openInAt?: Date;
 }
 
 export interface PunchOk {
@@ -100,7 +104,18 @@ export async function punchEmployee(
   const hasOpenSession = Boolean(openIn) && !laterOpenOut;
 
   if (input.kind === 'IN' && hasOpenSession) {
-    return { code: 'ALREADY_PUNCHED_IN' };
+    // Record the refusal. Note where we are: verifyWithinGeofence has already
+    // passed, several statements above, so reaching this line proves the
+    // employee is standing at their branch with acceptable GPS. An attempt
+    // from home fails earlier as OUT_OF_GEOFENCE and is never recorded.
+    //
+    // That ordering is not incidental - it is what makes the paid credit these
+    // rows drive impossible to game from a sofa. Anything that moves the
+    // geofence check below this point, or records a blocked attempt from a
+    // path that skips it, turns "I was at work and the system would not let me
+    // clock in" into an unverified claim that pays.
+    await recordBlockedAttempt(db, user, openIn!.at, input, now);
+    return { code: 'ALREADY_PUNCHED_IN', openInAt: openIn!.at };
   }
   if (input.kind === 'OUT' && !hasOpenSession) {
     return { code: 'NOT_PUNCHED_IN' };
@@ -147,6 +162,54 @@ export async function punchEmployee(
   }
 
   return { punch, minutes_since_in };
+}
+
+/**
+ * File the evidence behind a refused check-in.
+ *
+ * Only ever called from the ALREADY_PUNCHED_IN branch above, and only from
+ * there: the row's meaning is "this person was at the branch and the system
+ * would not let them start", which is only true past the geofence check.
+ * POST /api/me/punch/dev bypasses the geofence by design and so must never
+ * write one.
+ */
+async function recordBlockedAttempt(
+  db: PrismaClient,
+  user: { id: string; branch: { id: string } | null },
+  openInAt: Date,
+  input: PunchInput,
+  at: Date,
+): Promise<void> {
+  const attempt = await db.blockedPunchAttempt.create({
+    data: {
+      user_id: user.id,
+      branch_id: user.branch!.id,
+      at,
+      open_in_at: openInAt,
+      lat: input.lat,
+      lng: input.lng,
+      accuracy_m: Math.round(input.accuracy),
+      device_fp: input.deviceFp,
+      ip: input.ip,
+    },
+  });
+
+  await writeAuditLog({
+    actorId: user.id,
+    action: 'punch.blocked',
+    entity: 'BlockedPunchAttempt',
+    entityId: attempt.id,
+    after: {
+      at: attempt.at.toISOString(),
+      open_in_at: attempt.open_in_at.toISOString(),
+      lat: attempt.lat,
+      lng: attempt.lng,
+      accuracy_m: attempt.accuracy_m,
+      branch_id: attempt.branch_id,
+      reason: 'Check-in refused: an earlier check-in is still open. Recorded past the geofence check.',
+    },
+    db,
+  });
 }
 
 interface UserWithBranch {

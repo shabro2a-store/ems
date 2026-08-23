@@ -349,4 +349,67 @@ describe('punch integration (HTTP)', () => {
     const punchCount = await getTestPrisma().punch.count({ where: { user_id: user.id } });
     expect(punchCount).toBe(0);
   });
+
+  it('a blocked check-in explains itself and is recorded as evidence', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-blocked', branch_id: branch.id });
+    // Yesterday evening's check-in, never closed.
+    const openAt = new Date(Date.now() - 14 * 3_600_000);
+    await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: openAt });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `blk-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'fp-blocked' }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe('ALREADY_PUNCHED_IN');
+    // What the employee actually reads. The raw code must not survive into it.
+    expect(body.error.message).not.toContain('ALREADY_PUNCHED_IN');
+    expect(body.error.message).toContain('still checked in from');
+    expect(body.error.message).toContain('Ask your manager to close that shift');
+    expect(body.error.message).toContain("today's hours count from it");
+
+    const attempts = await getTestPrisma().blockedPunchAttempt.findMany({ where: { user_id: user.id } });
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]!.branch_id).toBe(branch.id);
+    expect(attempts[0]!.open_in_at.toISOString()).toBe(openAt.toISOString());
+    expect(attempts[0]!.accuracy_m).toBe(12);
+  });
+
+  it('records nothing when the blocked employee tries from outside the geofence', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 50 });
+    const user = await seedTestUser({ username: 'emp-blocked-far', branch_id: branch.id });
+    await seedTestPunch({
+      user_id: user.id,
+      branch_id: branch.id,
+      kind: 'IN',
+      at: new Date(Date.now() - 14 * 3_600_000),
+    });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `blkfar-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.91, lng: 35.5, accuracy: 10, deviceFp: 'fp-home' }),
+    });
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe('OUT_OF_GEOFENCE');
+    const attempts = await getTestPrisma().blockedPunchAttempt.count({ where: { user_id: user.id } });
+    expect(attempts).toBe(0);
+  });
 });

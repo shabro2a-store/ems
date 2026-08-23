@@ -56,6 +56,19 @@ type Store = {
   trips: Array<{ id: string; driver_id: string; back_at: Date | null }>;
   audits: Array<{ id: string }>;
   flags: Array<{ id: string; user_id: string; kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; resolved_at: Date | null; context_json: unknown; created_at: Date }>;
+  blocked: Array<{
+    id: string;
+    user_id: string;
+    branch_id: string;
+    at: Date;
+    open_in_at: Date;
+    lat: number;
+    lng: number;
+    accuracy_m: number;
+    device_fp: string;
+    ip: string;
+  }>;
+  auditActions: string[];
   punchSeq: number;
   auditSeq: number;
 };
@@ -68,6 +81,8 @@ const store: Store = {
   trips: [],
   audits: [],
   flags: [],
+  blocked: [],
+  auditActions: [],
   punchSeq: 0,
   auditSeq: 0,
 };
@@ -77,6 +92,7 @@ const mocks = vi.hoisted(() => ({
   scheduleOverride: { findUnique: vi.fn() },
   trip: { findFirst: vi.fn() },
   punch: { findFirst: vi.fn(), create: vi.fn() },
+  blockedPunchAttempt: { create: vi.fn() },
   auditLog: { create: vi.fn() },
   flag: { findFirst: vi.fn(), updateMany: vi.fn() },
 }));
@@ -95,6 +111,8 @@ function resetStore() {
   store.trips.length = 0;
   store.audits.length = 0;
   store.flags.length = 0;
+  store.blocked.length = 0;
+  store.auditActions.length = 0;
   store.punchSeq = 0;
   store.auditSeq = 0;
 }
@@ -112,6 +130,25 @@ function makeBranch(partial: Record<string, unknown> = {}) {
     is_active: true,
     ...partial,
   };
+}
+
+function seedOpenIn(userId: string, branchId: string, at: Date) {
+  store.punches.push({
+    id: `seed-${store.punches.length + 1}`,
+    user_id: userId,
+    branch_id: branchId,
+    kind: 'IN',
+    at,
+    lat: 33.8962,
+    lng: 35.4827,
+    accuracy_m: 10,
+    device_fp: 'fp',
+    ip: '1.2.3.4',
+    corrected: false,
+    corrected_by: null,
+    correction_reason: null,
+    created_at: at,
+  });
 }
 
 function makeUser(id: string, branch: ReturnType<typeof makeBranch>, role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' = 'EMPLOYEE') {
@@ -181,10 +218,17 @@ beforeEach(() => {
     return p;
   });
 
-  mocks.auditLog.create.mockImplementation(async () => {
+  mocks.blockedPunchAttempt.create.mockImplementation(async ({ data }: { data: Store['blocked'][number] }) => {
+    const row = { ...data, id: `bp${store.blocked.length + 1}` };
+    store.blocked.push(row);
+    return row;
+  });
+
+  mocks.auditLog.create.mockImplementation(async ({ data }: { data: { action: string } }) => {
     store.auditSeq += 1;
     const a = { id: `a${store.auditSeq}` };
     store.audits.push(a);
+    store.auditActions.push(data.action);
     return a;
   });
 
@@ -292,22 +336,7 @@ describe('punchEmployee', () => {
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
     const earlier = new Date(Date.now() - 60 * 60_000);
-    store.punches.push({
-      id: 'p1',
-      user_id: user.id,
-      branch_id: branch.id,
-      kind: 'IN',
-      at: earlier,
-      lat: 33.8962,
-      lng: 35.4827,
-      accuracy_m: 10,
-      device_fp: 'fp',
-      ip: '1.2.3.4',
-      corrected: false,
-      corrected_by: null,
-      correction_reason: null,
-      created_at: earlier,
-    });
+    seedOpenIn(user.id, branch.id, earlier);
 
     const r = await punchEmployee({
       userId: 'u1',
@@ -319,7 +348,11 @@ describe('punchEmployee', () => {
       ip: '1.2.3.4',
     });
     expect('code' in r).toBe(true);
-    if ('code' in r) expect(r.code).toBe('ALREADY_PUNCHED_IN');
+    if ('code' in r) {
+      expect(r.code).toBe('ALREADY_PUNCHED_IN');
+      // The caller needs the shift in the way to tell the employee what to fix.
+      expect(r.openInAt?.toISOString()).toBe(earlier.toISOString());
+    }
   });
 
   it('happy path: IN inserts all 5 evidence fields + audit log', async () => {
@@ -416,6 +449,133 @@ describe('punchEmployee', () => {
     // Day-off no longer blocks; a driver with an open trip is still blocked.
     expect('code' in r).toBe(true);
     if ('code' in r) expect(r.code).toBe('OPEN_TRIP_EXISTS');
+  });
+});
+
+// A blocked attempt is paid time (see blockedCredit.ts), so what may be
+// recorded is a money question, not a logging one. The only thing standing
+// between "I was at work and could not clock in" and an unverified claim from
+// a sofa is that punch.ts checks the geofence BEFORE it checks the session
+// state - so a rejection carrying ALREADY_PUNCHED_IN has already proved the
+// person is at the branch.
+describe('recording the blocked check-in', () => {
+  const OPEN_SINCE = new Date('2026-07-11T18:00:00Z');
+  const NOW = new Date('2026-07-12T06:00:00Z');
+
+  it('records the refusal with the GPS that placed them at the branch', async () => {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    seedOpenIn(user.id, branch.id, OPEN_SINCE);
+
+    await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.89622,
+      lng: 35.48272,
+      accuracy: 11,
+      deviceFp: 'fp-blocked',
+      ip: '203.0.113.9',
+      now: NOW,
+    });
+
+    expect(store.blocked).toHaveLength(1);
+    const row = store.blocked[0]!;
+    expect(row.user_id).toBe('u1');
+    expect(row.branch_id).toBe('b1');
+    expect(row.at.toISOString()).toBe(NOW.toISOString());
+    expect(row.open_in_at.toISOString()).toBe(OPEN_SINCE.toISOString());
+    expect(row.lat).toBe(33.89622);
+    expect(row.lng).toBe(35.48272);
+    expect(row.accuracy_m).toBe(11);
+    expect(store.auditActions).toContain('punch.blocked');
+  });
+
+  it('records nothing when the same blocked employee tries from outside the geofence', async () => {
+    // The fixture has an open session, so the ONLY thing stopping a row being
+    // written is the geofence check running first. Without that ordering this
+    // attempt - made from far outside the radius - would be recorded as paid
+    // time at the branch.
+    const branch = makeBranch({ gps_radius_m: 50 });
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    seedOpenIn(user.id, branch.id, OPEN_SINCE);
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.91,
+      lng: 35.5,
+      accuracy: 10,
+      deviceFp: 'fp-home',
+      ip: '203.0.113.9',
+      now: NOW,
+    });
+
+    expect(store.blocked).toHaveLength(0);
+    expect(store.auditActions).not.toContain('punch.blocked');
+    expect('code' in r && r.code).toBe('OUT_OF_GEOFENCE');
+  });
+
+  it('records nothing when GPS is too weak to place them at the branch', async () => {
+    const branch = makeBranch({ gps_accuracy_max_m: 100 });
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    seedOpenIn(user.id, branch.id, OPEN_SINCE);
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 400,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      now: NOW,
+    });
+
+    expect(store.blocked).toHaveLength(0);
+    expect('code' in r && r.code).toBe('LOW_GPS_ACCURACY');
+  });
+
+  it('records nothing for a driver stopped by the open-trip guard', async () => {
+    // That guard runs before the geofence, so this rejection proves nothing
+    // about where the driver is.
+    const branch = makeBranch();
+    const user = makeUser('u1', branch, 'DRIVER');
+    store.users.set(user.id, user);
+    store.trips.push({ id: 't1', driver_id: user.id, back_at: null });
+    seedOpenIn(user.id, branch.id, OPEN_SINCE);
+
+    const r = await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      now: NOW,
+    });
+
+    expect('code' in r && r.code).toBe('OPEN_TRIP_EXISTS');
+    expect(store.blocked).toHaveLength(0);
+  });
+
+  it('records nothing on a check-in that succeeds, or on a clock-out', async () => {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+
+    await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4', now: NOW,
+    });
+    await punchEmployee({
+      userId: 'u1', kind: 'OUT', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date(NOW.getTime() + 3_600_000),
+    });
+
+    expect(store.blocked).toHaveLength(0);
   });
 });
 

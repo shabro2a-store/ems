@@ -78,6 +78,57 @@ describe('punch.correct integration', () => {
     expect(dbPunch?.lng).toBe(35.4827);
   });
 
+  it('corrects a system-generated auto-close exactly like any other punch', async () => {
+    // autoCloseAbandoned writes the shift the employee was owed, not the hours
+    // they actually worked. Correcting it is the normal path back to the truth,
+    // so nothing about system_generated may make the row special here.
+    const branch = await seedTestBranch();
+    const employee = await seedTestUser({ username: 'corr-auto-emp', branch_id: branch.id });
+    const admin = await seedTestUser({ username: 'corr-auto-admin', role: Role.ADMIN });
+    const inAt = new Date('2026-07-12T06:00:00.000Z');
+    await seedTestPunch({ user_id: employee.id, branch_id: branch.id, kind: 'IN', at: inAt });
+    const autoOut = await getTestPrisma().punch.create({
+      data: {
+        user_id: employee.id,
+        branch_id: branch.id,
+        kind: 'OUT',
+        at: new Date('2026-07-12T14:00:00.000Z'),
+        lat: branch.lat,
+        lng: branch.lng,
+        accuracy_m: 0,
+        device_fp: 'system',
+        ip: 'system',
+        system_generated: true,
+      },
+    });
+
+    const aSession = await loginAs(admin.username, 'change-me');
+    const newAt = '2026-07-12T16:30:00.000Z';
+    const res = await fetch(`${BASE_URL}/api/admin/punches/correct`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idemKey('corr-auto'),
+        'X-CSRF-Token': aSession.csrf,
+        Cookie: aSession.cookies,
+      },
+      body: JSON.stringify({ punchId: autoOut.id, newAt, reason: 'he stayed until 19:30' }),
+    });
+    expect(res.status).toBe(200);
+
+    const dbPunch = await getTestPrisma().punch.findUnique({ where: { id: autoOut.id } });
+    expect(dbPunch?.at.toISOString()).toBe(newAt);
+    expect(dbPunch?.corrected).toBe(true);
+    expect(dbPunch?.corrected_by).toBe(admin.id);
+    // Still system-generated: a human fixed the time, but no human made the punch.
+    expect(dbPunch?.system_generated).toBe(true);
+
+    const audit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'Punch', entity_id: autoOut.id, action: 'punch.correct' },
+    });
+    expect(audit?.actor_id).toBe(admin.id);
+  });
+
   it('returns 404 for unknown punch', async () => {
     const admin = await seedTestUser({ username: 'corr-admin2', role: Role.ADMIN });
     const aSession = await loginAs(admin.username, 'change-me');

@@ -89,6 +89,7 @@ model User {
   calls_received       DriverCall[]       @relation("CallsReceived")
   calls_made           DriverCall[]       @relation("CallsMade")
   push_subscriptions   PushSubscription[]
+  blocked_punches      BlockedPunchAttempt[]
 
   @@index([branch_id])
 }
@@ -111,6 +112,7 @@ model Branch {
   punches            Punch[]
   trips              Trip[]
   flags              Flag[]
+  blocked_punches    BlockedPunchAttempt[]
 }
 
 model Punch {
@@ -137,6 +139,38 @@ model Punch {
   // punch (the branch's own coordinates) would otherwise imply.
   system_generated  Boolean   @default(false)
   created_at        DateTime  @default(now())
+
+  @@index([user_id, at])
+  @@index([branch_id, at])
+}
+
+// A check-in the system refused because the employee still had an open session
+// from an earlier shift they forgot to close.
+//
+// Written ONLY after verifyWithinGeofence has passed. That ordering is the
+// whole value of the row: punch.ts checks the geofence (punch.ts:68) before it
+// checks the session state (punch.ts:102), so a rejection carrying
+// ALREADY_PUNCHED_IN has already proved the person is standing at their branch
+// with acceptable GPS. An attempt from home fails earlier as OUT_OF_GEOFENCE
+// and never reaches here. That is what makes the paid credit these rows drive
+// ungameable, and it is why nothing may record one from a path that skips the
+// geofence - notably POST /api/me/punch/dev.
+model BlockedPunchAttempt {
+  id         String   @id @default(cuid())
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id])
+  branch_id  String
+  branch     Branch   @relation(fields: [branch_id], references: [id])
+  at         DateTime
+  // The check-in that was in the way, so the message and the audit trail can
+  // both name the shift the employee has to get closed.
+  open_in_at DateTime
+  lat        Float
+  lng        Float
+  accuracy_m Int
+  device_fp  String
+  ip         String
+  created_at DateTime @default(now())
 
   @@index([user_id, at])
   @@index([branch_id, at])

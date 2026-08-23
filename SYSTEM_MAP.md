@@ -73,6 +73,10 @@ cuid PKs, money = Int cents.
   check-in never got; its lat/lng are the branch's own, so the marker is what stops the row
   reading as somebody standing at the shop. Pays and corrects like any other punch, and the
   admin punch log shows it as `auto`). Indexed by (user,at),(branch,at).
+- **BlockedPunchAttempt** — a check-in the system refused because an earlier shift was still
+  open: user, branch, `at`, `open_in_at` (the check-in in the way) and the same GPS evidence a
+  real punch carries. Written **only** past `verifyWithinGeofence`, which is what makes it
+  evidence rather than a claim — see the blocked-time credit in §4.
 - **RateChange** — point-in-time hourly rate history (payroll uses the rate in effect at each shift).
 - **Schedule** — one row per (user, weekday 0=Sun..6=Sat): `shift_min`, the hours owed that day.
 - **ScheduleOverride** — one per (user, date): DAY_OFF or HOURS_CHANGE. DAY_OFF blocks punching.
@@ -313,7 +317,16 @@ Full request/response detail is in [API.md](API.md). Summary:
   payroll-page matter.
 - **Punch (`punch.ts`)** gate order: user active+branch → driver open-trip block →
   geofence (accuracy then radius) → session state. Writes full evidence + audit; resolves the
-  oldest open WATCHED flag atomically.
+  oldest open WATCHED flag atomically. **The last two steps are in that order on purpose**:
+  a rejection carrying `ALREADY_PUNCHED_IN` has already cleared the geofence, so it proves the
+  person is standing at their branch with acceptable GPS. That is why only this rejection
+  writes a `BlockedPunchAttempt`, and why the row can be trusted to pay. An attempt from home
+  fails earlier as `OUT_OF_GEOFENCE` and is never recorded; nor is the open-trip block, which
+  runs before the geofence; nor is `punch/dev`, which has no geofence at all.
+- **A blocked employee is told what happened.** The refusal message names the open shift, says
+  the manager closes it, and says the arrival is already recorded — the employee cannot fix
+  yesterday themselves, and "Punch rejected: ALREADY_PUNCHED_IN" left them standing there
+  retrying. All the punch rejections now carry a human message; see API.md.
 - **Geofence (`geofence.ts`)**: nearest active branch by haversine; reject if
   `accuracy > gps_accuracy_max_m` or `distance ≥ radius + accuracy`.
 - **Trips (`trip.ts`)**: one open trip per driver (service + DB index); geofenced both ends.

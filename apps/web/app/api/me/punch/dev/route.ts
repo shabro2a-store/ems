@@ -56,6 +56,10 @@ export async function POST(req: Request) {
     : null;
   const hasOpenSession = Boolean(lastIn) && !lastOut;
   if (body.kind === 'IN' && hasOpenSession) {
+    // Deliberately does NOT record a BlockedPunchAttempt, unlike the real punch
+    // route. A blocked attempt is paid time, and it is only sound evidence
+    // because the geofence check ran first — this endpoint has no geofence at
+    // all, so a row written here would be a paid claim from anywhere.
     return jsonError('ALREADY_PUNCHED_IN', 'You have an open session', 409);
   }
   if (body.kind === 'OUT' && !hasOpenSession) {

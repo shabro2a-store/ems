@@ -45,6 +45,7 @@ export function getTestPrisma(): PrismaClient {
 
 const TABLES = [
   'Punch',
+  'BlockedPunchAttempt',
   'Trip',
   'AuditLog',
   'ScheduleOverride',

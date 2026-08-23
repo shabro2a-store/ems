@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { headers } from 'next/headers';
+import { inBeirut } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { getClientIp, setAccessCookie } from '@/lib/auth/cookies';
@@ -21,15 +22,32 @@ const PunchBody = z.object({
   deviceFp: z.string().min(1).max(128),
 });
 
-const ERROR_MAP: Record<string, { code: string; status: number }> = {
-  USER_NOT_FOUND: { code: 'UNAUTHORIZED', status: 401 },
-  BRANCH_NOT_FOUND: { code: 'FORBIDDEN', status: 403 },
-  OPEN_TRIP_EXISTS: { code: 'OPEN_TRIP_EXISTS', status: 409 },
-  LOW_GPS_ACCURACY: { code: 'LOW_GPS_ACCURACY', status: 422 },
-  OUT_OF_GEOFENCE: { code: 'OUT_OF_GEOFENCE', status: 422 },
-  ALREADY_PUNCHED_IN: { code: 'ALREADY_PUNCHED_IN', status: 409 },
-  NOT_PUNCHED_IN: { code: 'NOT_PUNCHED_IN', status: 409 },
+// The employee reads `message` verbatim on their phone, so it has to say what
+// happened and what to do next. It used to render `Punch rejected: <CODE>` for
+// every one of these - a machine token shown to somebody who cannot act on it.
+const ERROR_MAP: Record<string, { code: string; status: number; message: string }> = {
+  USER_NOT_FOUND: { code: 'UNAUTHORIZED', status: 401, message: 'Your account is not active. Ask your manager.' },
+  BRANCH_NOT_FOUND: { code: 'FORBIDDEN', status: 403, message: 'You are not assigned to a branch yet. Ask your manager.' },
+  OPEN_TRIP_EXISTS: { code: 'OPEN_TRIP_EXISTS', status: 409, message: 'You are out on an order. Press Back from the trip first, then clock out.' },
+  LOW_GPS_ACCURACY: { code: 'LOW_GPS_ACCURACY', status: 422, message: 'GPS is too weak to confirm you are at the branch. Step outside and try again.' },
+  OUT_OF_GEOFENCE: { code: 'OUT_OF_GEOFENCE', status: 422, message: 'You are too far from your branch to clock in. Move closer and try again.' },
+  ALREADY_PUNCHED_IN: { code: 'ALREADY_PUNCHED_IN', status: 409, message: 'You are still checked in from an earlier shift, so this check-in was refused. Ask your manager to close it.' },
+  NOT_PUNCHED_IN: { code: 'NOT_PUNCHED_IN', status: 409, message: 'You are not checked in, so there is nothing to clock out of.' },
 };
+
+// The blocked employee is the one person who cannot fix this themselves: the
+// open shift is yesterday's and only an admin can close it. So the message
+// names the shift in the way, tells them who fixes it, and says their arrival
+// is already on the record and paid - otherwise the sane thing to do is stand
+// there retrying, or go home, and both cost them money.
+function blockedMessage(openInAt: Date, now: Date): string {
+  const open = inBeirut(openInAt);
+  return (
+    `You are still checked in from ${open.date} ${open.hhmm}, so this check-in was refused. ` +
+    `Ask your manager to close that shift. Your arrival at ${inBeirut(now).hhmm} is recorded ` +
+    `and today's hours count from it.`
+  );
+}
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -114,10 +132,17 @@ export async function POST(req: Request) {
   });
 
   if ('code' in result) {
-    const mapped = ERROR_MAP[result.code] ?? { code: result.code, status: 500 };
+    const mapped = ERROR_MAP[result.code] ?? {
+      code: result.code,
+      status: 500,
+      message: 'Your punch could not be recorded. Try again, and tell your manager if it keeps failing.',
+    };
     const response = {
       ok: false,
-      error: { code: mapped.code, message: `Punch rejected: ${result.code}` },
+      error: {
+        code: mapped.code,
+        message: result.openInAt ? blockedMessage(result.openInAt, new Date()) : mapped.message,
+      },
     };
     return NextResponse.json(response, { status: mapped.status });
   }

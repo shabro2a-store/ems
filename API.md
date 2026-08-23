@@ -57,11 +57,23 @@ a punch with full GPS evidence and audit; may resolve a WATCHED flag. An approve
 day-off does **not** block punching (staff may come in to help).
 → `200 { at, kind, minutes_since_in }`. Errors:
 `OPEN_TRIP_EXISTS` 409, `ALREADY_PUNCHED_IN` 409, `NOT_PUNCHED_IN` 409,
-`LOW_GPS_ACCURACY` 422, `OUT_OF_GEOFENCE` 422, plus the common ones.
+`LOW_GPS_ACCURACY` 422, `OUT_OF_GEOFENCE` 422, plus the common ones. Every one
+carries a message written for the employee's phone — the endpoint used to render
+`Punch rejected: <CODE>` for all of them.
+
+`ALREADY_PUNCHED_IN` additionally **records a `BlockedPunchAttempt`** and its
+message names the open shift, who closes it, and that the wait is already on the
+record: *"You are still checked in from 2026-08-22 21:04, so this check-in was
+refused. Ask your manager to close that shift. Your arrival at 06:12 is recorded
+and today's hours count from it."* Only this rejection is recorded, because only
+this one happens **after** the geofence check — see the blocked-time credit in
+SYSTEM_MAP §4.
 
 ### POST /api/me/punch/dev  *(CSRF; dev only)*
 Enabled only when `ENABLE_DEV_ENDPOINTS=true`, else `404`. Body `{ kind }`. Skips
-GPS/geofence (uses the branch centre) for testing on devices without GPS.
+GPS/geofence (uses the branch centre) for testing on devices without GPS. Its
+`ALREADY_PUNCHED_IN` deliberately records **no** `BlockedPunchAttempt`: a blocked
+attempt is paid time, and it is only sound evidence because the geofence ran first.
 
 ### GET /api/me/today
 → `200 { in_at, minutes_since_in, minutes_today, hours_month }` — the field screens'
