@@ -294,9 +294,12 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     expect(audit?.after_json).toMatchObject({ cleared_waiver: true });
   });
 
-  it('leaves no half-done state: the removal survives a ruling that never lands', async () => {
-    // The delete, the ack and the audit row are one transaction. A ruling that
-    // is refused before any of them runs must leave the removal untouched.
+  it('leaves the removal untouched when the ruling is refused', async () => {
+    // Only the refusal path: it returns before the transaction opens, so this
+    // says nothing about whether the delete, the ack and the audit row commit
+    // together. That atomicity is verified by reading the route, not here -
+    // provoking a mid-transaction failure over HTTP would need a fault the
+    // suite has no way to inject.
     const { emp, admin } = await setup();
     const aSession = await loginAs(admin.username, 'change-me');
     await setCheckout(emp.id, OUT_SMALL);
@@ -502,6 +505,29 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     expect(res.status).toBe(200);
     const rows = await getTestPrisma().penaltyWaiver.findMany({ where: { user_id: emp.id } });
     expect(rows[0]!.penalty_min).toBe(PEN_1_MIN);
+  });
+
+  it('records the removal Restore destroys, with the reason the owner gave', async () => {
+    // Restore does the same destructive thing Accept does - deletes the waiver
+    // and starts the deduction - so it keeps the same record. Only the button
+    // was hardened first; this is the other half.
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    expect((await waive(aSession, emp.id, true, PEN_1_MIN, 'sick note, kept it off')).status).toBe(200);
+    const granted = (await getTestPrisma().penaltyWaiver.findFirst({ where: { user_id: emp.id } }))!;
+
+    expect((await waive(aSession, emp.id, false, PEN_1_MIN)).status).toBe(200);
+
+    const audit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'PenaltyWaiver', entity_id: `${emp.id}:${DAY}:SHORTFALL`, action: 'penalty.unwaive' },
+    });
+    expect(audit?.before_json).toMatchObject({
+      penalty_min: PEN_1_MIN,
+      reason: 'sick note, kept it off',
+      waived_by: admin.id,
+      created_at: granted.created_at.toISOString(),
+    });
+    expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(PEN_1_CENT);
   });
 
   it('still restores a penalty, and re-queues the day when it does', async () => {

@@ -82,45 +82,76 @@ export async function POST(req: Request) {
     );
   }
 
-  if (body.waived) {
-    await prisma.penaltyWaiver.upsert({
-      where: key,
-      create: {
-        user_id: body.userId,
-        date,
-        kind: body.kind,
-        penalty_min: penaltyMin,
-        reason: body.reason ?? null,
-        waived_by: adminId,
-      },
-      update: { penalty_min: penaltyMin, reason: body.reason ?? null, waived_by: adminId },
-    });
+  // Both branches move money, so each writes its row and its record together or
+  // writes neither. Restoring is the destructive one and gets exactly what the
+  // ack route gets: the row is read inside the transaction and its whole
+  // contents - the figure, the owner's written reason, who granted it and when
+  // - go into `before`, because deleting the reason a day was forgiven with
+  // nothing but a boolean makes it unrecoverable.
+  const entityId = `${body.userId}:${body.date}:${body.kind}`;
+  await prisma.$transaction(async (tx) => {
+    if (body.waived) {
+      const prior = await tx.penaltyWaiver.findUnique({ where: key });
+      await tx.penaltyWaiver.upsert({
+        where: key,
+        create: {
+          user_id: body.userId,
+          date,
+          kind: body.kind,
+          penalty_min: penaltyMin,
+          reason: body.reason ?? null,
+          waived_by: adminId,
+        },
+        update: { penalty_min: penaltyMin, reason: body.reason ?? null, waived_by: adminId },
+      });
+      await writeAuditLog({
+        db: tx,
+        actorId: adminId,
+        action: 'penalty.waive',
+        entity: 'PenaltyWaiver',
+        entityId,
+        before: prior
+          ? {
+              penalty_min: prior.penalty_min,
+              reason: prior.reason,
+              waived_by: prior.waived_by,
+              created_at: prior.created_at.toISOString(),
+            }
+          : null,
+        after: {
+          user_id: body.userId,
+          date: body.date,
+          kind: body.kind,
+          penalty_min: penaltyMin,
+          reason: body.reason ?? null,
+        },
+      });
+      return;
+    }
+
+    const prior = await tx.penaltyWaiver.findUnique({ where: key });
+    if (prior) {
+      await tx.penaltyWaiver.delete({ where: key });
+    }
     await writeAuditLog({
-      actorId: adminId,
-      action: 'penalty.waive',
-      entity: 'PenaltyWaiver',
-      entityId: `${body.userId}:${body.date}:${body.kind}`,
-      after: {
-        user_id: body.userId,
-        date: body.date,
-        kind: body.kind,
-        penalty_min: penaltyMin,
-        reason: body.reason ?? null,
-      },
-    });
-  } else {
-    const existing = await prisma.penaltyWaiver.findUnique({ where: key });
-    await prisma.penaltyWaiver.deleteMany({ where: { user_id: body.userId, date, kind: body.kind } });
-    await writeAuditLog({
+      db: tx,
       actorId: adminId,
       action: 'penalty.unwaive',
       entity: 'PenaltyWaiver',
-      entityId: `${body.userId}:${body.date}:${body.kind}`,
-      before: existing
-        ? { user_id: body.userId, date: body.date, kind: body.kind, penalty_min: existing.penalty_min }
+      entityId,
+      before: prior
+        ? {
+            user_id: body.userId,
+            date: body.date,
+            kind: body.kind,
+            penalty_min: prior.penalty_min,
+            reason: prior.reason,
+            waived_by: prior.waived_by,
+            created_at: prior.created_at.toISOString(),
+          }
         : null,
     });
-  }
+  });
 
   return NextResponse.json({ ok: true, data: { waived: body.waived } });
 }
