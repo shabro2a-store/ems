@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
+import { requiredMinForArrival, staleSessionClose, writeSystemCheckout } from '@/lib/services/autoClose';
 
 const DevPunchBody = z.object({
   kind: z.enum(['IN', 'OUT']),
@@ -55,15 +56,55 @@ export async function POST(req: Request) {
       })
     : null;
   const hasOpenSession = Boolean(lastIn) && !lastOut;
-  if (body.kind === 'IN' && hasOpenSession) {
-    // Deliberately does NOT record a BlockedPunchAttempt, unlike the real punch
-    // route. A blocked attempt is paid time, and it is only sound evidence
-    // because the geofence check ran first — this endpoint has no geofence at
-    // all, so a row written here would be a paid claim from anywhere.
+
+  // The same stale-session close the real punch route does. It deliberately
+  // records NO BlockedPunchAttempt - a blocked attempt is paid time, and it is
+  // only sound evidence because the geofence check ran first; this endpoint has
+  // no geofence at all, so a row written here would be a paid claim from
+  // anywhere. But the close itself has to happen: without it, Dev OUT on a
+  // shift left open two days ago writes a checkout at `now` and payroll pays
+  // the whole runaway span - the exact hole the real route was just closed for,
+  // in an endpoint this deployment leaves enabled.
+  let devSystemClosed = false;
+  if (hasOpenSession && lastIn) {
+    const now = new Date();
+    const stale = staleSessionClose({
+      arrivalAt: lastIn.at,
+      now,
+      requiredMin: await requiredMinForArrival(prisma, userId, lastIn.at),
+      graceMin: user.branch.shift_grace_min,
+    });
+    if (stale) {
+      devSystemClosed = true;
+      await writeSystemCheckout(prisma, {
+        userId,
+        branchId: lastIn.branch_id,
+        branchLat: user.branch.lat,
+        branchLng: user.branch.lng,
+        arrivalAt: lastIn.at,
+        arrivalPunchId: lastIn.id,
+        closeAt: stale.closeAt,
+        requiredMin: stale.requiredMin,
+        now,
+        trigger: 'blocked_check_in',
+        reason:
+          `Dev punch met a session opened ${lastIn.at.toISOString()} belonging to a shift-day that ` +
+          `is over. Closed at check-in plus the ${stale.requiredMin} min that day required.`,
+      });
+    }
+  }
+
+  if (body.kind === 'IN' && hasOpenSession && !devSystemClosed) {
     return jsonError('ALREADY_PUNCHED_IN', 'You have an open session', 409);
   }
   if (body.kind === 'OUT' && !hasOpenSession) {
     return jsonError('NOT_PUNCHED_IN', 'No open session to close', 409);
+  }
+  if (body.kind === 'OUT' && devSystemClosed) {
+    return NextResponse.json({
+      ok: true,
+      data: { _dev: 'stale session closed at its scheduled hours; no punch written' },
+    });
   }
 
   const now = new Date();
