@@ -2,6 +2,7 @@ import type { PrismaClient, Punch } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
 import { writeAuditLog } from './audit';
+import { requiredMinForArrival, staleSessionClose, writeSystemCheckout } from './autoClose';
 import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
@@ -38,6 +39,15 @@ export interface PunchError {
 export interface PunchOk {
   punch: Punch;
   minutes_since_in: number | null;
+  // A session left open from a shift-day that is over was closed by the system
+  // as part of serving this request, at that day's scheduled hours. The caller
+  // has to say so: on a check-in it explains a shift the employee thought was
+  // still running, and on a clock-out it explains why `punch` is not the punch
+  // they just made.
+  systemClosedAt?: Date;
+  // True only on a clock-out that resolved into a system close: `punch` is the
+  // system's checkout, not the employee's.
+  systemClosedInsteadOfPunch?: boolean;
 }
 
 export type PunchResult = PunchOk | PunchError;
@@ -92,7 +102,9 @@ export async function punchEmployee(
   const openIn = await db.punch.findFirst({
     where: { user_id: user.id, kind: 'IN' },
     orderBy: { at: 'desc' },
-    select: { id: true, at: true },
+    // branch_id so a system checkout is attributed to the branch the shift was
+    // actually worked at, which is not always the employee's current branch.
+    select: { id: true, at: true, branch_id: true },
   });
   const laterOpenOut = openIn
     ? await db.punch.findFirst({
@@ -103,21 +115,93 @@ export async function punchEmployee(
 
   const hasOpenSession = Boolean(openIn) && !laterOpenOut;
 
-  if (input.kind === 'IN' && hasOpenSession) {
+  // A session left open from a shift-day that is over is the system's to close,
+  // not the employee's. Somebody standing at the branch, past the geofence,
+  // asking to start a shift has demonstrably finished the old one - which is
+  // better evidence than the 30h sweep ever has, so the same close the sweep
+  // would eventually write happens here instead, at the same instant
+  // (systemCheckoutAt) with the same system_generated marking and audit.
+  //
+  // This is what stops the block being a wall. Before it, the employee's screen
+  // offered CLOCK OUT on the stale session, they tapped it, and payroll paid
+  // the entire runaway span; and a night worker refused at 21:00 with no
+  // check-in that Beirut day lost the night with nothing on any queue.
+  //
+  // staleSessionClose is deliberately strict about what "a shift-day that is
+  // over" means: a second tap on the same day is a duplicate, and closing a
+  // shift somebody is in the middle of would take their hours.
+  let systemClosed: Punch | null = null;
+  let resolvedStaleSession = false;
+  if (hasOpenSession) {
+    const requiredMin = await requiredMinForArrival(db, user.id, openIn!.at);
+    const stale = staleSessionClose({
+      arrivalAt: openIn!.at,
+      now,
+      requiredMin,
+      graceMin: user.branch.shift_grace_min,
+    });
+    if (stale) {
+      resolvedStaleSession = true;
+      systemClosed = await writeSystemCheckout(db, {
+        userId: user.id,
+        branchId: openIn!.branch_id,
+        branchLat: user.branch.lat,
+        branchLng: user.branch.lng,
+        arrivalAt: openIn!.at,
+        arrivalPunchId: openIn!.id,
+        closeAt: stale.closeAt,
+        requiredMin: stale.requiredMin,
+        now,
+        trigger: 'blocked_check_in',
+        reason:
+          `Check-in refused would have blocked ${user.username}: the session opened ` +
+          `${openIn!.at.toISOString()} belongs to a shift-day that is over and had run past its ` +
+          `${stale.requiredMin} min plus the branch grace. Closed at check-in plus those ${stale.requiredMin} ` +
+          `min, on the evidence of a geofence-passing punch at the branch now. Overtime actually worked ` +
+          `that night is not included and must be added as a bonus.`,
+      });
+    }
+  }
+
+  if (input.kind === 'IN' && hasOpenSession && !resolvedStaleSession) {
     // Record the refusal. Note where we are: verifyWithinGeofence has already
-    // passed, several statements above, so reaching this line proves the
-    // employee is standing at their branch with acceptable GPS. An attempt
-    // from home fails earlier as OUT_OF_GEOFENCE and is never recorded.
+    // passed, above, so reaching this line proves the employee is standing at
+    // their branch with acceptable GPS. An attempt from home fails earlier as
+    // OUT_OF_GEOFENCE and is never recorded.
     //
     // That ordering is not incidental - it is what makes the paid credit these
     // rows drive impossible to game from a sofa. Anything that moves the
     // geofence check below this point, or records a blocked attempt from a
     // path that skips it, turns "I was at work and the system would not let me
     // clock in" into an unverified claim that pays.
+    //
+    // A self-resolved stale session records nothing: nothing was refused, and
+    // the check-in punch that follows is stronger evidence than a row saying it
+    // was turned away would be.
     await recordBlockedAttempt(db, user, openIn!.at, input, now);
     return { code: 'ALREADY_PUNCHED_IN', openInAt: openIn!.at };
   }
   if (input.kind === 'OUT' && !hasOpenSession) {
+    return { code: 'NOT_PUNCHED_IN' };
+  }
+  if (input.kind === 'OUT' && resolvedStaleSession) {
+    // They asked to clock out of a shift that ended on an earlier day. Writing
+    // their checkout at `now` is exactly the runaway payment this whole change
+    // exists to stop, and backdating their own punch would make the record lie
+    // about when they pressed the button. So the system's checkout stands and
+    // no punch of theirs is written; the response says so.
+    const closed = systemClosed ?? (await db.punch.findFirst({
+      where: { user_id: user.id, kind: 'OUT', at: { gt: openIn!.at } },
+      orderBy: { at: 'asc' },
+    }));
+    if (closed) {
+      return {
+        punch: closed,
+        minutes_since_in: Math.max(0, Math.floor((closed.at.getTime() - openIn!.at.getTime()) / 60_000)),
+        systemClosedAt: closed.at,
+        systemClosedInsteadOfPunch: true,
+      };
+    }
     return { code: 'NOT_PUNCHED_IN' };
   }
 
@@ -161,19 +245,43 @@ export async function punchEmployee(
     minutes_since_in = Math.max(0, Math.floor(sinceMs / 60_000));
   }
 
-  return { punch, minutes_since_in };
+  return {
+    punch,
+    minutes_since_in,
+    ...(systemClosed ? { systemClosedAt: systemClosed.at } : {}),
+  };
 }
 
 /**
  * File the evidence behind a refused check-in.
  *
- * Only ever called from the ALREADY_PUNCHED_IN branch above, and only from
- * there: the row's meaning is "this person was at the branch and the system
- * would not let them start", which is only true past the geofence check.
+ * Only ever called from the ALREADY_PUNCHED_IN branch in punchEmployee, and
+ * only from there: the row's meaning is "this person was at the branch and the
+ * system would not let them start", which is only true past the geofence check.
  * POST /api/me/punch/dev bypasses the geofence by design and so must never
  * write one.
+ *
+ * Failures are swallowed. This is bookkeeping on a request that is already
+ * being refused, and letting a write error propagate would turn a 409 the
+ * employee can act on into a 500 they cannot - trading the whole message for a
+ * row nobody is waiting on. The lost row costs at most some credit the owner
+ * would have had to approve anyway.
  */
 async function recordBlockedAttempt(
+  db: PrismaClient,
+  user: { id: string; branch: { id: string } | null },
+  openInAt: Date,
+  input: PunchInput,
+  at: Date,
+): Promise<void> {
+  try {
+    await writeBlockedAttempt(db, user, openInAt, input, at);
+  } catch (e) {
+    console.error('[punch] could not record blocked attempt', e);
+  }
+}
+
+async function writeBlockedAttempt(
   db: PrismaClient,
   user: { id: string; branch: { id: string } | null },
   openInAt: Date,

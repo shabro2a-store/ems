@@ -11,6 +11,10 @@ interface TodayPayload {
   minutes_since_in: number | null;
   minutes_today: number;
   hours_month: number;
+  // The open session belongs to a shift-day that is over: a checkout somebody
+  // forgot. Clocking out of it now would pay the whole runaway span, so the
+  // screen offers CLOCK IN instead and says what will happen.
+  open_session_stale: boolean;
 }
 interface TripInfo { open: boolean; since_min?: number; threshold_min: number }
 type Status =
@@ -97,7 +101,14 @@ export default function DriverHomeClient({ username, branch }: { username: strin
       body: { kind, lat: status.lat, lng: status.lng, accuracy: status.accuracy, deviceFp: deviceFp() },
     });
     setBusy(false);
-    if (r.ok) { setBanner({ tone: 'success', text: kind === 'IN' ? 'Clocked in. Have a good shift!' : 'Clocked out. See you next time!' }); await refresh(); }
+    if (r.ok) {
+      const d = r.data as { notice?: string };
+      setBanner({
+        tone: 'success',
+        text: d.notice ?? (kind === 'IN' ? 'Clocked in. Have a good shift!' : 'Clocked out. See you next time!'),
+      });
+      await refresh();
+    }
     else setBanner({ tone: 'danger', text: errorMessage(r) });
   }, [status, refresh]);
 
@@ -123,7 +134,11 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     else setBanner({ tone: 'danger', text: errorMessage(r) });
   }, [refresh]);
 
-  const isIn = Boolean(today?.in_at);
+  // A stale session is not "on shift" as far as the button is concerned: that
+  // shift is over, and the driver's next action is to start a new one. Tapping
+  // CLOCK IN closes the old one at its scheduled hours.
+  const stale = Boolean(today?.open_session_stale);
+  const isIn = Boolean(today?.in_at) && !stale;
   const open = trip?.open ?? false;
   const since = trip?.since_min ?? 0;
   const over = open && since > branch.trip_threshold_min;
@@ -139,6 +154,13 @@ export default function DriverHomeClient({ username, branch }: { username: strin
       <EnableAlerts />
 
       {banner && <Alert tone={banner.tone}>{banner.text}</Alert>}
+
+      {stale && today?.in_at && (
+        <Alert tone="warning">
+          Your shift from {formatBeirutTime(today.in_at)} was never closed. Clock in for today and it will be
+          closed automatically at the hours it was scheduled for. Tell your manager if you worked later than that.
+        </Alert>
+      )}
 
       {/* Shift (attendance clock) */}
       <Card>

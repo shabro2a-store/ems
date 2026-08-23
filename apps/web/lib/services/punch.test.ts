@@ -52,7 +52,8 @@ type Store = {
     correction_reason: string | null;
     created_at: Date;
   }>;
-  overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE' }>;
+  overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min?: number | null }>;
+  schedules: Array<{ user_id: string; weekday: number; shift_min: number }>;
   trips: Array<{ id: string; driver_id: string; back_at: Date | null }>;
   audits: Array<{ id: string }>;
   flags: Array<{ id: string; user_id: string; kind: 'WATCHED' | 'MISSED_CHECKOUT' | 'TRIP_OVER_THRESHOLD'; resolved_at: Date | null; context_json: unknown; created_at: Date }>;
@@ -78,6 +79,7 @@ const store: Store = {
   branches: new Map(),
   punches: [],
   overrides: [],
+  schedules: [],
   trips: [],
   audits: [],
   flags: [],
@@ -95,6 +97,8 @@ const mocks = vi.hoisted(() => ({
   blockedPunchAttempt: { create: vi.fn() },
   auditLog: { create: vi.fn() },
   flag: { findFirst: vi.fn(), updateMany: vi.fn() },
+  schedule: { findUnique: vi.fn() },
+  $transaction: vi.fn(),
 }));
 
 vi.mock('@/lib/db/prisma', () => ({
@@ -108,6 +112,7 @@ function resetStore() {
   store.branches.clear();
   store.punches.length = 0;
   store.overrides.length = 0;
+  store.schedules.length = 0;
   store.trips.length = 0;
   store.audits.length = 0;
   store.flags.length = 0;
@@ -179,6 +184,15 @@ beforeEach(() => {
     const { branch: _b, ...rest } = u;
     return rest;
   });
+
+  // The self-resolve path asks what the arrival's day owed, then closes the
+  // session inside a transaction. Default: nothing scheduled, so requiredMin is
+  // 0 and only the elapsed/day-boundary conditions decide staleness.
+  mocks.schedule.findUnique.mockImplementation(async ({ where }: { where: { user_id_weekday: { user_id: string; weekday: number } } }) => {
+    return store.schedules.find((s) => s.user_id === where.user_id_weekday.user_id && s.weekday === where.user_id_weekday.weekday) ?? null;
+  });
+
+  mocks.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(mocks));
 
   mocks.scheduleOverride.findUnique.mockImplementation(async ({ where }: { where: { user_id_date: { user_id: string; date: Date } } }) => {
     return (
@@ -335,7 +349,9 @@ describe('punchEmployee', () => {
     const branch = makeBranch();
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
-    const earlier = new Date(Date.now() - 60 * 60_000);
+    // Same Beirut day as `now`, so this is a duplicate tap rather than a shift
+    // that is over: it must be refused, not silently closed.
+    const earlier = new Date('2026-07-12T03:00:00Z');
     seedOpenIn(user.id, branch.id, earlier);
 
     const r = await punchEmployee({
@@ -346,6 +362,7 @@ describe('punchEmployee', () => {
       accuracy: 10,
       deviceFp: 'fp',
       ip: '1.2.3.4',
+      now: new Date('2026-07-12T06:00:00Z'),
     });
     expect('code' in r).toBe(true);
     if ('code' in r) {
@@ -388,23 +405,12 @@ describe('punchEmployee', () => {
     const branch = makeBranch();
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
-    const earlier = new Date(Date.now() - 90 * 60_000);
-    store.punches.push({
-      id: 'p1',
-      user_id: user.id,
-      branch_id: branch.id,
-      kind: 'IN',
-      at: earlier,
-      lat: 33.8962,
-      lng: 35.4827,
-      accuracy_m: 10,
-      device_fp: 'fp',
-      ip: '1.2.3.4',
-      corrected: false,
-      corrected_by: null,
-      correction_reason: null,
-      created_at: earlier,
-    });
+    // Pinned rather than relative to Date.now(): a real clock puts the arrival
+    // on the previous Beirut day whenever the suite runs between midnight and
+    // 01:30 local, which is now the self-resolve path and not this one.
+    const earlier = new Date('2026-07-12T04:30:00Z');
+    const now = new Date('2026-07-12T06:00:00Z');
+    seedOpenIn(user.id, branch.id, earlier);
 
     const result = await punchEmployee({
       userId: 'u1',
@@ -414,13 +420,14 @@ describe('punchEmployee', () => {
       accuracy: 10,
       deviceFp: 'fp',
       ip: '1.2.3.4',
+      now,
     });
 
     expect('punch' in result).toBe(true);
     if ('punch' in result) {
       expect(result.punch.kind).toBe('OUT');
-      expect(result.minutes_since_in).toBeGreaterThanOrEqual(89);
-      expect(result.minutes_since_in).toBeLessThanOrEqual(91);
+      expect(result.minutes_since_in).toBe(90);
+      expect(result.systemClosedInsteadOfPunch).toBeUndefined();
     }
   });
 
@@ -459,8 +466,11 @@ describe('punchEmployee', () => {
 // state - so a rejection carrying ALREADY_PUNCHED_IN has already proved the
 // person is at the branch.
 describe('recording the blocked check-in', () => {
-  const OPEN_SINCE = new Date('2026-07-11T18:00:00Z');
-  const NOW = new Date('2026-07-12T06:00:00Z');
+  // Deliberately the SAME Beirut day as NOW. A session from a day that is over
+  // no longer refuses anything - punchEmployee closes it and lets the check-in
+  // through - so the only refusals left to record are duplicates like this one.
+  const OPEN_SINCE = new Date('2026-07-12T03:00:00Z'); // 06:00 Beirut
+  const NOW = new Date('2026-07-12T06:00:00Z'); // 09:00 Beirut, same day
 
   it('records the refusal with the GPS that placed them at the branch', async () => {
     const branch = makeBranch();
@@ -576,6 +586,152 @@ describe('recording the blocked check-in', () => {
     });
 
     expect(store.blocked).toHaveLength(0);
+  });
+});
+
+/**
+ * The block used to be a wall: the employee's screen offered CLOCK OUT on the
+ * stale session, they tapped it, and payroll paid the whole runaway span - so
+ * the block was rarely even seen, and a night worker refused at 21:00 with no
+ * check-in that Beirut day lost the night entirely.
+ *
+ * Somebody standing at the branch past the geofence asking to start a shift has
+ * demonstrably finished the old one. That is better evidence than the 30h sweep
+ * ever has, so the same close happens here.
+ */
+describe('self-resolving a session left open from a shift-day that is over', () => {
+  // 21:00 Beirut Saturday, an 8h night shift nobody closed.
+  const NIGHT_BEFORE = new Date('2026-07-11T18:00:00Z');
+  const NEXT_EVENING = new Date('2026-07-12T18:00:00Z'); // 21:00 Beirut Sunday
+
+  function seedNightWorker() {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    // Saturday is Beirut weekday 6; the arrival is a Saturday.
+    store.schedules.push({ user_id: 'u1', weekday: 6, shift_min: 480 });
+    seedOpenIn(user.id, branch.id, NIGHT_BEFORE);
+    return { branch, user };
+  }
+
+  it('closes the stale shift at its scheduled hours and lets the check-in through', async () => {
+    seedNightWorker();
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: NEXT_EVENING,
+    });
+
+    expect('punch' in r).toBe(true);
+    if (!('punch' in r)) return;
+    expect(r.punch.kind).toBe('IN');
+    expect(r.punch.at.toISOString()).toBe(NEXT_EVENING.toISOString());
+    // 21:00 + 8h = 05:00 Beirut Sunday, not 24h of runaway span.
+    expect(r.systemClosedAt?.toISOString()).toBe(new Date('2026-07-12T02:00:00Z').toISOString());
+
+    const out = store.punches.find((p) => p.kind === 'OUT')!;
+    expect(out.at.toISOString()).toBe(new Date('2026-07-12T02:00:00Z').toISOString());
+    expect((out as unknown as { system_generated: boolean }).system_generated).toBe(true);
+    expect(store.auditActions).toContain('punch.auto_close');
+    // Nothing was refused, so nothing is recorded as a refusal.
+    expect(store.blocked).toHaveLength(0);
+  });
+
+  it('closes it on a clock-out too, instead of paying the runaway span', async () => {
+    seedNightWorker();
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'OUT', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: NEXT_EVENING,
+    });
+
+    expect('punch' in r).toBe(true);
+    if (!('punch' in r)) return;
+    expect(r.systemClosedInsteadOfPunch).toBe(true);
+    // The employee's tap wrote no punch of its own: writing one at `now` is
+    // exactly the 24h payment this exists to stop, and backdating theirs would
+    // make the record lie about when they pressed the button.
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
+    expect(r.minutes_since_in).toBe(480);
+  });
+
+  it('refuses a duplicate tap on the same Beirut day rather than closing a shift in progress', async () => {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    store.schedules.push({ user_id: 'u1', weekday: 0, shift_min: 480 });
+    const startedThisMorning = new Date('2026-07-12T03:00:00Z'); // 06:00 Beirut Sunday
+    seedOpenIn(user.id, branch.id, startedThisMorning);
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date('2026-07-12T13:00:00Z'), // 16:00 Beirut, 10h in - past 480 + 15
+    });
+
+    expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(0);
+    expect(store.auditActions).not.toContain('punch.auto_close');
+  });
+
+  it('refuses a stray tap mid-way through an overnight shift', async () => {
+    // 21:00 Saturday, 10h scheduled. At 02:00 Sunday they are five hours in and
+    // still working. The calendar day has turned over, so the day-boundary
+    // condition alone would happily close the shift under them.
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    store.schedules.push({ user_id: 'u1', weekday: 6, shift_min: 600 });
+    seedOpenIn(user.id, branch.id, NIGHT_BEFORE);
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date('2026-07-11T23:00:00Z'), // 02:00 Beirut Sunday, 5h elapsed
+    });
+
+    expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(0);
+  });
+
+  it('refuses a stray tap in the grace window past an overnight shift, rather than truncating it', async () => {
+    // The case that pins the elapsed condition specifically. 21:00 Saturday,
+    // 10h scheduled, tapped at 07:10 Sunday: ten minutes over, inside the
+    // branch's 15 min grace. The close would land at 07:00 - BEFORE now - so
+    // the "close must precede now" guard does not catch this one, and the
+    // day-boundary condition is long since satisfied. Only "past required +
+    // grace" stops it, and without it the employee's shift is silently
+    // truncated to exactly ten hours and their overrun taken.
+    const branch = makeBranch({ shift_grace_min: 15 });
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    store.schedules.push({ user_id: 'u1', weekday: 6, shift_min: 600 });
+    seedOpenIn(user.id, branch.id, NIGHT_BEFORE);
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date('2026-07-12T04:10:00Z'), // 07:10 Beirut Sunday, 610 min elapsed
+    });
+
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(0);
+    expect(store.auditActions).not.toContain('punch.auto_close');
+    expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
+  });
+
+  it('never writes a close that lands at or after now, which no guard could see', async () => {
+    // A 0-required session opened at 23:59:30 Beirut. One minute later the
+    // calendar day has turned and the elapsed time is past 0 + 0 grace, but the
+    // close would land on `now` itself - the exact shape that locked people out.
+    const branch = makeBranch({ shift_grace_min: 0 });
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    seedOpenIn(user.id, branch.id, new Date('2026-07-11T20:59:30Z'));
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date('2026-07-11T21:00:15Z'),
+    });
+
+    expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(0);
   });
 });
 

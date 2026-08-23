@@ -9,6 +9,10 @@ interface TodayPayload {
   minutes_since_in: number | null;
   minutes_today: number;
   hours_month: number;
+  // The open session belongs to a shift-day that is over: a checkout somebody
+  // forgot. Clocking out of it now would pay the whole runaway span, so the
+  // screen offers CHECK IN instead and says what will happen.
+  open_session_stale: boolean;
 }
 type Status =
   | { kind: 'idle' }
@@ -75,7 +79,14 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
       body: { kind, lat: status.lat, lng: status.lng, accuracy: status.accuracy, deviceFp: deviceFp() },
     });
     setBusy(false);
-    if (r.ok) { setBanner({ tone: 'success', text: kind === 'IN' ? 'Checked in. Have a good shift!' : 'Checked out. See you next time!' }); await fetchToday(); }
+    if (r.ok) {
+      const d = r.data as { notice?: string };
+      setBanner({
+        tone: 'success',
+        text: d.notice ?? (kind === 'IN' ? 'Checked in. Have a good shift!' : 'Checked out. See you next time!'),
+      });
+      await fetchToday();
+    }
     else setBanner({ tone: 'danger', text: errorMessage(r) });
   }, [status, fetchToday]);
 
@@ -87,7 +98,11 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
     else setBanner({ tone: 'danger', text: errorMessage(r) });
   }, [fetchToday]);
 
-  const isIn = Boolean(today?.in_at);
+  // A stale session is not "checked in" as far as the button is concerned: the
+  // shift it belongs to is over, and the employee's next action is to start a
+  // new one. Tapping CHECK IN closes the old shift at its scheduled hours.
+  const stale = Boolean(today?.open_session_stale);
+  const isIn = Boolean(today?.in_at) && !stale;
   const ready = status.kind === 'ready';
 
   return (
@@ -98,6 +113,13 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
       </div>
 
       {banner && <Alert tone={banner.tone}>{banner.text}</Alert>}
+
+      {stale && today?.in_at && (
+        <Alert tone="warning">
+          Your shift from {formatBeirutTime(today.in_at)} was never closed. Check in for today and it will be
+          closed automatically at the hours it was scheduled for. Tell your manager if you worked later than that.
+        </Alert>
+      )}
 
       <Card>
         <CardBody className="text-center">

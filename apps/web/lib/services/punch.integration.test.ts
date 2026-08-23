@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
-import { todayInBeirut } from 'time';
+import { todayInBeirut, beirutWeekday } from 'time';
 import { Role } from '@prisma/client';
 import {
   getTestPrisma,
@@ -8,6 +8,7 @@ import {
   seedTestUser,
   seedDayOffOverride,
   seedTestPunch,
+  seedTestSchedule,
 } from '../test-helpers/db';
 import { loginAs } from '../test-helpers/auth';
 
@@ -295,7 +296,13 @@ describe('punch integration (HTTP)', () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     // Exact key set: catches a stray money field left in, as much as one dropped.
-    expect(Object.keys(body.data).sort()).toEqual(['hours_month', 'in_at', 'minutes_since_in', 'minutes_today']);
+    expect(Object.keys(body.data).sort()).toEqual([
+      'hours_month',
+      'in_at',
+      'minutes_since_in',
+      'minutes_today',
+      'open_session_stale',
+    ]);
     expect(typeof body.data.in_at).toBe('string');
     expect(body.data.minutes_since_in).toBeGreaterThanOrEqual(0);
     expect(body.data.hours_month).toBe(8);
@@ -353,8 +360,10 @@ describe('punch integration (HTTP)', () => {
   it('a blocked check-in explains itself and is recorded as evidence', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-blocked', branch_id: branch.id });
-    // Yesterday evening's check-in, never closed.
-    const openAt = new Date(Date.now() - 14 * 3_600_000);
+    // A session opened earlier on the SAME Beirut day: a duplicate tap, which
+    // is the only kind of block left. A session from a day that is over
+    // self-resolves and lets the check-in through.
+    const openAt = new Date(`${todayInBeirut(new Date())}T00:00:00.000Z`);
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: openAt });
     const { cookies, csrf } = await loginAs(user.username, 'change-me');
 
@@ -374,9 +383,8 @@ describe('punch integration (HTTP)', () => {
     expect(body.error.code).toBe('ALREADY_PUNCHED_IN');
     // What the employee actually reads. The raw code must not survive into it.
     expect(body.error.message).not.toContain('ALREADY_PUNCHED_IN');
-    expect(body.error.message).toContain('still checked in from');
-    expect(body.error.message).toContain('Ask your manager to close that shift');
-    expect(body.error.message).toContain("today's hours count from it");
+    expect(body.error.message).toContain('You are already checked in');
+    expect(body.error.message).toContain('Clock out of it before starting a new one');
 
     const attempts = await getTestPrisma().blockedPunchAttempt.findMany({ where: { user_id: user.id } });
     expect(attempts).toHaveLength(1);
@@ -392,7 +400,7 @@ describe('punch integration (HTTP)', () => {
       user_id: user.id,
       branch_id: branch.id,
       kind: 'IN',
-      at: new Date(Date.now() - 14 * 3_600_000),
+      at: new Date(`${todayInBeirut(new Date())}T00:00:00.000Z`),
     });
     const { cookies, csrf } = await loginAs(user.username, 'change-me');
 
@@ -411,5 +419,76 @@ describe('punch integration (HTTP)', () => {
     expect((await res.json()).error.code).toBe('OUT_OF_GEOFENCE');
     const attempts = await getTestPrisma().blockedPunchAttempt.count({ where: { user_id: user.id } });
     expect(attempts).toBe(0);
+  });
+
+  it('a check-in behind a shift left open yesterday closes it and goes through', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-selfresolve', branch_id: branch.id });
+    // Yesterday's arrival, 8h scheduled for that weekday, never closed.
+    const yesterday = new Date(Date.now() - 26 * 3_600_000);
+    await seedTestSchedule({ user_id: user.id, weekday: beirutWeekday(yesterday), shift_min: 480 });
+    await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: yesterday });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `sr-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'fp-sr' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.kind).toBe('IN');
+    expect(body.data.notice).toContain('closed automatically');
+
+    const punches = await getTestPrisma().punch.findMany({
+      where: { user_id: user.id },
+      orderBy: { at: 'asc' },
+    });
+    expect(punches.map((p) => p.kind)).toEqual(['IN', 'OUT', 'IN']);
+    const systemOut = punches[1]!;
+    expect(systemOut.system_generated).toBe(true);
+    // Closed at yesterday's arrival + 8h, not at now: the runaway span is 26h.
+    expect(systemOut.at.getTime()).toBe(yesterday.getTime() + 480 * 60_000);
+    // Nothing was refused, so nothing is filed as a refusal.
+    expect(await getTestPrisma().blockedPunchAttempt.count({ where: { user_id: user.id } })).toBe(0);
+    expect(
+      await getTestPrisma().auditLog.count({ where: { entity_id: systemOut.id, action: 'punch.auto_close' } }),
+    ).toBe(1);
+  });
+
+  it('clocking out of a shift left open yesterday closes it at its hours, not at now', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-staleout', branch_id: branch.id });
+    const yesterday = new Date(Date.now() - 26 * 3_600_000);
+    await seedTestSchedule({ user_id: user.id, weekday: beirutWeekday(yesterday), shift_min: 480 });
+    await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: yesterday });
+    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+
+    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `so-${Date.now()}-${Math.random()}`,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
+      },
+      body: JSON.stringify({ kind: 'OUT', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'fp-so' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.system_closed_instead_of_punch).toBe(true);
+    const punches = await getTestPrisma().punch.findMany({ where: { user_id: user.id }, orderBy: { at: 'asc' } });
+    // Exactly one checkout, and it is the system's at 8h - not the employee's
+    // at 26h, which is what payroll used to be handed.
+    expect(punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
+    expect(punches[1]!.at.getTime()).toBe(yesterday.getTime() + 480 * 60_000);
+    expect(punches[1]!.system_generated).toBe(true);
   });
 });
