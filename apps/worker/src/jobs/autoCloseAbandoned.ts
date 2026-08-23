@@ -170,6 +170,28 @@ export async function runAutoCloseAbandoned(
         },
       });
 
+      // Mirrors writeSystemCheckout in apps/web/lib/services/autoClose.ts. A
+      // day that owed nothing is watched by nothing: missedCheckout and
+      // watchedDetector both skip 0-required days, and deltaMin >= 0 raises no
+      // penalty - so a day-off helper who forgot to clock out is paid three
+      // cents for an evening in total silence. This is the notice.
+      if (requiredMin === 0) {
+        await tx.flag.create({
+          data: {
+            kind: 'MISSED_CHECKOUT',
+            user_id: u.id,
+            branch_id: lastIn.branch_id,
+            context_json: {
+              shift_min: 0,
+              over_min: openMin,
+              zero_required_auto_close: true,
+              in_at: lastIn.at.toISOString(),
+              closed_at: punch.at.toISOString(),
+            },
+          },
+        });
+      }
+
       return punch;
     });
 

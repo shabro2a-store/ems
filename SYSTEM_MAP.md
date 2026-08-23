@@ -167,9 +167,11 @@ Full request/response detail is in [API.md](API.md). Summary:
   (uphold one; clears it from the attention queue without changing pay).
 - Overtime: `POST overtime/decision` (upserts one `OvertimeDecision` row per user/date;
   `ACCEPTED` upholds and changes no money, `REVOKED` deducts that day's excess from payroll).
-- Blocked-time credit: `POST blocked-credit/decision` (upserts one `BlockedCreditDecision` per
-  user/date; `ACCEPTED` upholds and changes no money, `REVOKED` withholds the credit, `PENDING`
-  deletes the row and is the undo).
+- Blocked-time credit: `GET blocked-credit?userId&month` (every day, decided or not — the
+  month-scoped surface behind the payroll page's modal, since the attention queue only reaches
+  back 7 days) · `POST blocked-credit/decision` (upserts one `BlockedCreditDecision` per
+  user/date; pending grants nothing, so `ACCEPTED` is what pays and `REVOKED` moves no money,
+  `PENDING` deletes the row and is the undo).
 - Flags: `POST flags/[id]/resolve`.
 - Telegram: `GET telegram/code` (the 6-digit bind code + whether a bot/chat is configured).
 
@@ -375,21 +377,37 @@ Full request/response detail is in [API.md](API.md). Summary:
   - A blocked attempt with no successful check-in **that same Beirut day** credits nothing —
     there is no day's work for it to start. Nor does one whose blocking session began that
     same day, since those minutes are already counted from their own check-in.
-- **A stale session resolves itself at the punch** (`staleSessionClose` in `autoClose.ts`):
-  when a check-in — or a clock-out — meets a session left open from a shift-day that is over,
-  that session is closed at `systemCheckoutAt` (the same instant the 30h sweep would use) and
-  the check-in proceeds. Somebody at the branch, past the geofence, starting a shift has
-  demonstrably finished the old one. **Both** conditions are required: the arrival is on an
-  earlier Beirut calendar day **and** the session has run past its own `required + grace`. The
-  day boundary alone closes a 21:00-07:00 shift under somebody at 02:00; the elapsed condition
-  alone lets a same-day duplicate tap end a shift in progress. The close must also land
-  strictly before now, or it is invisible to every guard. On a clock-out the employee's own
-  punch is **not** written — writing it at `now` pays the runaway span, and backdating it
-  would make the record lie about when they pressed the button.
-  Without this the feature never fired: `/api/me/today` reported the stale session as open,
-  both field screens rendered a clock-out button, and payroll was handed the whole span. They
-  now show a warning and offer check-in instead, driven by `open_session_stale` from the same
-  predicate.
+- **A stale session resolves itself at the punch, and the threshold is asymmetric**
+  (`autoClose.ts`). Both paths close the session at `systemCheckoutAt` — the same instant the
+  30h sweep would use — but they need different amounts of evidence:
+  - **Check-in** (`staleSessionClose`): the arrival is on an **earlier Beirut calendar day**
+    *and* the session has run past its own `required + grace`. Somebody at the branch, past the
+    geofence, starting a new shift has demonstrably finished the old one, and nothing they made
+    is discarded — their IN is still written at `now`. Both conditions are needed: the day
+    boundary alone closes a 21:00–07:00 shift under somebody at 02:00; the elapsed condition
+    alone lets a same-day duplicate tap end a shift in progress. The close must also land
+    strictly before now, or it is invisible to every guard.
+  - **Clock-out** (`abandonedSessionClose`): only past **`MAX_OPEN_SESSION_MIN`**. The employee
+    is standing there asserting the truth about their own shift and the system must not
+    overrule them. Using the check-in threshold here silently truncated real work — a night
+    worker on a 10h shift clocking out at 07:16 worked 616 minutes and was paid 600, with the
+    record saying 07:00; a 16:00–00:40 day was paid 480 of 520; a day-off helper who worked
+    21:00–02:00 was paid one minute. Between `required + grace` and 30h an overrun is plausibly
+    real, and the overtime notice is the control the owner already has for it. Past 30h the
+    employee's own punch is **not** written — writing it at `now` pays the runaway span, and
+    backdating it would make the record lie about when they pressed the button.
+
+  `open_session_stale` on `/api/me/today` uses the **clock-out** predicate, because the field
+  screens compute `isIn = Boolean(in_at) && !stale` on a 30-second poll: on the check-in
+  threshold a night worker sixteen minutes past grace would watch the clock-out button vanish
+  mid-shift, taking the driver's trip button with it. Only past 30h do the screens hide it,
+  show a warning and offer check-in instead — which is what makes the whole thing reachable at
+  all, since before it they simply rendered a clock-out and payroll was handed the whole span.
+- **A system close on a 0-required day raises a MISSED_CHECKOUT flag.** Nothing else watches
+  those days — `missedCheckout` and `watchedDetector` both skip them and `deltaMin >= 0` raises
+  no penalty — so a day-off helper who forgot to clock out was paid three cents for an evening
+  in silence. The flag carries `zero_required_auto_close` and the attention queue renders it as
+  its own sentence, with the Fix punch link.
 - **A blocked employee is told what happened.** Every punch rejection carries a message
   written for a phone; "Punch rejected: ALREADY_PUNCHED_IN" is gone. A refusal that survives
   self-resolve is a duplicate tap, so it says to clock out first — something they can do

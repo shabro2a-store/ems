@@ -4,7 +4,7 @@ import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
-import { requiredMinForArrival, staleSessionClose, writeSystemCheckout } from '@/lib/services/autoClose';
+import { abandonedSessionClose, requiredMinForArrival, staleSessionClose, writeSystemCheckout } from '@/lib/services/autoClose';
 
 const DevPunchBody = z.object({
   kind: z.enum(['IN', 'OUT']),
@@ -68,12 +68,14 @@ export async function POST(req: Request) {
   let devSystemClosed = false;
   if (hasOpenSession && lastIn) {
     const now = new Date();
-    const stale = staleSessionClose({
-      arrivalAt: lastIn.at,
-      now,
-      requiredMin: await requiredMinForArrival(prisma, userId, lastIn.at),
-      graceMin: user.branch.shift_grace_min,
-    });
+    const requiredMin = await requiredMinForArrival(prisma, userId, lastIn.at);
+    // Same asymmetry as the real route: a check-in is evidence the old shift
+    // ended, a clock-out is the employee asserting the truth about it and may
+    // only be overruled past MAX_OPEN_SESSION_MIN.
+    const stale =
+      body.kind === 'IN'
+        ? staleSessionClose({ arrivalAt: lastIn.at, now, requiredMin, graceMin: user.branch.shift_grace_min })
+        : abandonedSessionClose({ arrivalAt: lastIn.at, now, requiredMin });
     if (stale) {
       devSystemClosed = true;
       await writeSystemCheckout(prisma, {
@@ -86,7 +88,7 @@ export async function POST(req: Request) {
         closeAt: stale.closeAt,
         requiredMin: stale.requiredMin,
         now,
-        trigger: 'blocked_check_in',
+        trigger: body.kind === 'IN' ? 'new_check_in' : 'stale_clock_out',
         reason:
           `Dev punch met a session opened ${lastIn.at.toISOString()} belonging to a shift-day that ` +
           `is over. Closed at check-in plus the ${stale.requiredMin} min that day required.`,

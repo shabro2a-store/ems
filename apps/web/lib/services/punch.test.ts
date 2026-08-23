@@ -50,6 +50,7 @@ type Store = {
     corrected: boolean;
     corrected_by: string | null;
     correction_reason: string | null;
+    system_generated: boolean;
     created_at: Date;
   }>;
   overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min?: number | null }>;
@@ -96,7 +97,7 @@ const mocks = vi.hoisted(() => ({
   punch: { findFirst: vi.fn(), create: vi.fn() },
   blockedPunchAttempt: { create: vi.fn() },
   auditLog: { create: vi.fn() },
-  flag: { findFirst: vi.fn(), updateMany: vi.fn() },
+  flag: { findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
   schedule: { findUnique: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -152,6 +153,7 @@ function seedOpenIn(userId: string, branchId: string, at: Date) {
     corrected: false,
     corrected_by: null,
     correction_reason: null,
+    system_generated: false,
     created_at: at,
   });
 }
@@ -221,6 +223,10 @@ beforeEach(() => {
   mocks.punch.create.mockImplementation(async ({ data }: { data: { user_id: string; branch_id: string; kind: 'IN' | 'OUT'; at: Date; lat: number; lng: number; accuracy_m: number; device_fp: string; ip: string } }) => {
     store.punchSeq += 1;
     const p = {
+      // Prisma's column default. A punch the employee made carries no
+      // system_generated in its payload, so without this the assertions that
+      // distinguish their punch from the system's would compare undefined.
+      system_generated: false,
       id: `p${store.punchSeq}`,
       ...data,
       corrected: false,
@@ -230,6 +236,19 @@ beforeEach(() => {
     };
     store.punches.push(p);
     return p;
+  });
+
+  mocks.flag.create.mockImplementation(async ({ data }: { data: { kind: Store['flags'][number]['kind']; user_id: string; context_json: unknown } }) => {
+    const f = {
+      id: `f${store.flags.length + 1}`,
+      user_id: data.user_id,
+      kind: data.kind,
+      resolved_at: null,
+      context_json: data.context_json,
+      created_at: new Date(),
+    };
+    store.flags.push(f);
+    return f;
   });
 
   mocks.blockedPunchAttempt.create.mockImplementation(async ({ data }: { data: Store['blocked'][number] }) => {
@@ -637,20 +656,19 @@ describe('self-resolving a session left open from a shift-day that is over', () 
     expect(store.blocked).toHaveLength(0);
   });
 
-  it('closes it on a clock-out too, instead of paying the runaway span', async () => {
+  it('closes it on a clock-out only once the session is past 30h', async () => {
     seedNightWorker();
-
+    // 31 hours after the arrival: past MAX_OPEN_SESSION_MIN, so not a shift.
     const r = await punchEmployee({
       userId: 'u1', kind: 'OUT', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
-      now: NEXT_EVENING,
+      now: new Date(NIGHT_BEFORE.getTime() + 31 * 3_600_000),
     });
 
     expect('punch' in r).toBe(true);
     if (!('punch' in r)) return;
     expect(r.systemClosedInsteadOfPunch).toBe(true);
-    // The employee's tap wrote no punch of its own: writing one at `now` is
-    // exactly the 24h payment this exists to stop, and backdating theirs would
-    // make the record lie about when they pressed the button.
+    // No punch of theirs: writing one at `now` pays the 31h span, and
+    // backdating theirs would make the record lie about when they pressed it.
     expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
     expect(r.minutes_since_in).toBe(480);
   });
@@ -732,6 +750,95 @@ describe('self-resolving a session left open from a shift-day that is over', () 
 
     expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
     expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(0);
+  });
+});
+
+/**
+ * The system may close a session out from under a check-in, because the
+ * check-in is itself evidence the old shift ended. It must NOT do that to a
+ * clock-out: the employee is standing there asserting the truth about their own
+ * shift. Overruling them at `required + grace` - the moment overtime begins -
+ * paid them the scheduled hours and wrote a record saying they left earlier
+ * than they did.
+ */
+describe('a clock-out the employee makes is never overruled below 30h', () => {
+  function seedWorker(weekday: number, shiftMin: number, arrivalAt: Date) {
+    const branch = makeBranch({ shift_grace_min: 15 });
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    if (shiftMin > 0) store.schedules.push({ user_id: 'u1', weekday, shift_min: shiftMin });
+    seedOpenIn(user.id, branch.id, arrivalAt);
+  }
+
+  async function clockOut(now: Date) {
+    return punchEmployee({
+      userId: 'u1', kind: 'OUT', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4', now,
+    });
+  }
+
+  it('night shift 21:00 clocking out 07:16 against 10h is paid 616 minutes, not 600', async () => {
+    // Saturday 21:00 Beirut, 10h scheduled. 07:16 Sunday is 616 minutes: past
+    // required + grace (615) by one minute, and 16 minutes of real overtime.
+    const arrival = new Date('2026-07-11T18:00:00Z');
+    seedWorker(6, 600, arrival);
+    const now = new Date('2026-07-12T04:16:00Z');
+
+    const r = await clockOut(now);
+    expect('punch' in r).toBe(true);
+    if (!('punch' in r)) return;
+    expect(r.minutes_since_in).toBe(616);
+    expect(r.systemClosedInsteadOfPunch).toBeUndefined();
+    const outs = store.punches.filter((p) => p.kind === 'OUT');
+    expect(outs).toHaveLength(1);
+    // Their own punch, at the instant they made it - not a backdated 07:00.
+    expect(outs[0]!.at.toISOString()).toBe(now.toISOString());
+    expect(outs[0]!.system_generated).toBe(false);
+  });
+
+  it('a late day shift 16:00 clocking out 00:40 against 8h is paid 520 minutes, not 480', async () => {
+    // Crosses midnight, so the arrival is an earlier Beirut calendar day and
+    // 520 > 480 + 15. Both check-in conditions are met; the clock-out must
+    // still take the employee at their word.
+    const arrival = new Date('2026-07-11T13:00:00Z'); // 16:00 Beirut Saturday
+    seedWorker(6, 480, arrival);
+    const now = new Date('2026-07-11T21:40:00Z'); // 00:40 Beirut Sunday
+
+    const r = await clockOut(now);
+    expect('punch' in r).toBe(true);
+    if (!('punch' in r)) return;
+    expect(r.minutes_since_in).toBe(520);
+    expect(r.systemClosedInsteadOfPunch).toBeUndefined();
+    expect(store.punches.find((p) => p.kind === 'OUT')!.at.toISOString()).toBe(now.toISOString());
+  });
+
+  it('a day-off helper 21:00 to 02:00 is paid 300 minutes, not one', async () => {
+    // Nothing scheduled, so requiredMin is 0 and required + grace is 15. Under
+    // the check-in threshold this paid three cents for a five-hour evening.
+    const arrival = new Date('2026-07-11T18:00:00Z');
+    seedWorker(6, 0, arrival);
+    const now = new Date('2026-07-11T23:00:00Z'); // 02:00 Beirut Sunday
+
+    const r = await clockOut(now);
+    expect('punch' in r).toBe(true);
+    if (!('punch' in r)) return;
+    expect(r.minutes_since_in).toBe(300);
+    expect(r.systemClosedInsteadOfPunch).toBeUndefined();
+    expect(store.punches.find((p) => p.kind === 'OUT')!.at.toISOString()).toBe(now.toISOString());
+  });
+
+  it('holds right up to the 30h boundary, and gives way one minute past it', async () => {
+    const arrival = new Date('2026-07-11T18:00:00Z');
+    seedWorker(6, 600, arrival);
+
+    const atBoundary = await clockOut(new Date(arrival.getTime() + 30 * 3_600_000));
+    expect('punch' in atBoundary && atBoundary.systemClosedInsteadOfPunch).toBeUndefined();
+    expect(store.punches.find((p) => p.kind === 'OUT')!.system_generated).toBe(false);
+
+    store.punches.length = 0;
+    seedOpenIn('u1', 'b1', arrival);
+    const past = await clockOut(new Date(arrival.getTime() + 30 * 3_600_000 + 60_000));
+    expect('punch' in past && past.systemClosedInsteadOfPunch).toBe(true);
+    expect(store.punches.find((p) => p.kind === 'OUT')!.system_generated).toBe(true);
   });
 });
 

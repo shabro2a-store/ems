@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { apiGet, apiSend, centsToUsd, csrfFromCookie, errorMessage } from '@/lib/api';
+import { apiGet, apiSend, centsToUsd, csrfFromCookie, errorMessage, formatBeirutTime } from '@/lib/api';
 import { PageHeader, Card, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile } from '@/components/ui';
 
 interface Row {
@@ -56,6 +56,7 @@ export default function AdminPayrollPage() {
   const [rateFor, setRateFor] = useState<Row | null>(null);
   const [penaltiesFor, setPenaltiesFor] = useState<Row | null>(null);
   const [overtimeFor, setOvertimeFor] = useState<Row | null>(null);
+  const [blockedCreditFor, setBlockedCreditFor] = useState<Row | null>(null);
   const [salaryFor, setSalaryFor] = useState<Row | null>(null);
 
   async function load() {
@@ -192,14 +193,17 @@ export default function AdminPayrollPage() {
                         </td>
                         <td className="tabular px-4 py-2.5 text-right">
                           {centsToUsd(r.gross_cent)}
-                          {r.blocked_credit_cent > 0 && (
-                            <span
-                              className="block text-[11px] font-normal text-muted"
-                              title="Time this employee was at the branch but the app would not let them clock in. Already inside the gross figure above."
-                            >
-                              incl. {centsToUsd(r.blocked_credit_cent)} blocked
-                            </span>
-                          )}
+                          {/* Always offered, not only when something is credited:
+                              the whole point of this surface is reaching a day
+                              that is waiting or has gone stale, and both of those
+                              contribute nothing to the figure above. */}
+                          <button
+                            onClick={() => setBlockedCreditFor(r)}
+                            className="block w-full border-b border-dashed border-primary/40 text-right text-[11px] font-normal text-muted hover:text-primary"
+                            title="Time this employee was at the branch but the app would not let them clock in. Review, accept or undo."
+                          >
+                            {r.blocked_credit_cent > 0 ? `incl. ${centsToUsd(r.blocked_credit_cent)} blocked` : 'blocked time'}
+                          </button>
                         </td>
                         <td className={`tabular px-4 py-2.5 text-right font-medium ${r.adjustments_cent > 0 ? 'text-success' : r.adjustments_cent < 0 ? 'text-danger' : 'text-muted'}`}>
                           {r.adjustments_cent === 0 ? '—' : `${r.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(r.adjustments_cent), false)}`}
@@ -274,6 +278,9 @@ export default function AdminPayrollPage() {
       )}
       {penaltiesFor && (
         <PenaltiesModal row={penaltiesFor} month={month} onClose={() => setPenaltiesFor(null)} onChanged={() => { setMsg('Penalty updated.'); load(); }} />
+      )}
+      {blockedCreditFor && (
+        <BlockedCreditModal row={blockedCreditFor} month={month} onClose={() => setBlockedCreditFor(null)} onChanged={() => { setMsg('Blocked time updated.'); load(); }} />
       )}
       {overtimeFor && (
         <OvertimeModal row={overtimeFor} month={month} onClose={() => setOvertimeFor(null)} onChanged={() => { setMsg('Overtime updated.'); load(); }} />
@@ -535,6 +542,112 @@ function OvertimeModal({ row, month, onClose, onChanged }: { row: Row; month: st
                     </>
                   ) : (
                     <Button size="sm" variant="secondary" loading={busy === `${o.date}|PENDING`} onClick={() => decide(o, 'PENDING')}>
+                      Undo
+                    </Button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Modal>
+  );
+}
+
+interface BlockedCreditItem {
+  date: string;
+  blocked_at: string;
+  credit_from_at: string;
+  clocked_in_at: string;
+  waitedMin: number;
+  creditedMin: number;
+  amount_cent: number;
+  decision: 'ACCEPTED' | 'REVOKED' | null;
+}
+
+function creditState(d: BlockedCreditItem['decision']): { label: string; tone: string } {
+  if (d === 'REVOKED') return { label: 'Not credited', tone: 'text-muted' };
+  if (d === 'ACCEPTED') return { label: 'Credited — paid', tone: 'text-success' };
+  return { label: 'Waiting on you — not paid', tone: 'text-warning' };
+}
+
+// The attention queue reaches back only seven days and only shows undecided
+// days, which left a credit older than that withheld with no way to reach it —
+// and an accepted credit that went stale after a punch correction dropping out
+// of a past month's gross with nothing to prompt anyone. This is the
+// month-scoped surface, mirroring the penalty and overtime modals.
+function BlockedCreditModal({ row, month, onClose, onChanged }: { row: Row; month: string; onClose: () => void; onChanged: () => void }) {
+  const [items, setItems] = useState<BlockedCreditItem[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    const r = await apiGet<{ credits: BlockedCreditItem[] }>(`/api/admin/blocked-credit?userId=${row.user_id}&month=${month}`);
+    if (r.ok) setItems(r.data.credits);
+    else setErr(errorMessage(r));
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  async function decide(c: BlockedCreditItem, decision: 'ACCEPTED' | 'REVOKED' | 'PENDING') {
+    const id = `${c.date}|${decision}`;
+    setBusy(id); setErr(null);
+    const res = await apiSend('/api/admin/blocked-credit/decision', {
+      idempotent: true, idemPrefix: 'bc',
+      // This modal does not poll, so the figure on screen can go stale while it
+      // sits open. Sending it lets the server refuse a ruling made against an
+      // amount that no longer exists.
+      body: { userId: row.user_id, date: c.date, decision, creditedMin: c.creditedMin },
+    });
+    setBusy(null);
+    if (!res.ok) {
+      setErr(errorMessage(res));
+      await load();
+      return;
+    }
+    setItems((prev) => prev?.map((x) => (x.date === c.date ? { ...x, decision: decision === 'PENDING' ? null : decision } : x)) ?? null);
+    onChanged();
+  }
+
+  return (
+    <Modal title={`Blocked time · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      <p className="mb-3 text-sm text-muted">
+        Time the app refused their check-in for while they were at the branch. Nothing is paid until you
+        accept it, and an accepted day that later changes goes back to waiting — so a day here may need
+        approving again after you correct a punch.
+      </p>
+      {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
+      {items === null ? (
+        <div className="grid place-items-center py-8 text-muted"><Spinner /></div>
+      ) : items.length === 0 ? (
+        <EmptyState title="No blocked time" hint="Nothing was refused for this employee this month." />
+      ) : (
+        <ul className="divide-y divide-border">
+          {items.map((c) => {
+            const state = creditState(c.decision);
+            return (
+              <li key={c.date} className="flex items-center justify-between gap-3 py-2.5">
+                <div>
+                  <div className="text-sm font-medium">
+                    <span className="tabular">{c.creditedMin} min</span> could not be clocked
+                  </div>
+                  <div className="text-xs text-muted">
+                    {c.date} · turned away {formatBeirutTime(c.blocked_at)}, in {formatBeirutTime(c.clocked_in_at)} ·{' '}
+                    {centsToUsd(c.amount_cent)} · <span className={state.tone}>{state.label}</span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  {c.decision === null ? (
+                    <>
+                      <Button size="sm" variant="secondary" loading={busy === `${c.date}|ACCEPTED`} onClick={() => decide(c, 'ACCEPTED')}>
+                        Accept
+                      </Button>
+                      <Button size="sm" variant="ghost" loading={busy === `${c.date}|REVOKED`} onClick={() => decide(c, 'REVOKED')}>
+                        Revoke
+                      </Button>
+                    </>
+                  ) : (
+                    <Button size="sm" variant="secondary" loading={busy === `${c.date}|PENDING`} onClick={() => decide(c, 'PENDING')}>
                       Undo
                     </Button>
                   )}

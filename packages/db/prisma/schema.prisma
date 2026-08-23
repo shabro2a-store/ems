@@ -365,11 +365,12 @@ model OvertimeDecision {
   @@index([user_id, date])
 }
 
-// The owner has reviewed one day's blocked-time credit. No row means pending,
-// and pending credit is already granted - it is inside gross and it has already
-// cancelled that day's shortfall. ACCEPTED changes no money and only clears the
-// notice; REVOKED withholds the credit, which is why there is no deduction line
-// anywhere for it - nothing was paid out that has to be taken back.
+// The owner's ruling on one day's blocked-time credit. No row means pending,
+// and pending credit grants NOTHING - the inverse of OvertimeDecision, where
+// the pending day is the paid one. ACCEPTED is what puts the minutes into gross
+// and clears that day's shortfall; REVOKED moves no money at all and only
+// clears the notice, which is why nothing anywhere carries a deduction line for
+// it. A stale ruling reads as pending, so it withholds rather than pays.
 model BlockedCreditDecision {
   id           String             @id @default(cuid())
   user_id      String

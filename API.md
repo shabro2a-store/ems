@@ -63,10 +63,14 @@ carries a message written for the employee's phone — the endpoint used to rend
 
 A check-in that meets a session left open from a shift-day that is over does NOT
 fail: that session is closed at its scheduled hours and the punch goes through,
-returning `system_closed_at` and a `notice` for the employee. A clock-out in the
-same situation also closes it and returns `system_closed_instead_of_punch: true`
-- no punch of theirs is written, because writing one at `now` pays the runaway
-span. See the punch gate order in SYSTEM_MAP §4.
+returning `system_closed_at` and a `notice` for the employee.
+
+A **clock-out** is only overruled once the open session is past
+`MAX_OPEN_SESSION_MIN`, and then returns `system_closed_instead_of_punch: true`
+with no punch of theirs written. Below that the employee's own OUT is recorded
+at `now`, however far past their scheduled hours it is - overruling them there
+truncated real overtime and wrote a record saying they left earlier than they
+did. See the asymmetry in SYSTEM_MAP §4.
 
 `ALREADY_PUNCHED_IN` is therefore only reached by a duplicate tap on a live
 session, and its message says to clock out first. It **records a
@@ -92,10 +96,11 @@ made a live earnings ticker a source of friction. The caller's own payslip
   past midnight. This is what the tile labelled "Today" shows. It counts accepted
   blocked-time credit for that day, because `hours_month` does - the two used to
   disagree about the same day on the same screen.
-- `open_session_stale` marks an open session belonging to a shift-day that is over.
-  The field screens must not offer a bare clock-out on one: that writes a checkout at
-  `now` and pays the whole runaway span. They show a warning and offer check-in, which
-  closes the old shift at its scheduled hours.
+- `open_session_stale` marks an open session past **MAX_OPEN_SESSION_MIN** - no longer
+  a shift at all. Only then do the screens hide the clock-out button, show a warning and
+  offer check-in instead. Deliberately NOT the check-in threshold: the screens derive
+  `isIn` from this on a 30 second poll, so a night worker minutes past their grace would
+  watch the button vanish mid-shift.
 
 ### GET /api/me/payroll?month=YYYY-MM
 → `200 { hours, gross_cent, blocked_credit_cent, blocked_credit_min, adjustments_cent,

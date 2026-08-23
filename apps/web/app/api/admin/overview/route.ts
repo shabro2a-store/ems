@@ -20,7 +20,7 @@ const PUNCH_LOOKBACK_DAYS = 2;
 // why the system raised it. The detail is already in context_json — this turns it
 // into the sentence the admin actually needs.
 function flagReason(kind: string, ctx: unknown): string {
-  const c = (ctx ?? {}) as { shift_min?: number; over_min?: number };
+  const c = (ctx ?? {}) as { shift_min?: number; over_min?: number; zero_required_auto_close?: boolean };
   const mins = typeof c.over_min === 'number' ? c.over_min : null;
   const late = mins === null ? '' : mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
   switch (kind) {
@@ -29,6 +29,13 @@ function flagReason(kind: string, ctx: unknown): string {
         ? `No punch at all - they were scheduled ${Math.round(c.shift_min / 60)}h.`
         : 'No punch at all on a scheduled day.';
     case 'MISSED_CHECKOUT':
+      // A 0-required close is the one case where the shift is already over: the
+      // system closed it, and because the day owed nothing it paid a minute. No
+      // other job watches these days, so this row is the only prompt to correct
+      // the punch or pay a bonus.
+      if (c.zero_required_auto_close) {
+        return `Clocked in on a day off and never clocked out${late ? ` — open ${late}` : ''}. Closed automatically, so the day paid almost nothing. Correct the punch or add a bonus.`;
+      }
       return c.shift_min
         ? `Still clocked in past their ${Math.round(c.shift_min / 60)}h shift${late ? `, ${late} over` : ''}. Overtime, or forgot to punch out?`
         : 'Still clocked in well past the end of their shift.';

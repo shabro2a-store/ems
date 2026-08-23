@@ -462,15 +462,9 @@ describe('punch integration (HTTP)', () => {
     ).toBe(1);
   });
 
-  it('clocking out of a shift left open yesterday closes it at its hours, not at now', async () => {
-    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
-    const user = await seedTestUser({ username: 'emp-staleout', branch_id: branch.id });
-    const yesterday = new Date(Date.now() - 26 * 3_600_000);
-    await seedTestSchedule({ user_id: user.id, weekday: beirutWeekday(yesterday), shift_min: 480 });
-    await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: yesterday });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
-
-    const res = await fetch(`${BASE_URL}/api/me/punch`, {
+  async function punchOut(username: string, deviceFp: string) {
+    const { cookies, csrf } = await loginAs(username, 'change-me');
+    return fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -478,17 +472,48 @@ describe('punch integration (HTTP)', () => {
         'X-CSRF-Token': csrf,
         Cookie: cookies,
       },
-      body: JSON.stringify({ kind: 'OUT', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'fp-so' }),
+      body: JSON.stringify({ kind: 'OUT', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp }),
     });
+  }
 
+  it('clocking out well past the scheduled hours records the employee’s own punch', async () => {
+    // 26h open: past required + grace and on an earlier Beirut day, so the
+    // check-in rule would have closed it and paid 8h. The employee is the one
+    // asserting when their shift ended, and below 30h they are believed.
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-lateout', branch_id: branch.id });
+    const arrival = new Date(Date.now() - 26 * 3_600_000);
+    await seedTestSchedule({ user_id: user.id, weekday: beirutWeekday(arrival), shift_min: 480 });
+    await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: arrival });
+
+    const res = await punchOut(user.username, 'fp-lateout');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.system_closed_instead_of_punch).toBeUndefined();
+    // ~26h, not the scheduled 480 minutes.
+    expect(body.data.minutes_since_in).toBeGreaterThan(1500);
+
+    const punches = await getTestPrisma().punch.findMany({ where: { user_id: user.id }, orderBy: { at: 'asc' } });
+    expect(punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
+    expect(punches[1]!.system_generated).toBe(false);
+  });
+
+  it('clocking out of a session past 30h closes it at its hours instead', async () => {
+    const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
+    const user = await seedTestUser({ username: 'emp-staleout', branch_id: branch.id });
+    const arrival = new Date(Date.now() - 40 * 3_600_000);
+    await seedTestSchedule({ user_id: user.id, weekday: beirutWeekday(arrival), shift_min: 480 });
+    await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: arrival });
+
+    const res = await punchOut(user.username, 'fp-so');
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.system_closed_instead_of_punch).toBe(true);
     const punches = await getTestPrisma().punch.findMany({ where: { user_id: user.id }, orderBy: { at: 'asc' } });
     // Exactly one checkout, and it is the system's at 8h - not the employee's
-    // at 26h, which is what payroll used to be handed.
+    // at 40h, which is what payroll used to be handed.
     expect(punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
-    expect(punches[1]!.at.getTime()).toBe(yesterday.getTime() + 480 * 60_000);
+    expect(punches[1]!.at.getTime()).toBe(arrival.getTime() + 480 * 60_000);
     expect(punches[1]!.system_generated).toBe(true);
   });
 });

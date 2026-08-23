@@ -1,6 +1,6 @@
 import type { PrismaClient, Punch } from '@prisma/client';
 import { inBeirut, beirutWeekday } from 'time';
-import { requiredMinFor } from './coverage';
+import { requiredMinFor, MAX_OPEN_SESSION_MIN } from './coverage';
 
 /**
  * When a check-in nobody closed is deemed to have ended.
@@ -34,8 +34,46 @@ export interface StaleSessionCheck {
 }
 
 /**
+ * Whether an open check-in has stopped being a shift at all.
+ *
+ * The only basis on which the system may overrule a punch the employee is
+ * making right now. `MAX_OPEN_SESSION_MIN` is the codebase's own definition of
+ * "no longer a shift" - above a full 24h `shift_min`, so no real shift reaches
+ * it - and it is the one threshold the dashboard, the sweep and this all share.
+ *
+ * NOT `staleSessionClose`. That fires at `required + grace`, which is exactly
+ * when legitimate overtime begins - the reason autoCloseAbandoned refuses to
+ * trigger there. Applying it to a clock-out discarded the employee's own punch
+ * and paid them the scheduled hours instead: a night worker on a 10h shift who
+ * clocked out at 07:16 worked 616 minutes, was paid 600, and the record said
+ * they left at 07:00. Between `required + grace` and 30h an overrun is
+ * plausibly real work, and the overtime notice is the control the owner
+ * already has for it.
+ */
+export function abandonedSessionClose(args: {
+  arrivalAt: Date;
+  now: Date;
+  requiredMin: number;
+}): StaleSessionCheck | null {
+  const elapsedMin = Math.floor((args.now.getTime() - args.arrivalAt.getTime()) / 60_000);
+  if (elapsedMin <= MAX_OPEN_SESSION_MIN) return null;
+  const closeAt = systemCheckoutAt(args.arrivalAt, args.requiredMin);
+  // Always true at this point (the close is at most 24h past the arrival and
+  // the arrival is over 30h old), but the guard is what stops a checkout that
+  // no "is this open" query can see - see systemCheckoutAt.
+  if (closeAt.getTime() >= args.now.getTime()) return null;
+  return { closeAt, requiredMin: args.requiredMin };
+}
+
+/**
  * Whether an open check-in belongs to a shift-day that is over, and so may be
- * closed by the system rather than by the employee.
+ * closed when the employee starts a NEW shift.
+ *
+ * Check-in only. The new check-in is itself the evidence the old shift ended,
+ * and nothing the employee made is discarded - their IN is still written at
+ * `now`. On a clock-out the employee is standing there asserting the truth
+ * about their own shift, and the system must not overrule them; that path uses
+ * abandonedSessionClose.
  *
  * Two conditions, and both are needed:
  *
@@ -104,7 +142,7 @@ export async function writeSystemCheckout(
     closeAt: Date;
     requiredMin: number;
     now: Date;
-    trigger: 'abandoned_sweep' | 'blocked_check_in';
+    trigger: 'abandoned_sweep' | 'new_check_in' | 'stale_clock_out';
     reason: string;
   },
 ): Promise<Punch | null> {
@@ -155,6 +193,28 @@ export async function writeSystemCheckout(
         },
       },
     });
+
+    // A day that owed nothing goes entirely unwatched: missedCheckout skips
+    // 0-required days, watchedDetector skips them too, and deltaMin >= 0 means
+    // no penalty row - so a day-off helper who forgot to clock out is paid
+    // three cents for an evening and nobody is ever told. The one-minute floor
+    // is the lockout cure, not a notice. This is the notice.
+    if (args.requiredMin === 0) {
+      await tx.flag.create({
+        data: {
+          kind: 'MISSED_CHECKOUT',
+          user_id: args.userId,
+          branch_id: args.branchId,
+          context_json: {
+            shift_min: 0,
+            over_min: Math.floor((args.now.getTime() - args.arrivalAt.getTime()) / 60_000),
+            zero_required_auto_close: true,
+            in_at: args.arrivalAt.toISOString(),
+            closed_at: punch.at.toISOString(),
+          },
+        },
+      });
+    }
 
     return punch;
   });

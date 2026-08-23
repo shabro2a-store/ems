@@ -1,6 +1,6 @@
 -- The owner's ruling on one day's blocked-time credit. No row means pending,
--- and pending credit is already granted, so ACCEPTED moves no money and
--- REVOKED withholds rather than claws back.
+-- and pending credit grants nothing: ACCEPTED is what pays it, REVOKED moves no
+-- money at all. The inverse of OvertimeDecision, where pending is already paid.
 
 -- CreateEnum
 CREATE TYPE "CreditDecisionKind" AS ENUM ('ACCEPTED', 'REVOKED');

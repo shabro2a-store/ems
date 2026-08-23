@@ -1,8 +1,14 @@
 import type { PrismaClient, Punch } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
+import { MAX_OPEN_SESSION_MIN } from './coverage';
 import { writeAuditLog } from './audit';
-import { requiredMinForArrival, staleSessionClose, writeSystemCheckout } from './autoClose';
+import {
+  abandonedSessionClose,
+  requiredMinForArrival,
+  staleSessionClose,
+  writeSystemCheckout,
+} from './autoClose';
 import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
@@ -127,19 +133,32 @@ export async function punchEmployee(
   // the entire runaway span; and a night worker refused at 21:00 with no
   // check-in that Beirut day lost the night with nothing on any queue.
   //
-  // staleSessionClose is deliberately strict about what "a shift-day that is
-  // over" means: a second tap on the same day is a duplicate, and closing a
-  // shift somebody is in the middle of would take their hours.
+  // The threshold is ASYMMETRIC, and that is the whole of it. On a check-in the
+  // new punch is itself the evidence the old shift ended, and nothing the
+  // employee made is discarded - so `required + grace` on an earlier Beirut day
+  // is enough. On a clock-out the employee is standing there asserting the
+  // truth about their own shift, and the system must not overrule them: only a
+  // session past MAX_OPEN_SESSION_MIN, which is no longer a shift by the
+  // codebase's own definition, may be closed out from under a punch they made.
+  //
+  // Using the check-in threshold on the clock-out path silently truncated real
+  // work: a night worker on a 10h shift clocking out at 07:16 was paid 600
+  // minutes for 616, and the record said 07:00. Between `required + grace` and
+  // 30h the overrun is plausibly real, and the overtime notice is the control
+  // the owner already has for it.
   let systemClosed: Punch | null = null;
   let resolvedStaleSession = false;
   if (hasOpenSession) {
     const requiredMin = await requiredMinForArrival(db, user.id, openIn!.at);
-    const stale = staleSessionClose({
-      arrivalAt: openIn!.at,
-      now,
-      requiredMin,
-      graceMin: user.branch.shift_grace_min,
-    });
+    const stale =
+      input.kind === 'IN'
+        ? staleSessionClose({
+            arrivalAt: openIn!.at,
+            now,
+            requiredMin,
+            graceMin: user.branch.shift_grace_min,
+          })
+        : abandonedSessionClose({ arrivalAt: openIn!.at, now, requiredMin });
     if (stale) {
       resolvedStaleSession = true;
       systemClosed = await writeSystemCheckout(db, {
@@ -152,13 +171,18 @@ export async function punchEmployee(
         closeAt: stale.closeAt,
         requiredMin: stale.requiredMin,
         now,
-        trigger: 'blocked_check_in',
+        trigger: input.kind === 'IN' ? 'new_check_in' : 'stale_clock_out',
         reason:
-          `Check-in refused would have blocked ${user.username}: the session opened ` +
-          `${openIn!.at.toISOString()} belongs to a shift-day that is over and had run past its ` +
-          `${stale.requiredMin} min plus the branch grace. Closed at check-in plus those ${stale.requiredMin} ` +
-          `min, on the evidence of a geofence-passing punch at the branch now. Overtime actually worked ` +
-          `that night is not included and must be added as a bonus.`,
+          input.kind === 'IN'
+            ? `${user.username} started a new shift while the session opened ${openIn!.at.toISOString()} ` +
+              `was still open. That session belongs to a shift-day that is over and had run past its ` +
+              `${stale.requiredMin} min plus the branch grace, and a geofence-passing check-in now is ` +
+              `evidence it ended. Closed at check-in plus those ${stale.requiredMin} min. Overtime ` +
+              `actually worked that night is not included and must be added as a bonus.`
+            : `${user.username} tried to clock out of the session opened ${openIn!.at.toISOString()}, ` +
+              `which had been open past the ${MAX_OPEN_SESSION_MIN} min abandoned threshold and is no ` +
+              `longer a shift. Closed at check-in plus the ${stale.requiredMin} min that day required ` +
+              `rather than paying the whole span. No punch of theirs was written.`,
       });
     }
   }

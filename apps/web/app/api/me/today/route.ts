@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db/prisma';
 import { currentOpenIn } from '@/lib/services/punch';
 import { payoutForUser } from '@/lib/services/payout';
 import { currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
-import { requiredMinForArrival, staleSessionClose } from '@/lib/services/autoClose';
+import { abandonedSessionClose, requiredMinForArrival } from '@/lib/services/autoClose';
 import { grantedCreditMinutesByDate } from '@/lib/services/blockedCredit';
 import { todayInBeirut, todayInBeirutDateRange } from 'time';
 
@@ -29,17 +29,13 @@ export async function GET() {
   const { startUtc, endUtc } = todayInBeirutDateRange(todayStr);
   const punchesFromUtc = new Date(startUtc.getTime() - PUNCH_LOOKBACK_DAYS * 86_400_000);
 
-  const [open, payout, punches, user, creditByUser] = await Promise.all([
+  const [open, payout, punches, creditByUser] = await Promise.all([
     currentOpenIn(userId),
     payoutForUser(userId, month, prisma),
     prisma.punch.findMany({
       where: { user_id: userId, at: { gte: punchesFromUtc, lt: endUtc } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
-    }),
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { branch: { select: { shift_grace_min: true } } },
     }),
     // hours_month comes through payoutForUser and already counts accepted
     // blocked-time credit. Leaving it out of the day figure put two numbers
@@ -53,24 +49,22 @@ export async function GET() {
     creditedMinByDate: creditByUser.get(userId),
   });
 
-  // Whether the open session belongs to a shift-day that is over. The field
-  // screens must not offer a bare clock-out on one: tapping it wrote a checkout
-  // at `now` and payroll paid the entire runaway span, which is exactly the
-  // failure the auto-close exists to prevent - and it meant the employee never
-  // saw the block at all. Same predicate punch.ts uses to decide whether to
-  // close the session itself, so the screen and the server cannot disagree.
+  // Whether the open session has stopped being a shift at all - past
+  // MAX_OPEN_SESSION_MIN. Only then do the field screens hide the clock-out
+  // button, because only then is a clock-out something the server will refuse
+  // to take at face value.
+  //
+  // This must NOT be the check-in threshold (`required + grace`). The screens
+  // compute `isIn = Boolean(in_at) && !stale` on a 30 second poll, so a night
+  // worker sixteen minutes past their grace would watch the button vanish
+  // mid-shift - and a driver would lose the trip button with it. Same predicate
+  // the clock-out path uses, so the screen and the server cannot disagree.
   const staleOpenSession = open
-    ? (await (async () => {
-        const requiredMin = await requiredMinForArrival(prisma, userId, open.in_at);
-        return (
-          staleSessionClose({
-            arrivalAt: open.in_at,
-            now,
-            requiredMin,
-            graceMin: user?.branch?.shift_grace_min ?? 15,
-          }) !== null
-        );
-      })())
+    ? abandonedSessionClose({
+        arrivalAt: open.in_at,
+        now,
+        requiredMin: await requiredMinForArrival(prisma, userId, open.in_at),
+      }) !== null
     : false;
 
   return NextResponse.json({

@@ -22,9 +22,10 @@ const store: {
   schedules: ScheduleRow[];
   overrides: OverrideRow[];
   audits: AuditRow[];
+  flags: Array<{ kind: string; user_id: string; context_json: unknown }>;
   branches: Map<string, { lat: number; lng: number }>;
   seq: number;
-} = { users: [], punches: [], schedules: [], overrides: [], audits: [], branches: new Map(), seq: 0 };
+} = { users: [], punches: [], schedules: [], overrides: [], audits: [], flags: [], branches: new Map(), seq: 0 };
 
 import { runAutoCloseAbandoned, MAX_OPEN_SESSION_MIN, systemCheckoutAt } from './autoCloseAbandoned';
 
@@ -34,6 +35,7 @@ function resetStore() {
   store.schedules.length = 0;
   store.overrides.length = 0;
   store.audits.length = 0;
+  store.flags.length = 0;
   store.branches.clear();
   store.branches.set('b1', { lat: 33.8962, lng: 35.4827 });
   store.seq = 0;
@@ -79,6 +81,12 @@ function makeDb() {
     auditLog: {
       create: async ({ data }: { data: AuditRow }) => {
         store.audits.push(data);
+        return data;
+      },
+    },
+    flag: {
+      create: async ({ data }: { data: { kind: string; user_id: string; context_json: unknown } }) => {
+        store.flags.push(data);
         return data;
       },
     },
@@ -251,6 +259,13 @@ describe('runAutoCloseAbandoned', () => {
     // A minute at $2.00/h floors to 3 cents. The ruling says zero; three cents
     // is what a record visible to the guards costs.
     expect(grossCentOfStore()).toBe(3);
+
+    // Nothing else watches a 0-required day - missedCheckout and
+    // watchedDetector both skip them, and deltaMin >= 0 raises no penalty - so
+    // without this flag the owner is never told an evening paid three cents.
+    expect(store.flags).toHaveLength(1);
+    expect(store.flags[0]!.kind).toBe('MISSED_CHECKOUT');
+    expect(store.flags[0]!.context_json).toMatchObject({ shift_min: 0, zero_required_auto_close: true });
 
     // The session is now genuinely closed: nothing more to do, ever.
     expect((await runAutoCloseAbandoned({ db: db as never, now })).closed).toBe(0);
