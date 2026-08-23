@@ -202,6 +202,17 @@ Without a bot token the app still works — alerts just stay in the dashboard's
 5. In the app as admin: **Dashboard → Telegram alerts → Connect**. It shows a
    6-digit code; send `/start <code>` to the bot from the phone that should receive
    alerts.
+6. Press **Send test** on the same card. Nothing before this step proves a message can
+   actually be delivered — a token short one character and a bot the phone later blocked
+   both read as connected. If it fails, the message names which of the two to fix.
+
+**There is no chat id to configure.** The phone binds itself with the code; the id it
+reports is stored against the admin account. Nothing about the handset lives in `.env`,
+so replacing it is a new `/start <code>` and nothing else.
+
+**If the phone is lost or leaves with somebody**, press **Disconnect** on the same card.
+It clears the binding on every admin account, tells the chat it was cut off, and is
+audited. Alerts stop until a phone is bound again.
 
 **Binding is code-gated on purpose.** The webhook secret only proves a request came
 from Telegram, not *who* messaged the bot, so a bare `/start` is refused — otherwise

@@ -66,8 +66,18 @@ export async function POST(req: Request) {
     // screen displays. Without it any stranger who found the bot could point
     // the whole alert feed at their own chat.
     const supplied = text.slice('/start'.length).trim();
-    const admin = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
-    if (!admin) {
+    // Every admin, not findFirst. The code shown in the app is derived from the
+    // id of the admin who is logged in (see currentBindCode); an unordered
+    // findFirst here checked it against a possibly different admin, so with two
+    // admin accounts a perfectly valid code could never verify. Trying them all
+    // makes the two sides agree by construction rather than by luck of row
+    // order, and the HMAC is what decides - not the query.
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN' },
+      orderBy: { created_at: 'asc' },
+      select: { id: true, username: true },
+    });
+    if (admins.length === 0) {
       return jsonError('NOT_FOUND', 'No admin user found', 404);
     }
 
@@ -79,7 +89,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, data: { needsCode: true } });
     }
 
-    if (!verifyBindCode(admin.id, supplied)) {
+    const admin = admins.find((a) => verifyBindCode(a.id, supplied));
+    if (!admin) {
       await reply(chatId, `❌ That code is wrong or expired. Codes last 10 minutes — grab a fresh one from the app and try again.`);
       return NextResponse.json({ ok: true, data: { rejected: true } });
     }

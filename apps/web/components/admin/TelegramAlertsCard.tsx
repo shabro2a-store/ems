@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { apiGet } from '@/lib/api';
-import { Card, CardBody, CardHeader, Badge, Button, Spinner } from '@/components/ui';
+import { apiGet, apiSend } from '@/lib/api';
+import { Card, CardBody, CardHeader, Badge, Button, Spinner, Alert } from '@/components/ui';
 
 interface BindState {
   code: string;
@@ -11,10 +11,18 @@ interface BindState {
   bot_configured: boolean;
 }
 
+interface TestResult {
+  delivered: boolean;
+  reason?: string;
+  message?: string;
+}
+
 export function TelegramAlertsCard() {
   const [state, setState] = useState<BindState | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCode, setShowCode] = useState(false);
+  const [busy, setBusy] = useState<'test' | 'disconnect' | null>(null);
+  const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
 
   const load = useCallback(async () => {
     const res = await apiGet<BindState>('/api/admin/telegram/code');
@@ -32,6 +40,41 @@ export function TelegramAlertsCard() {
     const t = setInterval(() => void load(), 30_000);
     return () => clearInterval(t);
   }, [showCode, load]);
+
+  const sendTest = useCallback(async () => {
+    setBusy('test');
+    setBanner(null);
+    const res = await apiSend<TestResult>('/api/admin/telegram/test');
+    setBusy(null);
+    if (!res.ok) {
+      setBanner({ tone: 'danger', text: res.error.message });
+      return;
+    }
+    setBanner(
+      res.data.delivered
+        ? { tone: 'success', text: 'Sent. Check the phone — if nothing arrived, the chat is bound to a different one.' }
+        : { tone: 'danger', text: res.data.message ?? 'The test message was not delivered.' },
+    );
+    await load();
+  }, [load]);
+
+  const disconnect = useCallback(async () => {
+    // The phone is company property in somebody else's pocket, so this is the
+    // button you reach for when it goes missing. Confirm it, because pressing
+    // it by accident silences every alert until somebody notices.
+    if (!window.confirm('Stop sending alerts to the bound phone? You can bind it again at any time.')) return;
+    setBusy('disconnect');
+    setBanner(null);
+    const res = await apiSend('/api/admin/telegram/disconnect');
+    setBusy(null);
+    setShowCode(false);
+    if (!res.ok) {
+      setBanner({ tone: 'danger', text: res.error.message });
+      return;
+    }
+    setBanner({ tone: 'success', text: 'Disconnected. No alerts will reach that phone.' });
+    await load();
+  }, [load]);
 
   if (loading) {
     return (
@@ -60,7 +103,7 @@ export function TelegramAlertsCard() {
           </p>
         ) : (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge tone={state.bound ? 'success' : 'warning'}>
                 {state.bound ? 'Connected' : 'Not connected'}
               </Badge>
@@ -69,7 +112,31 @@ export function TelegramAlertsCard() {
                   {state.bound ? 'Bind another chat' : 'Connect'}
                 </Button>
               )}
+              {state.bound && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={busy === 'test'}
+                    disabled={busy !== null}
+                    onClick={() => void sendTest()}
+                  >
+                    Send test
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    loading={busy === 'disconnect'}
+                    disabled={busy !== null}
+                    onClick={() => void disconnect()}
+                  >
+                    Disconnect
+                  </Button>
+                </>
+              )}
             </div>
+
+            {banner && <Alert tone={banner.tone}>{banner.text}</Alert>}
 
             {showCode && (
               <div className="space-y-2">

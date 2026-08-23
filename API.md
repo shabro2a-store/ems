@@ -384,6 +384,18 @@ so it surfaces in payroll only if revoked.
   The 6-digit code the admin sends the bot as `/start <code>`. Derived by HMAC from
   `JWT_SECRET` over a 10-minute window, so nothing is stored and nothing expires in the
   DB. A bare `/start`, or a wrong/expired code, is refused — see the webhook below.
+- **POST /api/admin/telegram/test** *(CSRF)* → `{ delivered }`, and on failure
+  `{ delivered: false, reason, message }` where `reason` is `NOT_BOUND`, `NO_TOKEN` or
+  `TELEGRAM_ERROR`. Sends a real message to the chat **the notifier resolves**, not to the
+  caller's own row — a test that proves a different chat works is worse than no test.
+  `bot_configured` and `bound` only say a token and a chat id exist; a token typed one
+  character short, a blocked bot, or a chat lost to a reinstall all read as connected and
+  deliver nothing. This is the only thing that proves delivery.
+- **POST /api/admin/telegram/disconnect** *(CSRF)* → `{ was_bound, cleared }`. Clears the
+  binding on **every** admin account and best-effort tells each chat it was cut off;
+  audited as `telegram.disconnect` per row. All accounts, not just the caller's, because
+  the button promises alerts stop — a disconnect that leaves the notifier resolving another
+  admin's chat is the worst outcome available. Re-binding costs one code.
 
 ---
 
@@ -413,7 +425,10 @@ Guarded by the `x-telegram-bot-api-secret-token` header vs `TELEGRAM_WEBHOOK_SEC
 That header proves the request came **from Telegram**, not *who* messaged the bot, so
 binding is additionally gated on a code from `GET /api/admin/telegram/code`:
 
-- `/start <valid code>` → binds that chat to the admin. `200 { bound }`
+- `/start <valid code>` → binds that chat to the admin whose code it is. The code is
+  checked against **every** admin account, because the code shown in the app is derived
+  from the id of whoever is logged in; matching against one arbitrary admin meant a valid
+  code could never verify once a second admin existed. `200 { bound }`
 - `/start` with no code → `200 { needsCode: true }`, replies with instructions
 - `/start <wrong or expired code>` → `200 { rejected: true }`, no binding
 - `/help` → `200 { helped: true }`

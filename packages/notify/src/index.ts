@@ -30,8 +30,14 @@ export function makeNotifier(env: NodeJS.ProcessEnv = process.env): Notifier {
         // client: the cron jobs notify every minute, and a connect/disconnect
         // per message churns through Postgres connections for no benefit.
         const prisma = await getRecipientPrisma();
+        // `telegram_chat_id: { not: null }` and an explicit order, not "any
+        // admin". An unordered findFirst over the admins could return one who
+        // never bound a phone, whose chat_id is null - and then every alert in
+        // the system is dropped with one console line nobody reads. Mirrors
+        // boundAdminChatId in apps/web/lib/services/telegramSend.ts.
         const admin = await prisma.user.findFirst({
-          where: { role: 'ADMIN' },
+          where: { role: 'ADMIN', telegram_chat_id: { not: null } },
+          orderBy: { created_at: 'asc' },
           select: { telegram_chat_id: true },
         });
         return admin?.telegram_chat_id ?? null;
