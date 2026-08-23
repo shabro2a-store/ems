@@ -7,6 +7,8 @@ import { Card, CardBody, CardHeader, Field, Input, Spinner, StatTile } from '@/c
 interface PayoutData {
   hours: number;
   gross_cent: number;
+  blocked_credit_cent: number;
+  blocked_credit_min: number;
   adjustments_cent: number;
   advances_cent: number;
   penalties_cent: number;
@@ -55,6 +57,14 @@ export default function EmployeePayrollPage() {
             <CardBody>
               <dl className="divide-y divide-border text-sm">
                 <Line k="Gross pay" v={centsToUsd(data.gross_cent)} />
+                {/* Inside gross pay above, never added to it. Without the line
+                    the payslip shows hours they know they did not clock. */}
+                {data.blocked_credit_cent > 0 && (
+                  <Line
+                    k={`of which time you could not clock in (${Math.round(data.blocked_credit_min / 6) / 10}h)`}
+                    v={centsToUsd(data.blocked_credit_cent)}
+                  />
+                )}
                 <Line k="Bonuses / deductions" v={`${data.adjustments_cent >= 0 ? '+' : '−'}${centsToUsd(Math.abs(data.adjustments_cent), false)}`} tone={data.adjustments_cent > 0 ? 'success' : data.adjustments_cent < 0 ? 'danger' : undefined} />
                 <Line k="Hours-short penalties" v={data.penalties_cent ? `−${centsToUsd(data.penalties_cent, false)}` : '—'} tone={data.penalties_cent ? 'danger' : undefined} />
                 <Line k="Overtime not approved" v={data.overtime_deduction_cent ? `−${centsToUsd(data.overtime_deduction_cent, false)}` : '—'} tone={data.overtime_deduction_cent ? 'danger' : undefined} />

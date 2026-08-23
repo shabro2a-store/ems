@@ -54,6 +54,10 @@ export async function GET(req: Request) {
         expected_salary_cent: u.expected_monthly_salary_cent,
         hours: r.hours,
         gross_cent: r.grossCent,
+        // Inside gross_cent, not added to it. Without the line the table reads
+        // as if they clocked hours they did not.
+        blocked_credit_cent: r.blockedCreditCent,
+        blocked_credit_min: r.blockedCreditMin,
         adjustments_cent: r.adjustmentsCent,
         advances_cent: r.advancesCent,
         penalties_cent: r.penaltiesCent,
@@ -69,6 +73,7 @@ export async function GET(req: Request) {
     (s, r) => ({
       hours: s.hours + r.hours,
       gross_cent: s.gross_cent + r.gross_cent,
+      blocked_credit_cent: s.blocked_credit_cent + r.blocked_credit_cent,
       adjustments_cent: s.adjustments_cent + r.adjustments_cent,
       advances_cent: s.advances_cent + r.advances_cent,
       penalties_cent: s.penalties_cent + r.penalties_cent,
@@ -78,6 +83,7 @@ export async function GET(req: Request) {
     {
       hours: 0,
       gross_cent: 0,
+      blocked_credit_cent: 0,
       adjustments_cent: 0,
       advances_cent: 0,
       penalties_cent: 0,

@@ -7,6 +7,13 @@ import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval } from './cover
 export interface PayoutForUserResult {
   hours: number;
   grossCent: number;
+  // The part of grossCent that is accepted blocked-time credit rather than
+  // clocked work. A memo line, not an addend: gross already contains it. The
+  // codebase set this standard with overtime_deduction_cent - a figure that
+  // moves the total and appears nowhere makes the table stop adding up, and
+  // this one silently inflates hours as well as money.
+  blockedCreditCent: number;
+  blockedCreditMin: number;
   adjustmentsCent: number;
   advancesCent: number;
   penaltiesCent: number;
@@ -125,9 +132,20 @@ export function computePayoutFromRows(args: {
     .reduce((s, a) => s + a.amount_cent, 0);
   const penaltiesCent = args.penaltiesCent ?? 0;
   const overtimeDeductionCent = args.overtimeDeductionCent ?? 0;
-  const { hours, grossCent } = grossWithCredit(args.punches, args.rateChanges, args.creditedIntervals ?? []);
+  const credited = args.creditedIntervals ?? [];
+  const { hours, grossCent } = grossWithCredit(args.punches, args.rateChanges, credited);
   const netCent = grossCent + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
-  return { hours, grossCent, adjustmentsCent, advancesCent, penaltiesCent, overtimeDeductionCent, netCent };
+  return {
+    hours,
+    grossCent,
+    blockedCreditCent: sumIntervalsCent(credited),
+    blockedCreditMin: sumIntervalMinutes(credited),
+    adjustmentsCent,
+    advancesCent,
+    penaltiesCent,
+    overtimeDeductionCent,
+    netCent,
+  };
 }
 
 export async function payoutForUser(

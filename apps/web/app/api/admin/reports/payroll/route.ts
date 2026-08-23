@@ -60,6 +60,7 @@ export async function GET(req: Request) {
         hours: payout.hours,
         rate_cent: latestRate?.rate_cent ?? 0,
         gross_cent: payout.grossCent,
+        blocked_credit_cent: payout.blockedCreditCent,
         adjustments_cent: payout.adjustmentsCent,
         penalties_cent: payout.penaltiesCent,
         advances_cent: payout.advancesCent,

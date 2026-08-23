@@ -26,7 +26,7 @@ interface Overview {
     flags: { id: string; kind: string; username: string | null; branch_name: string | null; created_at: string; notified_at: string | null; reason: string }[];
     penalties: { user_id: string; username: string; date: string; kind: 'SHORTFALL'; shortfallMin: number; penaltyMin: number; amount_cent: number; waived: boolean }[];
     overtime: { user_id: string; username: string; date: string; overtimeMin: number; amount_cent: number }[];
-    blockedCredits: { user_id: string; username: string; date: string; blocked_at: string; clocked_in_at: string; waitedMin: number; creditedMin: number; amount_cent: number }[];
+    blockedCredits: { user_id: string; username: string; date: string; blocked_at: string; credit_from_at: string; clocked_in_at: string; waitedMin: number; creditedMin: number; amount_cent: number }[];
     pendingAdvances: { id: string; username: string; amount_cent: number; reason: string | null }[];
     pendingLeaves: { id: string; username: string; kind: string; start_date: string; end_date: string; off_min: number | null; note: string | null }[];
   };
@@ -444,17 +444,18 @@ export default function AdminDashboard() {
                       <Badge tone="primary">Blocked</Badge>
                       <div className="min-w-0 flex-1 text-sm">
                         <div className="font-medium">
-                          {c.username} · {centsToUsd(c.amount_cent)} credited for time they could not clock
+                          {c.username} · {centsToUsd(c.amount_cent)} to credit for time they could not clock
                         </div>
                         <div className="text-xs text-muted">
                           {c.date} · turned away {formatBeirutTime(c.blocked_at)}, clocked in{' '}
-                          {formatBeirutTime(c.clocked_in_at)} · {formatMinutes(c.creditedMin)} paid
-                          {capped ? ` (waited ${formatMinutes(c.waitedMin)}, capped at the day's hours)` : ''}
+                          {formatBeirutTime(c.clocked_in_at)} · {formatMinutes(c.creditedMin)} would be paid
+                          {capped ? ` (gap ${formatMinutes(c.waitedMin)}, capped at the day's hours)` : ''}
                         </div>
                         <div className="mt-1 text-xs text-muted">
-                          Their previous shift was still open, so the app refused the check-in. GPS put them at
-                          the branch the whole time. Already paid, and it cancels the day's shortfall. Accept to
-                          leave it, or revoke it to pay only what they clocked.
+                          Their previous shift was still open, so the app refused the check-in. GPS placed them
+                          at the branch at {formatBeirutTime(c.blocked_at)}; it does not show where they were
+                          for the rest of the gap. Nothing is paid and the day still carries its shortfall
+                          until you accept. Accept to credit it, or revoke to pay only what they clocked.
                         </div>
                         <div className="mt-2 flex gap-2">
                           <Button
@@ -464,7 +465,7 @@ export default function AdminDashboard() {
                             onClick={() =>
                               act(`bc-ok:${key}`, '/api/admin/blocked-credit/decision', {
                                 body: { ...body, decision: 'ACCEPTED' },
-                                success: `Credit stands — ${centsToUsd(c.amount_cent)} stays in ${c.username}'s pay.`,
+                                success: `Credited — ${centsToUsd(c.amount_cent)} added to ${c.username}'s pay, and that day's shortfall is cleared.`,
                               })
                             }
                           >
@@ -481,7 +482,7 @@ export default function AdminDashboard() {
                               }
                               void act(`bc-no:${key}`, '/api/admin/blocked-credit/decision', {
                                 body: { ...body, decision: 'REVOKED' },
-                                success: `Credit revoked — ${centsToUsd(c.amount_cent)} removed from ${c.username}'s pay, and the day is judged on their punches alone.`,
+                                success: `Not credited — ${c.username}'s day stands on their punches alone. No pay changed; nothing had been credited.`,
                               });
                             }}
                           >

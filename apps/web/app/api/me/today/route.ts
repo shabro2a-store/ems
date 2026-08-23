@@ -5,6 +5,7 @@ import { currentOpenIn } from '@/lib/services/punch';
 import { payoutForUser } from '@/lib/services/payout';
 import { currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
 import { requiredMinForArrival, staleSessionClose } from '@/lib/services/autoClose';
+import { grantedCreditMinutesByDate } from '@/lib/services/blockedCredit';
 import { todayInBeirut, todayInBeirutDateRange } from 'time';
 
 // A shift belongs to the Beirut day it started, so the day total has to see an
@@ -28,7 +29,7 @@ export async function GET() {
   const { startUtc, endUtc } = todayInBeirutDateRange(todayStr);
   const punchesFromUtc = new Date(startUtc.getTime() - PUNCH_LOOKBACK_DAYS * 86_400_000);
 
-  const [open, payout, punches, user] = await Promise.all([
+  const [open, payout, punches, user, creditByUser] = await Promise.all([
     currentOpenIn(userId),
     payoutForUser(userId, month, prisma),
     prisma.punch.findMany({
@@ -40,9 +41,17 @@ export async function GET() {
       where: { id: userId },
       select: { branch: { select: { shift_grace_min: true } } },
     }),
+    // hours_month comes through payoutForUser and already counts accepted
+    // blocked-time credit. Leaving it out of the day figure put two numbers
+    // for the same day on the same screen that disagreed.
+    grantedCreditMinutesByDate([userId], month, prisma),
   ]);
 
-  const shiftDay = currentShiftDayMinutes({ punches: punches as PunchLite[], now });
+  const shiftDay = currentShiftDayMinutes({
+    punches: punches as PunchLite[],
+    now,
+    creditedMinByDate: creditByUser.get(userId),
+  });
 
   // Whether the open session belongs to a shift-day that is over. The field
   // screens must not offer a bare clock-out on one: tapping it wrote a checkout

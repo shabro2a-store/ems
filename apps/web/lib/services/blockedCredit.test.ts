@@ -76,11 +76,38 @@ describe('blocked-time credit', () => {
     expect(penaltiesFor(coverage, punches).map((p) => p.amount_cent)).toEqual([800]);
   });
 
-  it('starts the day at the first blocked attempt, pays it, and clears the shortfall', () => {
+  const ACCEPTED = new Map<string, CreditDecisionLite>([
+    [DATE, { decision: 'ACCEPTED', credited_min: 120 }],
+  ]);
+
+  it('proposes the credit but grants nothing until the owner accepts', () => {
+    // The cap does not bound the exposure so much as size the credit to fill
+    // the day: one tap at 06:00, back at 15:00, an hour clocked, and an
+    // automatic credit would hand over a full day's gross. So a pending day
+    // must read exactly as if the employee had never been blocked.
+    const { coverage, credits } = build({ punches, attempts: [{ at: BLOCKED_AT }], shiftMin: 480 });
+    const untouched = build({ punches, shiftMin: 480 });
+
+    expect(credits).toHaveLength(1);
+    expect(credits[0]!.decision).toBeNull();
+    expect(credits[0]!.creditedMin).toBe(120);
+    expect(credits[0]!.amount_cent).toBe(400); // what accepting would be worth
+
+    // Nothing granted: no minutes, no gross, no interval, and the shortfall
+    // penalty still stands.
+    expect(grantedIntervals(credits)).toEqual([]);
+    expect(coverage).toEqual(untouched.coverage);
+    expect(coverage[0]!.workedMin).toBe(360);
+    expect(coverage[0]!.grossCent).toBe(1200);
+    expect(penaltiesFor(coverage, punches).map((p) => p.amount_cent)).toEqual([800]);
+  });
+
+  it('starts the day at the first blocked attempt once accepted, and clears the shortfall', () => {
     const { coverage, credits } = build({
       punches,
       attempts: [{ at: BLOCKED_AT }],
       shiftMin: 480,
+      decisions: ACCEPTED,
     });
 
     expect(credits).toHaveLength(1);
@@ -90,7 +117,7 @@ describe('blocked-time credit', () => {
     expect(credit.clockedInAt.toISOString()).toBe(beirut('08:00').toISOString());
     expect(credit.creditedMin).toBe(120);
     expect(credit.amount_cent).toBe(400); // 2h at $2.00
-    expect(credit.decision).toBeNull(); // pending, and pending is credited
+    expect(credit.decision).toBe('ACCEPTED');
 
     const day = coverage[0]!;
     expect(day.workedMin).toBe(480); // 06:00 to 14:00, not 08:00 to 14:00
@@ -120,6 +147,7 @@ describe('blocked-time credit', () => {
       punches: longWait,
       attempts: [{ at: beirut('03:00') }],
       shiftMin: 480,
+      decisions: new Map([[DATE, { decision: 'ACCEPTED', credited_min: 60 }]]),
     });
 
     expect(
@@ -179,38 +207,57 @@ describe('blocked-time credit', () => {
     expect(credits).toEqual([]);
   });
 
-  it('grants nothing once the owner revokes it, and the shortfall comes back', () => {
+  it('revoking moves no money, because nothing had been granted', () => {
     const decisions = new Map<string, CreditDecisionLite>([
       [DATE, { decision: 'REVOKED', credited_min: 120 }],
     ]);
-    const { coverage, credits } = build({ punches, attempts: [{ at: BLOCKED_AT }], shiftMin: 480, decisions });
+    const revoked = build({ punches, attempts: [{ at: BLOCKED_AT }], shiftMin: 480, decisions });
+    const pending = build({ punches, attempts: [{ at: BLOCKED_AT }], shiftMin: 480 });
 
-    expect(credits[0]!.decision).toBe('REVOKED');
-    expect(grantedIntervals(credits)).toEqual([]);
-    expect(coverage[0]!.workedMin).toBe(360);
-    expect(penaltiesFor(coverage, punches).map((p) => p.amount_cent)).toEqual([800]);
+    expect(revoked.credits[0]!.decision).toBe('REVOKED');
+    expect(grantedIntervals(revoked.credits)).toEqual([]);
+    expect(revoked.coverage).toEqual(pending.coverage);
+    expect(penaltiesFor(revoked.coverage, punches).map((p) => p.amount_cent)).toEqual([800]);
   });
 
-  it('treats a ruling made against a different figure as no ruling at all', () => {
-    // The owner revoked 90 minutes; a correction has since made it 120. The
-    // safe default is inverted from a penalty here - pending credit is paid -
-    // so the day goes back to pending and the employee keeps the money until
-    // he rules on the amount he can actually see.
+  it('an acceptance made against a different figure grants nothing until re-ruled', () => {
+    // The owner accepted 90 minutes; a correction has since made it 120. The
+    // safe default is inverted from overtime here - pending credit is NOT paid
+    // - so "stale reads as pending" holds the money back rather than handing
+    // it over. That matters: the cap sizes credit to fill the day, so a deleted
+    // punch could turn an approved 30 minutes into an approved eight hours.
     const decisions = new Map<string, CreditDecisionLite>([
-      [DATE, { decision: 'REVOKED', credited_min: 90 }],
+      [DATE, { decision: 'ACCEPTED', credited_min: 90 }],
     ]);
     const { coverage, credits } = build({ punches, attempts: [{ at: BLOCKED_AT }], shiftMin: 480, decisions });
     expect(credits[0]!.decision).toBeNull();
-    expect(coverage[0]!.workedMin).toBe(480);
+    expect(coverage[0]!.workedMin).toBe(360);
+    expect(coverage[0]!.grossCent).toBe(1200);
   });
 
-  it('accepting changes no money', () => {
-    const decisions = new Map<string, CreditDecisionLite>([
-      [DATE, { decision: 'ACCEPTED', credited_min: 120 }],
-    ]);
-    const { coverage } = build({ punches, attempts: [{ at: BLOCKED_AT }], shiftMin: 480, decisions });
-    expect(coverage[0]!.workedMin).toBe(480);
-    expect(coverage[0]!.grossCent).toBe(1600);
+  it('never credits minutes an earlier day is already paying for', () => {
+    // A 21:00 Sunday shift closes at 07:00 Monday and belongs to Sunday. A
+    // Monday 06:00 tap is refused while it is still open; they get in at 09:00.
+    // Crediting from 06:00 would pay 06:00-07:00 twice - once inside Sunday's
+    // interval, once as Monday's credit.
+    const overnight: PunchLite[] = [
+      { kind: 'IN', at: beirut('21:00', '2026-08-16') },
+      { kind: 'OUT', at: beirut('07:00') },
+      { kind: 'IN', at: beirut('09:00') },
+      { kind: 'OUT', at: beirut('13:00') },
+    ];
+    const { credits } = build({
+      punches: overnight,
+      attempts: [{ at: beirut('06:00') }],
+      shiftMin: 480,
+    });
+
+    expect(credits).toHaveLength(1);
+    expect(credits[0]!.blockedAt.toISOString()).toBe(beirut('06:00').toISOString());
+    // Credited from 07:00, where Sunday's pay actually stops - not 06:00.
+    expect(credits[0]!.creditFromAt.toISOString()).toBe(beirut('07:00').toISOString());
+    expect(credits[0]!.waitedMin).toBe(120);
+    expect(credits[0]!.creditedMin).toBe(120);
   });
 
   it('prices the credit at the rate in force when the wait ended, as payroll prices a shift', () => {
@@ -242,15 +289,26 @@ describe('credited time keeps pairHours and per-day gross in agreement', () => {
     attempts: BlockedAttemptLite[];
     shiftMin: number;
     rates: { rate_cent: number; effective_from: Date }[];
+    accept?: boolean;
   }) {
-    const { coverage, credits } = coverageWithBlockedCredit({
+    const inputs = {
       punches: args.punches,
       shiftMinByWeekday: shiftOf(args.shiftMin),
       overridesByDate: new Map(),
-      rateCentAt: (at) => rateAt(args.rates, at),
+      rateCentAt: (at: Date) => rateAt(args.rates, at),
       attempts: args.attempts,
-      decisionsByDate: new Map(),
-    });
+    };
+    // Credit grants nothing until it is accepted, so a sweep left on the
+    // default would reconcile two numbers that are both credit-free - the
+    // definition of a vacuous property test. Accept every proposed day at the
+    // figure the server would stamp, exactly as the decision route does.
+    const decisionsByDate = new Map<string, CreditDecisionLite>();
+    if (args.accept !== false) {
+      for (const c of coverageWithBlockedCredit({ ...inputs, decisionsByDate: new Map() }).credits) {
+        decisionsByDate.set(c.date, { decision: 'ACCEPTED', credited_min: c.creditedMin });
+      }
+    }
+    const { coverage, credits } = coverageWithBlockedCredit({ ...inputs, decisionsByDate });
     const monthGross = computePayoutFromRows({
       userId: 'u1',
       punches: args.punches.map((p, i) => ({ id: `p${i}`, user_id: 'u1', kind: p.kind, at: p.at })),
@@ -260,7 +318,7 @@ describe('credited time keeps pairHours and per-day gross in agreement', () => {
       creditedIntervals: grantedIntervals(credits),
     }).grossCent;
     const perDayGross = coverage.reduce((s, d) => s + d.grossCent, 0);
-    return { monthGross, perDayGross, coverage, credits };
+    return { monthGross, perDayGross, coverage, credits, granted: grantedIntervals(credits) };
   }
 
   it('agrees across several credited days and a mid-shift raise', () => {
@@ -281,9 +339,16 @@ describe('credited time keeps pairHours and per-day gross in agreement', () => {
       { at: beirut('05:09', '2026-08-18') },
       { at: beirut('08:50', '2026-08-19') },
     ];
-    const r = reconcile({ punches, attempts, shiftMin: 480, rates });
-    expect(r.credits.length).toBeGreaterThan(0);
-    expect(r.monthGross).toBe(r.perDayGross);
+    const accepted = reconcile({ punches, attempts, shiftMin: 480, rates });
+    expect(accepted.granted.length).toBeGreaterThan(0);
+    expect(accepted.monthGross).toBe(accepted.perDayGross);
+
+    // And with the same days left pending, where the credit reaches neither
+    // side. Both states have to reconcile, not just the granted one.
+    const pending = reconcile({ punches, attempts, shiftMin: 480, rates, accept: false });
+    expect(pending.granted).toEqual([]);
+    expect(pending.monthGross).toBe(pending.perDayGross);
+    expect(pending.monthGross).toBeLessThan(accepted.monthGross);
   });
 
   /**
@@ -335,7 +400,7 @@ describe('credited time keeps pairHours and per-day gross in agreement', () => {
       const graceMin = Math.floor(rand() * 61);
 
       const r = reconcile({ punches, attempts, shiftMin, rates });
-      if (r.credits.length > 0) credited += 1;
+      if (r.granted.length > 0) credited += 1;
       expect(r.monthGross).toBe(r.perDayGross);
 
       const penaltyCent = shortfallPenalties({

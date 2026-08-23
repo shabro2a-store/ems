@@ -8,6 +8,10 @@ export interface PayrollRow {
   hours: number;
   rate_cent: number;
   gross_cent: number;
+  // Part of gross_cent and of hours, never added to either. Blocked-time
+  // credit the owner accepted: minutes the employee was at the branch unable
+  // to clock in. Optional so a caller that predates the column still renders.
+  blocked_credit_cent?: number;
   adjustments_cent: number;
   penalties_cent: number;
   advances_cent: number;
@@ -88,8 +92,8 @@ function genLabel(d: Date): string {
 
 export function PayrollDocument({ month, generatedAt, rows, branchName }: PayrollPdfProps): React.ReactElement {
   const totals = rows.reduce(
-    (a, r) => ({ gross: a.gross + r.gross_cent, adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
-    { gross: 0, adj: 0, pen: 0, adv: 0, net: 0, hours: 0 },
+    (a, r) => ({ gross: a.gross + r.gross_cent, credit: a.credit + (r.blocked_credit_cent ?? 0), adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
+    { gross: 0, credit: 0, adj: 0, pen: 0, adv: 0, net: 0, hours: 0 },
   );
 
   return (
@@ -116,6 +120,10 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           <View style={styles.card}><Text style={styles.cardK}>Adjustments</Text><Text style={[styles.cardV, { color: totals.adj > 0 ? C.success : totals.adj < 0 ? C.danger : C.ink }]}>{signedUsd(totals.adj)}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Penalties</Text><Text style={[styles.cardV, { color: totals.pen > 0 ? C.danger : C.ink }]}>{totals.pen > 0 ? `−${usd(totals.pen)}` : '—'}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Advances</Text><Text style={[styles.cardV, { color: totals.adv > 0 ? C.danger : C.ink }]}>{usd(totals.adv)}</Text></View>
+          {/* Inside gross wages above, not on top of it: time the app refused
+              a check-in for, which the owner approved. Shown because a gross
+              figure that includes hours nobody clocked has to say so. */}
+          <View style={styles.card}><Text style={styles.cardK}>of which blocked time</Text><Text style={styles.cardV}>{totals.credit > 0 ? usd(totals.credit) : '—'}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Hours</Text><Text style={styles.cardV}>{totals.hours.toFixed(1)}</Text></View>
         </View>
 

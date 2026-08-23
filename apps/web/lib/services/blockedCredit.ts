@@ -21,9 +21,13 @@ import {
  * open, so they were working with no clock running.
  *
  * The day's work therefore starts at the FIRST blocked attempt of that Beirut
- * day, not at the punch that eventually landed. It applies automatically, so
- * nobody carries a penalty for the system blocking them, and it is reviewable
- * and revocable from the attention queue.
+ * day, not at the punch that eventually landed.
+ *
+ * It does NOT pay until the owner accepts it. The cap does not bound the
+ * exposure so much as size the credit to fill the day: tap once at 06:00, come
+ * back at 15:00, work an hour, and an automatic credit would hand over a full
+ * day's gross. So a credited day arrives on the attention queue saying what
+ * would be credited and why, and grants nothing until it is accepted.
  */
 
 export interface BlockedAttemptLite {
@@ -39,12 +43,19 @@ export interface CreditDecisionLite {
 export interface BlockedCreditItem {
   date: string; // YYYY-MM-DD (Beirut)
   blockedAt: Date; // the first refused check-in of that day
+  // Where the credited window actually starts: the blocked attempt, unless an
+  // earlier day's shift is still being paid past it.
+  creditFromAt: Date;
   clockedInAt: Date; // the check-in that finally landed
   waitedMin: number; // the whole wait, before the cap
-  creditedMin: number; // what the cap allowed
+  creditedMin: number; // what the cap allows, granted or not
   rate_cent: number;
-  amount_cent: number; // already inside gross - nothing has to pay it out later
-  decision: 'ACCEPTED' | 'REVOKED' | null; // null means pending, and pending is credited
+  // What accepting this day is worth. Inside gross only once ACCEPTED; on a
+  // pending or revoked day it is what the owner is being asked to approve.
+  amount_cent: number;
+  // null means pending, and pending grants nothing. Note the inversion against
+  // overtime: there, no row means already paid.
+  decision: 'ACCEPTED' | 'REVOKED' | null;
 }
 
 interface RateChangeLite {
@@ -52,12 +63,33 @@ interface RateChangeLite {
   effective_from: Date;
 }
 
+/** The latest checkout at or before `at`, from any day. */
+function lastOutAtOrBefore(punches: PunchLite[], at: Date): Date | null {
+  let latest: Date | null = null;
+  for (const p of punches) {
+    if (p.kind !== 'OUT') continue;
+    if (p.at > at) continue;
+    if (!latest || p.at > latest) latest = p.at;
+  }
+  return latest;
+}
+
 /**
- * A ruling applies to the day as it stood when it was made. Mirrors overtime
- * exactly, including the safe default: pending credit is granted, so a ruling
- * that no longer names the day's figure falls back to pending - the employee
- * keeps the money until the owner rules on the amount he can actually see.
- * A null recorded figure predates the column and is stale for the same reason.
+ * A ruling applies to the day as it stood when it was made, and a ruling that
+ * no longer names the day's figure reads as pending again - the same mechanic
+ * as overtime.
+ *
+ * The safe default is inverted, and that is the whole point of this direction.
+ * An undecided overtime day is paid and an undecided shortfall is docked; an
+ * undecided credit grants nothing. So "stale reads as pending" protects the
+ * employee for overtime and holds money back here, which is exactly what the
+ * owner ruled: no credit moves until he has seen the figure it is for. A
+ * correction that grows a credited day cannot quietly grow the payment with
+ * it, which is reachable - the cap sizes credit to fill the day, so a deleted
+ * punch could turn an approved 30 minutes into an approved eight hours.
+ *
+ * Nothing is lost by it: the day goes straight back on the queue at its new
+ * figure. A null recorded figure predates the column and is stale the same way.
  */
 function liveDecision(
   stored: CreditDecisionLite | undefined,
@@ -117,7 +149,19 @@ export function computeBlockedCredits(args: {
     // would pay the same stretch twice.
     if (clockedInAt <= blockedAt) continue;
 
-    const waitedMin = Math.max(0, Math.floor((clockedInAt.getTime() - blockedAt.getTime()) / 60_000));
+    // Do not credit minutes somebody is already being paid for. An overnight
+    // shift belongs to the day it STARTED, so a 21:00-07:00 Sunday shift puts
+    // paid minutes inside Monday morning - and a Monday 06:00 attempt followed
+    // by a Monday 09:00 check-in would otherwise credit 06:00-07:00 a second
+    // time. The last checkout at or before the successful punch is where the
+    // uncredited gap really begins, whichever day that checkout is attributed
+    // to.
+    const coveredUntil = lastOutAtOrBefore(args.punches, clockedInAt);
+    const creditFromAt =
+      coveredUntil && coveredUntil > blockedAt ? coveredUntil : blockedAt;
+    if (creditFromAt >= clockedInAt) continue;
+
+    const waitedMin = Math.max(0, Math.floor((clockedInAt.getTime() - creditFromAt.getTime()) / 60_000));
     const headroomMin = day.requiredMin - day.workedMin;
     const creditedMin = Math.max(0, Math.min(waitedMin, headroomMin));
     if (creditedMin === 0) continue;
@@ -130,6 +174,7 @@ export function computeBlockedCredits(args: {
     items.push({
       date,
       blockedAt,
+      creditFromAt,
       clockedInAt,
       waitedMin,
       creditedMin,
@@ -144,13 +189,21 @@ export function computeBlockedCredits(args: {
 }
 
 /**
- * The priced minutes a credit actually grants. A REVOKED day grants nothing -
- * the credit is withheld rather than clawed back afterwards, which is why
- * revoking needs no deduction line anywhere.
+ * The priced minutes a credit actually grants: ACCEPTED days and no others.
+ *
+ * Pending and revoked both grant nothing, and neither is a clawback - the
+ * credit was never in gross to begin with. That is why nothing anywhere needs
+ * a deduction line for a revoked credit, and why an unreviewed day reads
+ * exactly as if the employee had never been blocked.
+ *
+ * This is the single gate. Everything that has to agree about a day - the
+ * coverage that decides the shortfall, the intervals that reach pairHours -
+ * is built from this one list, so a day cannot be credited in one and not the
+ * other whatever its decision is.
  */
 export function grantedCredit(items: BlockedCreditItem[]): CreditedTime[] {
   return items
-    .filter((i) => i.decision !== 'REVOKED')
+    .filter((i) => i.decision === 'ACCEPTED')
     .map((i) => ({ date: i.date, minutes: i.creditedMin, rateCent: i.rate_cent }));
 }
 
@@ -305,6 +358,33 @@ export async function creditedMinForDay(
   return items.find((i) => i.date === date)?.creditedMin ?? 0;
 }
 
+/**
+ * Granted credit minutes per user per Beirut date, for the screens that count
+ * "hours on this day" rather than money.
+ *
+ * They have to see it or they contradict the payslip on the same screen: the
+ * month figure comes through payoutForUser and already includes accepted
+ * credit, while the day figure is built from punches alone.
+ */
+export async function grantedCreditMinutesByDate(
+  userIds: string[],
+  month: string,
+  db: PrismaClient,
+): Promise<Map<string, Map<string, number>>> {
+  const out = new Map<string, Map<string, number>>();
+  if (userIds.length === 0) return out;
+  const notices = await allBlockedCredits(userIds, month, db);
+  for (const [userId, items] of notices) {
+    const byDate = new Map<string, number>();
+    for (const c of items) {
+      if (c.decision !== 'ACCEPTED') continue;
+      byDate.set(c.date, (byDate.get(c.date) ?? 0) + c.creditedMin);
+    }
+    if (byDate.size > 0) out.set(userId, byDate);
+  }
+  return out;
+}
+
 export interface BlockedCreditNotice extends BlockedCreditItem {
   user_id: string;
   username: string;
@@ -321,7 +401,31 @@ export async function pendingBlockedCreditNotices(
   opts: { since: string },
 ): Promise<BlockedCreditNotice[]> {
   if (users.length === 0) return [];
-  const ids = users.map((u) => u.id);
+  const byUser = await allBlockedCredits(users.map((u) => u.id), month, db);
+
+  const notices: BlockedCreditNotice[] = [];
+  for (const u of users) {
+    for (const c of byUser.get(u.id) ?? []) {
+      // Only undecided days. Nothing has been paid on them, so this is an
+      // approval queue rather than a review one.
+      if (c.decision !== null) continue;
+      if (c.date < opts.since) continue;
+      notices.push({ ...c, user_id: u.id, username: u.username });
+    }
+  }
+
+  notices.sort((a, b) => (a.date === b.date ? a.username.localeCompare(b.username) : b.date.localeCompare(a.date)));
+  return notices;
+}
+
+/** Every user's blocked-time credit for a month, decided or not. Batch loaded. */
+async function allBlockedCredits(
+  ids: string[],
+  month: string,
+  db: PrismaClient,
+): Promise<Map<string, BlockedCreditItem[]>> {
+  const out = new Map<string, BlockedCreditItem[]>();
+  if (ids.length === 0) return out;
   const { start, end } = monthRangeUtc(month);
 
   const [punches, schedules, overrides, rateChanges, blocked] = await Promise.all([
@@ -360,37 +464,30 @@ export async function pendingBlockedCreditNotices(
   const overridesBy = by(overrides);
   const ratesBy = by(rateChanges);
 
-  const notices: BlockedCreditNotice[] = [];
-  for (const u of users) {
-    const attempts = blocked.attemptsByUser.get(u.id);
+  for (const id of ids) {
+    const attempts = blocked.attemptsByUser.get(id);
     if (!attempts || attempts.length === 0) continue;
 
     const shiftMinByWeekday = new Map<number, number>();
-    for (const s of schedulesBy.get(u.id) ?? []) shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
+    for (const s of schedulesBy.get(id) ?? []) shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
 
     const overridesByDate = new Map<string, OverrideLite>();
-    for (const o of overridesBy.get(u.id) ?? []) {
+    for (const o of overridesBy.get(id) ?? []) {
       if (o.kind !== 'DAY_OFF' && o.kind !== 'HOURS_CHANGE') continue;
       overridesByDate.set(o.date.toISOString().slice(0, 10), { kind: o.kind, shift_min: o.shift_min });
     }
 
-    const userRates = (ratesBy.get(u.id) ?? []) as RateChangeLite[];
+    const userRates = (ratesBy.get(id) ?? []) as RateChangeLite[];
     const { credits } = coverageWithBlockedCredit({
-      punches: (punchesBy.get(u.id) ?? []) as PunchLite[],
+      punches: (punchesBy.get(id) ?? []) as PunchLite[],
       shiftMinByWeekday,
       overridesByDate,
       rateCentAt: (at) => rateAt(userRates, at),
       attempts,
-      decisionsByDate: blocked.decisionsByUser.get(u.id) ?? new Map(),
+      decisionsByDate: blocked.decisionsByUser.get(id) ?? new Map(),
     });
-
-    for (const c of credits) {
-      if (c.decision !== null) continue;
-      if (c.date < opts.since) continue;
-      notices.push({ ...c, user_id: u.id, username: u.username });
-    }
+    if (credits.length > 0) out.set(id, credits);
   }
 
-  notices.sort((a, b) => (a.date === b.date ? a.username.localeCompare(b.username) : b.date.localeCompare(a.date)));
-  return notices;
+  return out;
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { Role } from '@prisma/client';
-import { beirutWeekday } from 'time';
+import { beirutWeekday, todayInBeirut, scheduledToUtc } from 'time';
 import {
   getTestPrisma,
   cleanDb,
@@ -13,20 +13,29 @@ import { loginAs } from '../test-helpers/auth';
 
 const BASE_URL = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:3000';
 
-const MONTH = '2026-07';
-const DATE = '2026-07-01';
-// Beirut is UTC+3 in July.
-const BLOCKED_AT = new Date('2026-07-01T03:00:00Z'); // 06:00 Beirut
-const IN_AT = new Date('2026-07-01T05:00:00Z'); // 08:00 Beirut
-const OUT_AT = new Date('2026-07-01T11:00:00Z'); // 14:00 Beirut, 360 min clocked
+// Anchored to yesterday, not a fixed July date. The attention queue only looks
+// back 7 days, so a fixed past date made the notices filter match nothing and
+// the assertions inside the loop never ran at all - the queue had no coverage.
+const YESTERDAY = new Date(Date.now() - 24 * 3_600_000);
+const DATE = todayInBeirut(YESTERDAY);
+const MONTH = DATE.slice(0, 7);
+// Beirut wall-clock times on that day.
+const BLOCKED_AT = beirutAt(DATE, '06:00');
+const IN_AT = beirutAt(DATE, '08:00');
+const OUT_AT = beirutAt(DATE, '14:00'); // 360 min clocked
 const RATE_CENT = 600; // $6.00/h
 // 360 clocked + 120 credited = the full 480 shift. 480 x $6.00 = $48.00.
 const GROSS_WITH_CREDIT_CENT = 4800;
 const GROSS_WITHOUT_CREDIT_CENT = 3600;
 
+function beirutAt(date: string, hhmm: string): Date {
+  return scheduledToUtc(date, hhmm);
+}
+
 interface PayrollRow {
   username: string;
   gross_cent: number;
+  blocked_credit_cent: number;
   penalties_cent: number;
   net_cent: number;
 }
@@ -79,60 +88,86 @@ describe('blocked-time credit integration (HTTP)', () => {
     return { branch, user };
   }
 
-  it('pays the wait, clears the shortfall, and shows on the attention queue', async () => {
-    const { user } = await seedBlockedDay('bc-emp');
-    const admin = await seedTestUser({ username: 'bc-admin', role: Role.ADMIN });
-    const a = await loginAs(admin.username, 'change-me');
-
-    const row = await payrollFor(user.username, a.cookies);
-    expect(row.gross_cent).toBe(GROSS_WITH_CREDIT_CENT);
-    // Without the credit the day is 2h short: min(2 x 120, 360) = 240 min docked.
-    expect(row.penalties_cent).toBe(0);
-    expect(row.net_cent).toBe(GROSS_WITH_CREDIT_CENT);
-
-    const ovRes = await fetch(`${BASE_URL}/api/admin/overview`, { headers: { Cookie: a.cookies } });
-    const ov = await ovRes.json();
-    const notices = ov.data.attention.blockedCredits as Array<{
-      user_id: string;
-      date: string;
-      creditedMin: number;
-      amount_cent: number;
-    }>;
-    // The lookback is 7 days, so this July day only shows if the clock is near
-    // it; assert on the shape when it is present rather than pinning the date.
-    for (const n of notices.filter((n) => n.user_id === user.id)) {
-      expect(n.creditedMin).toBe(120);
-      expect(n.amount_cent).toBe(1200);
-    }
-
-    const penRes = await fetch(`${BASE_URL}/api/admin/penalties?userId=${user.id}&month=${MONTH}`, {
-      headers: { Cookie: a.cookies },
-    });
-    const pen = await penRes.json();
-    expect(pen.data.penalties).toEqual([]);
-  });
-
-  it('revoking takes the credit back out of gross and the shortfall returns', async () => {
-    const { user } = await seedBlockedDay('bc-emp2');
-    const admin = await seedTestUser({ username: 'bc-admin2', role: Role.ADMIN });
-    const a = await loginAs(admin.username, 'change-me');
-
-    const res = await fetch(`${BASE_URL}/api/admin/blocked-credit/decision`, {
+  async function decide(cookies: string, csrf: string, body: unknown) {
+    return fetch(`${BASE_URL}/api/admin/blocked-credit/decision`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Idempotency-Key': idem('bc'),
-        'X-CSRF-Token': a.csrf,
-        Cookie: a.cookies,
+        'X-CSRF-Token': csrf,
+        Cookie: cookies,
       },
-      body: JSON.stringify({ userId: user.id, date: DATE, decision: 'REVOKED', creditedMin: 120 }),
+      body: JSON.stringify(body),
     });
+  }
+
+  it('shows on the attention queue and moves no money until it is accepted', async () => {
+    const { user } = await seedBlockedDay('bc-emp');
+    const admin = await seedTestUser({ username: 'bc-admin', role: Role.ADMIN });
+    const a = await loginAs(admin.username, 'change-me');
+
+    const ovRes = await fetch(`${BASE_URL}/api/admin/overview`, { headers: { Cookie: a.cookies } });
+    const ov = await ovRes.json();
+    const notices = (ov.data.attention.blockedCredits as Array<{
+      user_id: string;
+      date: string;
+      creditedMin: number;
+      amount_cent: number;
+    }>).filter((n) => n.user_id === user.id);
+    // Not a filtered loop that can quietly match nothing: the row must be here.
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.date).toBe(DATE);
+    expect(notices[0]!.creditedMin).toBe(120);
+    expect(notices[0]!.amount_cent).toBe(1200);
+
+    // Nothing paid, and the day still carries its full shortfall.
+    const row = await payrollFor(user.username, a.cookies);
+    expect(row.gross_cent).toBe(GROSS_WITHOUT_CREDIT_CENT);
+    expect(row.blocked_credit_cent).toBe(0);
+    // 240 docked minutes at $6.00/h, ceilinged by the day's own $36.00 gross.
+    expect(row.penalties_cent).toBe(2400);
+  });
+
+  it('accepting pays the wait, clears the shortfall, and shows as its own line', async () => {
+    const { user } = await seedBlockedDay('bc-emp-ok');
+    const admin = await seedTestUser({ username: 'bc-admin-ok', role: Role.ADMIN });
+    const a = await loginAs(admin.username, 'change-me');
+
+    const res = await decide(a.cookies, a.csrf, { userId: user.id, date: DATE, decision: 'ACCEPTED', creditedMin: 120 });
     expect(res.status).toBe(200);
 
     const row = await payrollFor(user.username, a.cookies);
-    expect(row.gross_cent).toBe(GROSS_WITHOUT_CREDIT_CENT);
-    // 240 docked minutes at $6.00/h, ceilinged by the day's own $36.00 gross.
-    expect(row.penalties_cent).toBe(2400);
+    expect(row.gross_cent).toBe(GROSS_WITH_CREDIT_CENT);
+    // Inside gross, and named: 120 min at $6.00/h.
+    expect(row.blocked_credit_cent).toBe(1200);
+    expect(row.penalties_cent).toBe(0);
+    expect(row.net_cent).toBe(GROSS_WITH_CREDIT_CENT);
+
+    const penRes = await fetch(`${BASE_URL}/api/admin/penalties?userId=${user.id}&month=${MONTH}`, {
+      headers: { Cookie: a.cookies },
+    });
+    expect((await penRes.json()).data.penalties).toEqual([]);
+
+    const audit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'BlockedCreditDecision', entity_id: `${user.id}:${DATE}` },
+    });
+    expect(audit?.action).toBe('blocked_credit.accepted');
+  });
+
+  it('revoking changes no money, because nothing had been credited', async () => {
+    const { user } = await seedBlockedDay('bc-emp2');
+    const admin = await seedTestUser({ username: 'bc-admin2', role: Role.ADMIN });
+    const a = await loginAs(admin.username, 'change-me');
+
+    const before = await payrollFor(user.username, a.cookies);
+    const res = await decide(a.cookies, a.csrf, { userId: user.id, date: DATE, decision: 'REVOKED', creditedMin: 120 });
+    expect(res.status).toBe(200);
+
+    const after = await payrollFor(user.username, a.cookies);
+    expect(after.gross_cent).toBe(before.gross_cent);
+    expect(after.net_cent).toBe(before.net_cent);
+    expect(after.gross_cent).toBe(GROSS_WITHOUT_CREDIT_CENT);
+    expect(after.penalties_cent).toBe(2400);
 
     const audit = await getTestPrisma().auditLog.findFirst({
       where: { entity: 'BlockedCreditDecision', entity_id: `${user.id}:${DATE}` },
@@ -160,26 +195,20 @@ describe('blocked-time credit integration (HTTP)', () => {
     expect(await getTestPrisma().blockedCreditDecision.count({ where: { user_id: user.id } })).toBe(0);
   });
 
-  it('undo puts a revoked credit back', async () => {
+  it('undo takes back a mis-clicked acceptance and puts the day back on the queue', async () => {
     const { user } = await seedBlockedDay('bc-emp4');
     const admin = await seedTestUser({ username: 'bc-admin4', role: Role.ADMIN });
     const a = await loginAs(admin.username, 'change-me');
-    const post = (body: unknown) =>
-      fetch(`${BASE_URL}/api/admin/blocked-credit/decision`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': idem('bc'),
-          'X-CSRF-Token': a.csrf,
-          Cookie: a.cookies,
-        },
-        body: JSON.stringify(body),
-      });
 
-    expect((await post({ userId: user.id, date: DATE, decision: 'REVOKED', creditedMin: 120 })).status).toBe(200);
+    expect((await decide(a.cookies, a.csrf, { userId: user.id, date: DATE, decision: 'ACCEPTED', creditedMin: 120 })).status).toBe(200);
+    expect((await payrollFor(user.username, a.cookies)).gross_cent).toBe(GROSS_WITH_CREDIT_CENT);
+
+    expect((await decide(a.cookies, a.csrf, { userId: user.id, date: DATE, decision: 'PENDING' })).status).toBe(200);
     expect((await payrollFor(user.username, a.cookies)).gross_cent).toBe(GROSS_WITHOUT_CREDIT_CENT);
 
-    expect((await post({ userId: user.id, date: DATE, decision: 'PENDING' })).status).toBe(200);
-    expect((await payrollFor(user.username, a.cookies)).gross_cent).toBe(GROSS_WITH_CREDIT_CENT);
+    const ov = await (await fetch(`${BASE_URL}/api/admin/overview`, { headers: { Cookie: a.cookies } })).json();
+    expect(
+      (ov.data.attention.blockedCredits as Array<{ user_id: string }>).filter((n) => n.user_id === user.id),
+    ).toHaveLength(1);
   });
 });

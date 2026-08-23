@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db/prisma';
 import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
 import { pendingOvertimeNotices } from '@/lib/services/overtime';
-import { pendingBlockedCreditNotices } from '@/lib/services/blockedCredit';
+import { grantedCreditMinutesByDate, pendingBlockedCreditNotices } from '@/lib/services/blockedCredit';
 import { requiredMinFor, currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
 import { lookbackMonths, mergeNotices } from '@/lib/services/noticeWindow';
 
@@ -139,6 +139,15 @@ export async function GET(req: Request) {
 
   const tripsTodayByDriver = new Map(tripsTodayAgg.map((t) => [t.driver_id, t._count._all]));
 
+  // Accepted blocked-time credit counts as hours worked, and payroll already
+  // pays it - so the hours and labour KPIs have to see it or they report a
+  // smaller day than the month they roll up into.
+  const creditMinByUser = await grantedCreditMinutesByDate(
+    users.map((u) => u.id),
+    todayStr.slice(0, 7),
+    prisma,
+  );
+
   const branchName = new Map(branches.map((b) => [b.id, b.name]));
   const punchesByUser = new Map<string, PunchLite[]>();
   for (const p of recentPunches) {
@@ -164,6 +173,7 @@ export async function GET(req: Request) {
       const { minutes, openInAt } = currentShiftDayMinutes({
         punches: punchesByUser.get(u.id) ?? [],
         now: nowDate,
+        creditedMinByDate: creditMinByUser.get(u.id),
       });
       hoursMinutes += minutes;
       laborCent += Math.floor((minutes * u.hourly_rate_cent) / 60);
@@ -263,14 +273,16 @@ export async function GET(req: Request) {
     amount_cent: o.amount_cent,
   }));
 
-  // Paid automatically, so this is a review row like the other two: the times
-  // are what the row has to show, because "credited 1h 48m" without "blocked
-  // at 06:12, in at 08:00" gives the owner nothing to judge.
+  // Unlike penalties and overtime, nothing has happened yet: this row is an
+  // approval, not a review. The times are what the row has to show, because
+  // "would credit 1h 48m" without "turned away 06:12, clocked in 08:00, worked
+  // 6h" gives the owner nothing to judge.
   const blockedCredits = mergeNotices(blockedCreditBatches).map((c) => ({
     user_id: c.user_id,
     username: c.username,
     date: c.date,
     blocked_at: c.blockedAt.toISOString(),
+    credit_from_at: c.creditFromAt.toISOString(),
     clocked_in_at: c.clockedInAt.toISOString(),
     waitedMin: c.waitedMin,
     creditedMin: c.creditedMin,

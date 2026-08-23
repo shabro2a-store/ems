@@ -16,6 +16,8 @@ interface Row {
   expected_salary_cent: number | null;
   hours: number;
   gross_cent: number;
+  // Inside gross_cent, never added to it.
+  blocked_credit_cent: number;
   adjustments_cent: number;
   advances_cent: number;
   penalties_cent: number;
@@ -25,6 +27,8 @@ interface Row {
 interface Totals {
   hours: number;
   gross_cent: number;
+  // Inside gross_cent, never added to it.
+  blocked_credit_cent: number;
   adjustments_cent: number;
   advances_cent: number;
   penalties_cent: number;
@@ -121,7 +125,13 @@ export default function AdminPayrollPage() {
       {totals && (
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
           <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + bonuses − deductions − advances − penalties − revoked overtime" />
-          <StatTile label="Gross wages" value={centsToUsd(totals.gross_cent)} />
+          <StatTile
+            label="Gross wages"
+            value={centsToUsd(totals.gross_cent)}
+            // Inside gross, not on top of it. A gross figure that includes
+            // hours nobody clocked has to say so somewhere on the screen.
+            hint={totals.blocked_credit_cent > 0 ? `incl. ${centsToUsd(totals.blocked_credit_cent)} blocked time` : undefined}
+          />
           <StatTile
             label="Adjustments"
             value={totals.adjustments_cent === 0 ? '$0.00' : `${totals.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(totals.adjustments_cent))}`}
@@ -180,7 +190,17 @@ export default function AdminPayrollPage() {
                             {centsToUsd(r.rate_cent)}
                           </button>
                         </td>
-                        <td className="tabular px-4 py-2.5 text-right">{centsToUsd(r.gross_cent)}</td>
+                        <td className="tabular px-4 py-2.5 text-right">
+                          {centsToUsd(r.gross_cent)}
+                          {r.blocked_credit_cent > 0 && (
+                            <span
+                              className="block text-[11px] font-normal text-muted"
+                              title="Time this employee was at the branch but the app would not let them clock in. Already inside the gross figure above."
+                            >
+                              incl. {centsToUsd(r.blocked_credit_cent)} blocked
+                            </span>
+                          )}
+                        </td>
                         <td className={`tabular px-4 py-2.5 text-right font-medium ${r.adjustments_cent > 0 ? 'text-success' : r.adjustments_cent < 0 ? 'text-danger' : 'text-muted'}`}>
                           {r.adjustments_cent === 0 ? '—' : `${r.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(r.adjustments_cent), false)}`}
                         </td>

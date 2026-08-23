@@ -92,10 +92,11 @@ cuid PKs, money = Int cents.
 - **BlockedCreditDecision** — (user, date) unique, `decision` ACCEPTED/REVOKED, plus
   **`credited_min?`** — the day's credited minutes at the moment the owner ruled, stamped
   server-side. Mirrors `OvertimeDecision` including the safe default: no row means pending,
-  and pending credit is **already granted**. `ACCEPTED` changes no money; `REVOKED` **withholds**
-  the credit rather than clawing it back, so there is no deduction line for it anywhere — the
-  day simply reverts to what the punches alone say, shortfall included. A ruling counts only
-  while `credited_min` still equals the day's current credit.
+  and pending credit **grants nothing** — the inverse of `OvertimeDecision`, where the pending
+  day is the paid one. `ACCEPTED` is what puts the minutes into gross and clears that day's
+  shortfall; `REVOKED` changes no money at all, since nothing was ever credited, and only
+  clears the notice. A ruling counts only while `credited_min` still equals the day's current
+  credit, so a stale ruling reads as pending and holds the money back until he rules again.
 - **PushSubscription** — a device's Web Push subscription (user, endpoint unique, p256dh, auth);
   lets a ring reach a locked/closed phone. Dead endpoints (404/410) are auto-pruned.
 - **PenaltyWaiver** — (user, date, kind SHORTFALL) unique, plus **`penalty_min?`** — the
@@ -180,9 +181,11 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 - **Payroll (`payout.ts`)**: pairs each IN with next OUT; `minutes = floor((out-in)/60000)`;
   interval gross = `floor(minutes * rate_at_shift / 60)` (respects RateChange history). Open
-  session pays nothing. **Blocked-time credit is inside gross**, priced by the same
+  session pays nothing. **Accepted blocked-time credit is inside gross**, priced by the same
   per-interval floor and added from the same objects `computeCoverage` folded into those days —
-  it is hours worked, not an adjustment. `net = gross + Σadjustments − ΣapprovedAdvances(month)
+  it is hours worked, not an adjustment, and it carries its own memo line on both payroll
+  screens and the PDF. An unaccepted credit contributes nothing anywhere.
+  `net = gross + Σadjustments − ΣapprovedAdvances(month)
   − Σpenalties(month) − ΣrevokedOvertime(month)`. Can go negative.
 - **Penalties (`penalty.ts`)**: covering fewer minutes than the day required (SHORTFALL), docked
   from pay. `penaltyMin = min(2 × shortfallMin, workedMin)` once the shortfall passes the branch's
@@ -335,16 +338,24 @@ Full request/response detail is in [API.md](API.md). Summary:
   writes a `BlockedPunchAttempt`, and why the row can be trusted to pay. An attempt from home
   fails earlier as `OUT_OF_GEOFENCE` and is never recorded; nor is the open-trip block, which
   runs before the geofence; nor is `punch/dev`, which has no geofence at all.
-- **Blocked time is paid (`blockedCredit.ts`)**: the day's work starts at the **first
-  `BlockedPunchAttempt` of that Beirut day**, not at the punch that eventually landed. GPS put
-  them at the branch and the shop was open, so they were working with no clock running — the
-  owner ruled it paid. Applied **automatically**, so nobody carries a penalty for the system
-  blocking them, and shown on the attention queue with what was credited and why.
-  - **Capped** so `worked + credited` never exceeds the day's required minutes. Not the owner's
-    ruling — a judgement call, flagged as one: credit must erase a shortfall, never manufacture
-    overtime, or being blocked becomes worth money and waiting generates overtime notices. The
+- **Blocked time can be paid, once the owner accepts it (`blockedCredit.ts`)**: the day's work
+  starts at the **first `BlockedPunchAttempt` of that Beirut day**, not at the punch that
+  eventually landed. GPS put them at the branch, so they were at work with no clock running.
+  It reaches the attention queue as an **approval**, not a review: until it is accepted it
+  grants nothing — no gross, no coverage minutes, no relief from that day's shortfall — and
+  the day reads exactly as if they had never been blocked.
+  - **Why approval and not automatic.** The cap does not bound the exposure so much as size
+    the credit to fill the day: one tap at 06:00, back at 15:00, an hour clocked, and an
+    automatic credit hands over a full day's gross. GPS proves one tap, not the whole gap.
+  - **Capped** so `worked + credited` never exceeds the day's required minutes. Credit must
+    erase a shortfall, never manufacture overtime, or waiting generates overtime notices. The
     cap also makes credit and overtime mutually exclusive by construction (a credited day has
     `deltaMin <= 0`), so no day can be both.
+  - **Near-unreachable in practice, by design.** A check-in behind a session from a shift-day
+    that is over now self-resolves (see the punch gate order above), so the employee is not
+    held up and there is nothing to credit. What remains are rows already in the table,
+    refusals self-resolve declines (a same-day duplicate, which credits nothing anyway), and
+    any day an admin has yet to approve. It is the safety net, not the main path.
   - **Where it enters the money path.** One function prices it once, and the identical
     `WorkInterval` objects go to **both** sides: `computeCoverage` folds them into that day's
     `workedMin` and `intervals` (at the front — credited time is the start of the day, so
@@ -364,10 +375,25 @@ Full request/response detail is in [API.md](API.md). Summary:
   - A blocked attempt with no successful check-in **that same Beirut day** credits nothing —
     there is no day's work for it to start. Nor does one whose blocking session began that
     same day, since those minutes are already counted from their own check-in.
-- **A blocked employee is told what happened.** The refusal message names the open shift, says
-  the manager closes it, and says the arrival is already recorded — the employee cannot fix
-  yesterday themselves, and "Punch rejected: ALREADY_PUNCHED_IN" left them standing there
-  retrying. All the punch rejections now carry a human message; see API.md.
+- **A stale session resolves itself at the punch** (`staleSessionClose` in `autoClose.ts`):
+  when a check-in — or a clock-out — meets a session left open from a shift-day that is over,
+  that session is closed at `systemCheckoutAt` (the same instant the 30h sweep would use) and
+  the check-in proceeds. Somebody at the branch, past the geofence, starting a shift has
+  demonstrably finished the old one. **Both** conditions are required: the arrival is on an
+  earlier Beirut calendar day **and** the session has run past its own `required + grace`. The
+  day boundary alone closes a 21:00-07:00 shift under somebody at 02:00; the elapsed condition
+  alone lets a same-day duplicate tap end a shift in progress. The close must also land
+  strictly before now, or it is invisible to every guard. On a clock-out the employee's own
+  punch is **not** written — writing it at `now` pays the runaway span, and backdating it
+  would make the record lie about when they pressed the button.
+  Without this the feature never fired: `/api/me/today` reported the stale session as open,
+  both field screens rendered a clock-out button, and payroll was handed the whole span. They
+  now show a warning and offer check-in instead, driven by `open_session_stale` from the same
+  predicate.
+- **A blocked employee is told what happened.** Every punch rejection carries a message
+  written for a phone; "Punch rejected: ALREADY_PUNCHED_IN" is gone. A refusal that survives
+  self-resolve is a duplicate tap, so it says to clock out first — something they can do
+  themselves. See API.md.
 - **Geofence (`geofence.ts`)**: nearest active branch by haversine; reject if
   `accuracy > gps_accuracy_max_m` or `distance ≥ radius + accuracy`.
 - **Trips (`trip.ts`)**: one open trip per driver (service + DB index); geofenced both ends.
@@ -459,7 +485,7 @@ indistinguishable from a button that does nothing, which is exactly how this fai
 | **Flag** | Dismiss (+ Fix punch) | Dismiss is an acknowledgement only — no record changes. `MISSED_CHECKOUT` also links to `/admin/punches`, where the punch can actually be corrected. Absence (`WATCHED`) surfaces here too — notice only, no automatic penalty. |
 | **Penalty** | Accept · Revoke | Accept upholds (no money moves, and clears any earlier removal); Revoke waives and returns the money. Both send the figure the row is showing and are refused if the day has moved since. A day whose removal has gone stale appears here too, saying so — nothing is docked while it waits. |
 | **Overtime** | Accept · Revoke | Already paid either way — Accept leaves it that way; Revoke deducts that day's excess from payroll. |
-| **Blocked** | Accept · Revoke | Time credited because the app refused their check-in while they stood at the branch. Already paid and already cancelling that day's shortfall — Accept leaves it; Revoke withholds the credit, and the day goes back to being judged on the punches alone. Both send the figure the row is showing and are refused if the day has moved since. |
+| **Blocked** | Accept · Revoke | Time the app refused their check-in for while they stood at the branch. **Nothing is paid yet** and the day still carries its shortfall — this row is an approval, not a review. Accept credits it and clears the shortfall; Revoke moves no money and only clears the notice. Both send the figure the row is showing and are refused if the day has moved since. |
 | **Advance** | Approve · Reject | Approve deducts from this month's pay. |
 | **Leave** | Approve · Reject | Approve writes `ScheduleOverride` rows — days off for `DAY_OFF`; for `HOURS_CHANGE`, the requested hours are **subtracted** from that weekday's scheduled hours (floored at 0). The row shows the requested hours so the admin is not approving blind. |
 

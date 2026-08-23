@@ -61,13 +61,17 @@ day-off does **not** block punching (staff may come in to help).
 carries a message written for the employee's phone — the endpoint used to render
 `Punch rejected: <CODE>` for all of them.
 
-`ALREADY_PUNCHED_IN` additionally **records a `BlockedPunchAttempt`** and its
-message names the open shift, who closes it, and that the wait is already on the
-record: *"You are still checked in from 2026-08-22 21:04, so this check-in was
-refused. Ask your manager to close that shift. Your arrival at 06:12 is recorded
-and today's hours count from it."* Only this rejection is recorded, because only
-this one happens **after** the geofence check — see the blocked-time credit in
-SYSTEM_MAP §4.
+A check-in that meets a session left open from a shift-day that is over does NOT
+fail: that session is closed at its scheduled hours and the punch goes through,
+returning `system_closed_at` and a `notice` for the employee. A clock-out in the
+same situation also closes it and returns `system_closed_instead_of_punch: true`
+- no punch of theirs is written, because writing one at `now` pays the runaway
+span. See the punch gate order in SYSTEM_MAP §4.
+
+`ALREADY_PUNCHED_IN` is therefore only reached by a duplicate tap on a live
+session, and its message says to clock out first. It **records a
+`BlockedPunchAttempt`** - the only rejection that does, because only this one
+happens **after** the geofence check.
 
 ### POST /api/me/punch/dev  *(CSRF; dev only)*
 Enabled only when `ENABLE_DEV_ENDPOINTS=true`, else `404`. Body `{ kind }`. Skips
@@ -76,7 +80,7 @@ GPS/geofence (uses the branch centre) for testing on devices without GPS. Its
 attempt is paid time, and it is only sound evidence because the geofence ran first.
 
 ### GET /api/me/today
-→ `200 { in_at, minutes_since_in, minutes_today, hours_month }` — the field screens'
+→ `200 { in_at, minutes_since_in, minutes_today, hours_month, open_session_stale }` — the field screens'
 live counters. Hours only, no money: a shared shop floor with per-employee rates
 made a live earnings ticker a source of friction. The caller's own payslip
 (`GET /api/me/payroll`) still carries the real money figures.
@@ -85,12 +89,21 @@ made a live earnings ticker a source of friction. The caller's own payslip
 - `minutes_today` is the whole **current shift-day** (`currentShiftDayMinutes`): every
   session that started on it, plus the open one counted to now. Punching out and back
   in adds to it instead of restarting it, and an overnight arrival keeps it climbing
-  past midnight. This is what the tile labelled "Today" shows.
+  past midnight. This is what the tile labelled "Today" shows. It counts accepted
+  blocked-time credit for that day, because `hours_month` does - the two used to
+  disagree about the same day on the same screen.
+- `open_session_stale` marks an open session belonging to a shift-day that is over.
+  The field screens must not offer a bare clock-out on one: that writes a checkout at
+  `now` and pays the whole runaway span. They show a warning and offer check-in, which
+  closes the old shift at its scheduled hours.
 
 ### GET /api/me/payroll?month=YYYY-MM
-→ `200 { hours, gross_cent, adjustments_cent, advances_cent, penalties_cent,
-overtime_deduction_cent, net_cent }`. Every subtracted line is listed separately, so
-`gross + adjustments − advances − penalties − overtime_deduction === net`.
+→ `200 { hours, gross_cent, blocked_credit_cent, blocked_credit_min, adjustments_cent,
+advances_cent, penalties_cent, overtime_deduction_cent, net_cent }`. Every subtracted line is
+listed separately, so `gross + adjustments − advances − penalties − overtime_deduction === net`.
+`blocked_credit_cent` is **inside** `gross_cent` and inside `hours`, never added to either: it
+is the accepted blocked-time credit, and without the line the payslip credits hours the
+employee knows they did not clock.
 
 ### GET /api/me/advances  ·  GET /api/me/advances?view=list
 Summary `{ pending, approved_balance_cent }`, or `{ advances: [...] }` (latest 50).
@@ -150,11 +163,14 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
     branch's shift grace with no *live* decision yet appear — a decision whose
     recorded minutes no longer match the day reads as pending and reappears here.
     Resolved with `overtime/decision` (see below).
-  - `blockedCredits[]` — `{ user_id, username, date, blocked_at, clocked_in_at, waitedMin,
-    creditedMin, amount_cent }`. Time paid because the app refused their check-in while they
-    stood at the branch. Same on-the-fly computation and 7-day lookback; only days with no
-    *live* decision appear. `waitedMin` above `creditedMin` means the cap trimmed it to the
-    day's required hours. Resolved with `blocked-credit/decision` (see below).
+  - `blockedCredits[]` — `{ user_id, username, date, blocked_at, credit_from_at,
+    clocked_in_at, waitedMin, creditedMin, amount_cent }`. Time the app refused their
+    check-in for while they stood at the branch. **Nothing is paid yet** — this is an approval
+    queue, so `amount_cent` is what accepting would be worth. Same on-the-fly computation and
+    7-day lookback; only days with no *live* decision appear. `waitedMin` above `creditedMin`
+    means the cap trimmed it to the day's required hours; `credit_from_at` later than
+    `blocked_at` means an earlier day's shift was still being paid past the attempt.
+    Resolved with `blocked-credit/decision` (see below).
   - All three lists are loaded once per calendar month the 7-day lookback touches, so
     the window still reaches back over a month boundary. It matters most for
     overtime, where a day with no decision is already paid: a month-end overrun
@@ -234,7 +250,10 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **GET /api/admin/payroll?month=YYYY-MM&branchId=** → `{ rows[], totals, month,
   branchId, branches }`. Each row + `totals` include `gross_cent`, `adjustments_cent`,
   `penalties_cent`, `overtime_deduction_cent`, `advances_cent`, `net_cent` — every
-  line `net_cent` is built from, so the table reconciles. Each row also carries
+  line `net_cent` is built from, so the table reconciles. Rows also carry
+  `blocked_credit_cent` / `blocked_credit_min` (and `totals` the cent figure): a memo line
+  **inside** `gross_cent`, never added to it — accepted blocked-time credit, shown so a
+  gross figure containing hours nobody clocked says so. Each row also carries
   `expected_salary_cent` (nullable) — the owner's reference figure; deliberately absent
   from `totals`, since it is never summed or built into `net_cent`.
 - **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
@@ -333,11 +352,12 @@ so it surfaces in payroll only if revoked.
 ### Blocked-time credit
 - **POST /api/admin/blocked-credit/decision** *(CSRF, Idempotent)* `{ userId, date:
   "YYYY-MM-DD", decision: "ACCEPTED"|"REVOKED"|"PENDING", creditedMin, reason? }` — upserts the
-  one `BlockedCreditDecision` row for that (user, date). The credit is granted automatically,
-  so `ACCEPTED` **changes no money** and only takes the notice off the queue; `REVOKED`
-  **withholds** it, which drops the minutes out of gross and puts that day's shortfall back.
-  Nothing is clawed back, so there is no deduction line for it. `PENDING` is the undo: the
-  absence of a row *is* pending, so it **deletes** the row and the credit returns. Audited as
+  one `BlockedCreditDecision` row for that (user, date). Credit grants nothing until it is
+  accepted, so this is an approval rather than a review: `ACCEPTED` is what puts the minutes
+  into gross and clears that day's shortfall; `REVOKED` **changes no money at all** and only
+  clears the notice. Note the inversion against overtime, where the pending day is the paid
+  one. `PENDING` is the undo for either: the absence of a row *is* pending, so it **deletes**
+  the row and the day returns to the queue uncredited. Audited as
   `blocked_credit.accepted` / `.revoked` / `.undecided`. → `{ decision }`.
   `creditedMin` is **required** for `ACCEPTED`/`REVOKED` (not for `PENDING`, which only hands
   money back): it is the amount the screen was showing. The route recomputes the day's true
@@ -345,9 +365,10 @@ so it surfaces in payroll only if revoked.
   **nothing is written**. On a match the row stores the **server's** value. A day with no
   credit at all cannot be ruled on (`400 INVALID_INPUT`), because a ruling stamped with 0 would
   match every future 0 and quietly cover whatever the day grows into. A ruling goes stale the
-  moment its `credited_min` stops matching, and a stale ruling reads as pending — the credit is
-  granted again and the day returns to the queue, erring towards paying the employee exactly as
-  overtime does.
+  moment its `credited_min` stops matching, and a stale ruling reads as pending — so the credit
+  is **withheld** and the day returns to the queue. The same mechanic as overtime, opposite
+  effect, and deliberately: the cap sizes credit to fill the day, so a corrected punch could
+  otherwise turn an approved 30 minutes into an approved eight hours.
 
 ### Flags
 - **POST /api/admin/flags/[id]/resolve** *(CSRF)* — acknowledges a flag

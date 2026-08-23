@@ -245,7 +245,14 @@ export const MAX_OPEN_SESSION_MIN = 30 * 60;
  *
  * Callers must query punches far enough back to include a previous-day arrival.
  */
-export function currentShiftDayMinutes(args: { punches: PunchLite[]; now: Date }): ShiftDayMinutes {
+export function currentShiftDayMinutes(args: {
+  punches: PunchLite[];
+  now: Date;
+  // Granted blocked-time credit, keyed by Beirut date. Without it this answer
+  // and the month's hours disagree on the same screen about the same day: one
+  // counts the credited minutes and the other does not.
+  creditedMinByDate?: Map<string, number>;
+}): ShiftDayMinutes {
   const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
 
   const closedByDate = new Map<string, number>();
@@ -275,7 +282,7 @@ export function currentShiftDayMinutes(args: { punches: PunchLite[]; now: Date }
   const openMin = live ? openMinRaw : 0;
   return {
     date,
-    minutes: (closedByDate.get(date) ?? 0) + openMin,
+    minutes: (closedByDate.get(date) ?? 0) + openMin + (args.creditedMinByDate?.get(date) ?? 0),
     openInAt: live,
     staleOpenInAt: stale ? openIn : null,
   };

@@ -154,11 +154,11 @@ model Punch {
 // from an earlier shift they forgot to close.
 //
 // Written ONLY after verifyWithinGeofence has passed. That ordering is the
-// whole value of the row: punch.ts checks the geofence (punch.ts:68) before it
-// checks the session state (punch.ts:102), so a rejection carrying
-// ALREADY_PUNCHED_IN has already proved the person is standing at their branch
-// with acceptable GPS. An attempt from home fails earlier as OUT_OF_GEOFENCE
-// and never reaches here. That is what makes the paid credit these rows drive
+// whole value of the row: punchEmployee calls verifyWithinGeofence before it
+// looks at the session state, so a rejection carrying ALREADY_PUNCHED_IN has
+// already proved the person is standing at their branch with acceptable GPS.
+// An attempt from home fails earlier as OUT_OF_GEOFENCE and never reaches
+// recordBlockedAttempt. That is what makes the paid credit these rows drive
 // ungameable, and it is why nothing may record one from a path that skips the
 // geofence - notably POST /api/me/punch/dev.
 model BlockedPunchAttempt {

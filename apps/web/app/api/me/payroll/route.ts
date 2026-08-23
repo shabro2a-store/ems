@@ -26,6 +26,11 @@ export async function GET(req: Request) {
     data: {
       hours: result.hours,
       gross_cent: result.grossCent,
+      // Part of gross_cent and of hours, so it needs a line of its own too -
+      // otherwise the payslip credits them for hours they know they did not
+      // clock, with nothing accounting for it.
+      blocked_credit_cent: result.blockedCreditCent,
+      blocked_credit_min: result.blockedCreditMin,
       adjustments_cent: result.adjustmentsCent,
       advances_cent: result.advancesCent,
       penalties_cent: result.penaltiesCent,

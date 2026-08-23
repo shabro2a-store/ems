@@ -17,8 +17,9 @@ function isValidCalendarDate(value: string): boolean {
 }
 
 // PENDING is not a CreditDecisionKind - the absence of a row IS pending, and
-// pending credit is granted. Accepting it here means "put this day back the
-// way it was", the undo for a mis-clicked Revoke, and it deletes the row.
+// pending credit grants nothing. Accepting it here means "put this day back on
+// the queue undecided", the undo for a mis-clicked Accept or Revoke, and it
+// deletes the row.
 const Body = z.object({
   userId: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, 'date must be a real calendar day'),
@@ -49,10 +50,10 @@ const AUDIT_ACTION = {
 } as const;
 
 // Record the owner's call on one day's blocked-time credit. A pending day (no
-// row) is already credited - the minutes are inside gross and have already
-// cancelled that day's shortfall - so ACCEPTED changes no money and only takes
-// the notice off the queue; REVOKED withholds the credit, which puts the day
-// back to what the punches alone say, shortfall included.
+// row) grants nothing, so this is an approval rather than a review: ACCEPTED is
+// what puts the minutes into gross and clears that day's shortfall; REVOKED
+// changes no money at all and only takes the notice off the queue. Note the
+// inversion against overtime, where the pending day is the paid one.
 export async function POST(req: Request) {
   const h = headers();
   const role = h.get('x-user-role');
@@ -70,8 +71,8 @@ export async function POST(req: Request) {
   } catch (err) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
-  // Optional in the schema so PENDING need not carry it, mandatory here for a
-  // ruling that moves money: without it there is nothing to confirm against.
+  // Optional in the schema so PENDING need not carry it (it only ever takes
+  // money back off the table), mandatory here for a ruling that could move it.
   if (body.decision !== 'PENDING' && body.creditedMin === undefined) {
     return jsonError('INVALID_INPUT', 'creditedMin is required: a decision must name the amount it was made against', 400);
   }
