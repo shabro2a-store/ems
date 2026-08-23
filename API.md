@@ -236,7 +236,10 @@ past the branch's `shift_grace_min` the docked minutes are `min(2 × shortfallMi
 workedMin)` and the amount is `floor(penaltyMin × rate / 60)` **clamped to that day's
 own gross**, priced the way payroll prices it (per IN/OUT interval, at the rate in
 force when each closed). So `amount_cent` is not always `penaltyMin × rate_cent`, and
-the screens do not present it as an equation. The grace is a
+the screens do not present it as an equation. A day whose rate resolves to zero — a punch
+backdated to before the employee's first `RateChange` — grosses zero, so its penalty is
+zero and **the day is omitted entirely**: a $0.00 penalty is not something the owner can
+accept or revoke. The grace is a
 threshold, not forgiveness — the whole shortfall is doubled once it is crossed —
 and the ceiling at the day's own worked minutes means a penalty can zero a day's
 pay but never reach into another day's. They surface in payroll as
@@ -279,6 +282,10 @@ raises no shortfall between its sessions. Unclosed days stay out too.
   unreviewed the same way, so no forgiven day is re-docked by the deploy.
 
 ### Overtime
+`amount_cent` on an overtime day is what the excess minutes were **actually paid** (the
+last `overtimeMin` minutes, priced per interval), not `overtimeMin × one rate` — so a
+revoke after a mid-shift raise takes back the excess and leaves the required hours intact.
+
 A day that ran past its required hours by more than the branch's shift grace
 is **computed**, not stored, until the owner decides it (see `overtimeForUser`).
 A pending day (no decision) is already paid — pairHours pays every worked minute —

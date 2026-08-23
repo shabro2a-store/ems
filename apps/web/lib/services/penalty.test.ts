@@ -28,6 +28,7 @@ function day(over: { workedMin: number; requiredMin?: number; date?: string; clo
     closed: over.closed ?? true,
     lastPunchAt: new Date('2026-08-17T14:00:00Z'),
     grossCent: Math.floor((over.workedMin * RATE_CENT) / 60),
+    intervals: [{ minutes: over.workedMin, rateCent: RATE_CENT }],
   };
 }
 
@@ -380,6 +381,20 @@ describe('a penalty never reaches past the day it is for', () => {
     expect(item.amount_cent).toBeLessThan(wholeDayAtClosingRate);
     expect(item.amount_cent).toBe(gross);
     expect(gross - item.amount_cent).toBe(0);
+  });
+
+  it('raises no penalty at all for a day that priced at zero', () => {
+    // A punch backdated to before the employee's first RateChange prices the
+    // whole day at nothing, so the clamp takes the penalty to nothing too. The
+    // day is dropped rather than shown as a $0.00 penalty nobody can act on -
+    // and the real problem, a day of work paying zero, is a rate-history one.
+    const rateSetLater: RateLite[] = [{ rate_cent: 200, effective_from: new Date('2026-09-01T00:00:00Z') }];
+    const worked = punches(['2026-08-17T05:00:00Z', 'IN'], ['2026-08-17T09:00:00Z', 'OUT']);
+
+    expect(paidForCent(worked, rateSetLater)).toBe(0);
+    // The shortfall is real - 240 of 480 minutes - it is only the money that is not.
+    expect(judgeAt(worked, REAL_RATE, NEXT_DAY)[0]!.shortfallMin).toBe(240);
+    expect(judgeAt(worked, rateSetLater, NEXT_DAY)).toHaveLength(0);
   });
 
   it('does not overshoot by the rounding on each session', () => {

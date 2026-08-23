@@ -133,6 +133,17 @@ export function shortfallPenalties(args: {
     // cent per interval. Clamping to the day's own gross closes both, and is
     // what makes "the worst day is zero pay" true rather than nearly true.
     const amountCent = Math.min(Math.floor((penaltyMin * rate) / 60), day.grossCent);
+    // A penalty that takes nothing is not a penalty. Accept and Revoke on a
+    // $0.00 row are both no-ops, so surfacing one would park an item on the
+    // review queue that no click can resolve into anything.
+    //
+    // It is reachable, and not only by rounding: a day whose rate resolves to
+    // zero grosses zero, and the clamp then takes the penalty to zero with it.
+    // That happens when a punch is backdated to before the employee's first
+    // RateChange - which this owner does by hand. Note what that day really
+    // means: the employee is being paid nothing for it. That is a rate-history
+    // problem, much larger than the penalty, and the penalty queue is the wrong
+    // place to report it - see the zero-priced day in SYSTEM_MAP's known issues.
     if (amountCent === 0) continue;
     items.push({
       date: day.date,

@@ -182,6 +182,10 @@ Full request/response detail is in [API.md](API.md). Summary:
   with what payroll actually paid, and the penalty could exceed the day and start taking the
   next one. Sum-of-floors also sits below floor-of-sum by up to a cent per session. The clamp
   closes both, which is what makes "the worst day is zero pay" exact rather than approximate.
+  `DayCoverage.intervals` carries the priced pairs behind `grossCent`, so "what did the last
+  n minutes pay" — the question revoked overtime asks — is answerable from the same source.
+  A day that prices to **zero** raises no penalty item at all: a $0.00 penalty is not a
+  penalty and neither Accept nor Revoke would move anything. See known issue 3.
 - **A day is only judged once it is over**: the **current shift-day** raises no shortfall, whatever
   its coverage says. That day is `currentShiftDayMinutes`'s answer - the Beirut day of the
   employee's open arrival, or today when nothing is open - so there is one definition of "the day
@@ -197,7 +201,13 @@ Full request/response detail is in [API.md](API.md). Summary:
   the owner is told; a reported overrun is reported in full, never grace-trimmed. Every worked
   minute is already paid by `payout.ts` regardless of `shift_min`, so a pending notice changes
   no money: an admin **Accept** just clears it (writes an `OvertimeDecision`, no money moves);
-  **Revoke** deducts that day's excess (`overtimeMin * rate / 60`) from payroll. A day with 0
+  **Revoke** deducts that day's excess — **what the excess minutes were actually paid**,
+  not `overtimeMin * one rate`. The excess is the part of the day worked after the required
+  minutes were covered, so it is the last `overtimeMin` minutes, priced per interval by
+  `centsForLastMinutes`. Pricing the whole overrun at the rate in force at the closing punch
+  takes back more than the excess earned once a raise lands mid-shift, and on a day requiring
+  0 minutes it can exceed the day's entire gross. Revoking must leave the employee their
+  required hours' pay, and only the per-interval figure does. A day with 0
   required hours (unscheduled, or a `DAY_OFF` override) makes every worked minute overtime.
   A revoked day shows as its own line (`overtime_deduction_cent`) on both payroll screens,
   and **Undo** on the payroll screen's overtime modal deletes the decision row, putting the
@@ -429,12 +439,19 @@ requires a short-lived code shown only to a logged-in admin.
 
 ## 9. Known issues
 
-Two left:
+Three left:
 
 1. **`driverStale` re-alerts every 30 min.** No per-trip guard, unlike `tripThreshold`'s
    `threshold_alerted_at`. A driver out 8h generates ~9 identical messages. → Add
    `stale_alerted_at` on `Trip` and gate on it.
-2. **A split shift that straddles midnight is judged as two days.** Each IN/OUT pair belongs
+2. **A day can be paid zero and say nothing about it.** `rateAt` returns 0 when no
+   `RateChange` precedes a punch, so a punch backdated to before an employee's rate was set
+   prices that whole day at nothing — the employee is paid $0 for a day they worked. Nothing
+   flags it: payroll shows a smaller number, and the penalty for that day is dropped because
+   it too computes to zero. This owner backdates punches by hand, so it is reachable. →
+   Flag a day with worked minutes and zero gross, in `watchedDetector` or alongside it; the
+   penalty queue is the wrong place to report a rate-history problem.
+3. **A split shift that straddles midnight is judged as two days.** Each IN/OUT pair belongs
    to its own check-in day (`computeCoverage`), so in 21:00, out 02:00, back in 05:00 puts the
    first session on day 1 and the second on day 2 — two part-days, each measured against a
    full `shift_min`, so both can raise a shortfall for one night's work. The current
