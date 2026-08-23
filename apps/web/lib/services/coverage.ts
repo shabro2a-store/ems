@@ -44,6 +44,38 @@ export interface DayCoverage {
   // answers diverge. Anything that wants to bound a day by its own pay has to
   // bound it by this figure or it can quietly overshoot into the next day.
   grossCent: number;
+  // The priced pairs behind grossCent, in order. Kept because "what did this
+  // day pay" is not the only question asked of a day: revoking overtime asks
+  // what the LAST n minutes paid, and that cannot be recovered from a single
+  // total once the day spans two rates.
+  intervals: WorkInterval[];
+}
+
+/** One closed IN/OUT pair, priced at the rate in force when it closed. */
+export interface WorkInterval {
+  minutes: number;
+  rateCent: number;
+}
+
+/**
+ * What the last `minutes` worked minutes of a day were paid.
+ *
+ * Each interval is floored on its own, exactly as payout.ts floors it, and a
+ * slice that lands mid-interval is floored too - so slicing a day never
+ * produces more than the day. Asking for everything gives the day's gross,
+ * which is how grossCent itself is built: one function, so a slice can never
+ * disagree with the total it came from.
+ */
+export function centsForLastMinutes(intervals: WorkInterval[], minutes: number): number {
+  let remaining = Math.max(0, minutes);
+  let cents = 0;
+  for (let i = intervals.length - 1; i >= 0 && remaining > 0; i--) {
+    const iv = intervals[i]!;
+    const take = Math.min(remaining, iv.minutes);
+    cents += Math.floor((take * iv.rateCent) / 60);
+    remaining -= take;
+  }
+  return cents;
 }
 
 /**
@@ -66,7 +98,7 @@ export function computeCoverage(args: {
   const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
 
   const workedByDate = new Map<string, number>();
-  const grossByDate = new Map<string, number>();
+  const intervalsByDate = new Map<string, WorkInterval[]>();
   const lastPunchByDate = new Map<string, Date>();
   // The weekday must come from the ARRIVAL, not the closing punch: an overnight
   // shift closes on the next calendar day, which is a different weekday.
@@ -83,10 +115,12 @@ export function computeCoverage(args: {
     const date = inBeirut(openIn.at).date;
     const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
     workedByDate.set(date, (workedByDate.get(date) ?? 0) + minutes);
-    // Same expression payout.ts uses per interval, resolved at the SAME instant
-    // (the checkout), so summing these across a month reproduces gross exactly.
-    const intervalCent = Math.floor((minutes * args.rateCentAt(p.at)) / 60);
-    grossByDate.set(date, (grossByDate.get(date) ?? 0) + intervalCent);
+    // The rate is resolved at the SAME instant payout.ts resolves it (the
+    // checkout), so summing these across a month reproduces gross exactly.
+    const forDate = intervalsByDate.get(date);
+    const interval: WorkInterval = { minutes, rateCent: args.rateCentAt(p.at) };
+    if (forDate) forDate.push(interval);
+    else intervalsByDate.set(date, [interval]);
     lastPunchByDate.set(date, p.at);
     if (!arrivalByDate.has(date)) arrivalByDate.set(date, openIn.at);
     openIn = null;
@@ -102,6 +136,7 @@ export function computeCoverage(args: {
   const days: DayCoverage[] = [];
   for (const [date, workedMin] of workedByDate) {
     const lastPunchAt = lastPunchByDate.get(date)!;
+    const intervals = intervalsByDate.get(date) ?? [];
     const requiredMin = requiredMinFor(
       args.overridesByDate.get(date),
       args.shiftMinByWeekday.get(beirutWeekday(arrivalByDate.get(date)!)),
@@ -114,7 +149,8 @@ export function computeCoverage(args: {
       deltaMin: workedMin - requiredMin,
       closed: !openDates.has(date),
       lastPunchAt,
-      grossCent: grossByDate.get(date) ?? 0,
+      grossCent: centsForLastMinutes(intervals, workedMin),
+      intervals,
     });
   }
 

@@ -1,6 +1,12 @@
 import type { PrismaClient } from '@prisma/client';
 import { rateAt, monthRangeUtc } from './payout';
-import { computeCoverage, type DayCoverage, type OverrideLite, type PunchLite } from './coverage';
+import {
+  centsForLastMinutes,
+  computeCoverage,
+  type DayCoverage,
+  type OverrideLite,
+  type PunchLite,
+} from './coverage';
 
 interface RateChangeLite {
   rate_cent: number;
@@ -56,7 +62,16 @@ export function computeOvertime(args: {
       date: day.date,
       overtimeMin: day.deltaMin,
       rate_cent: rate,
-      amount_cent: Math.floor((day.deltaMin * rate) / 60),
+      // What the excess minutes were actually paid, not deltaMin at one rate.
+      // The excess is the part of the day worked after the required minutes
+      // were covered, so it is the LAST deltaMin minutes - priced per interval
+      // like payroll pays them. deltaMin * rateAt(lastPunch) prices the whole
+      // overrun at whatever rate happened to be in force at the closing punch:
+      // after a mid-shift raise that takes back more than the excess earned,
+      // and on a day requiring nothing it can exceed the day's entire gross.
+      // Revoking has to leave the employee their required hours' pay, and this
+      // is the only expression that does.
+      amount_cent: centsForLastMinutes(day.intervals, day.deltaMin),
       decision: liveDecision(args.decisionsByDate.get(day.date), day.deltaMin),
     });
   }
