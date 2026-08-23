@@ -25,7 +25,14 @@ const Body = z.object({
   // the server's own, and the two must agree or the ruling is refused -
   // otherwise a punch corrected while the screen sits open turns a click on a
   // $2.00 row into a ruling on $9.00.
-  penaltyMin: z.number().int().min(0),
+  penaltyMin: z
+    .number()
+    .int()
+    // See the ack route: penaltyMinForDay answers 0 for a day that has no
+    // penalty at all, so a body of 0 would match and stamp a forgiveness of
+    // nothing - which would then sit there covering whatever that day grows
+    // into once a punch is corrected.
+    .min(1, 'penaltyMin must name a real penalty: a day with nothing docked cannot be ruled on'),
   reason: z.string().max(500).optional(),
 });
 

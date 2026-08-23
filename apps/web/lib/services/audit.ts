@@ -8,7 +8,10 @@ export interface AuditWriteInput {
   entityId: string;
   before?: unknown;
   after?: unknown;
-  db?: PrismaClient;
+  // Widened from PrismaClient so a caller inside prisma.$transaction can pass
+  // its tx: a destructive change and the record of it must commit together, or
+  // roll back together. Prisma's transaction client is not a PrismaClient.
+  db?: Pick<PrismaClient, 'auditLog'>;
 }
 
 function toJsonValue(v: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {

@@ -233,7 +233,10 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 ### Penalties
 Shortfall penalties are **computed** from hours owed vs hours covered, not stored:
 past the branch's `shift_grace_min` the docked minutes are `min(2 × shortfallMin,
-workedMin)` and the amount is `floor(penaltyMin × rate / 60)`. The grace is a
+workedMin)` and the amount is `floor(penaltyMin × rate / 60)` **clamped to that day's
+own gross**, priced the way payroll prices it (per IN/OUT interval, at the rate in
+force when each closed). So `amount_cent` is not always `penaltyMin × rate_cent`, and
+the screens do not present it as an equation. The grace is a
 threshold, not forgiveness — the whole shortfall is doubled once it is crossed —
 and the ceiling at the day's own worked minutes means a penalty can zero a day's
 pay but never reach into another day's. They surface in payroll as
@@ -254,8 +257,14 @@ raises no shortfall between its sessions. Unclosed days stay out too.
   attention queue stops recomputing it. **Changes no money** — `waive` is the one
   that refunds. Audited. → `{ acknowledged: true }`.
   `ack` also **deletes any waiver** for that day — "this penalty stands" is the opposite
-  of "this penalty is removed", so at most one of the two rows exists.
-- `penaltyMin` is **required** on both: it is the amount the screen was showing. The
+  of "this penalty is removed" — in one transaction with the ack and an audit entry whose
+  `before` carries the deleted waiver's figure, reason, author and timestamp. (`waive`
+  does not clear an ack; a stale ack behind a live waiver is inert, since the waiver is
+  read first.)
+- `penaltyMin` is **required** on both and must be **at least 1**: it is the amount the
+  screen was showing, and a day with nothing docked is not a day that can be ruled on.
+  (`penaltyMinForDay` answers 0 for such a day, so a body of 0 would otherwise match and
+  land a ruling nobody could see.) The
   route computes the day's true docked minutes **server-side** and compares. They must
   match — otherwise `409 PENALTY_CHANGED`, naming both figures, and **nothing is
   written**. A refusal deletes nothing either, so an existing waiver keeps suppressing

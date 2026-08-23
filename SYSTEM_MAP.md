@@ -92,10 +92,12 @@ cuid PKs, money = Int cents.
 - **PenaltyAck** — (user, date, kind) unique, plus the same **`penalty_min?`**. The admin saw
   an auto-penalty and let it stand. Changes **no money** — it exists only so the attention
   queue stops recomputing a penalty the admin has already reviewed, and it **deletes any
-  waiver** for that day, since "this stands" is the opposite of "this is removed". Waiver =
-  revoked; ack = reviewed and upheld; at most one of the two exists. Either stops holding the
-  day off the queue once `penalty_min` no longer equals the day's current penalty — see
-  "Stale penalty rulings" in §4.
+  waiver** for that day (recording the deleted row — figure, reason, who and when — in the
+  audit `before`, in the same transaction), since "this stands" is the opposite of "this is
+  removed". Waiver = revoked; ack = reviewed and upheld. Acking clears a waiver, but waiving
+  does **not** clear an ack: a stale ack alongside a live waiver is inert, because the waiver
+  is read first. Either row stops holding the day off the queue once `penalty_min` no longer
+  equals the day's current penalty — see "Stale penalty rulings" in §4.
 - **OvertimeDecision** — (user, date) unique, `decision` ACCEPTED/REVOKED, plus
   **`overtime_min?`** — the day's overtime at the moment the owner ruled, stamped
   server-side. Mirrors the waiver/ack pattern: no row means pending, and pending
@@ -172,6 +174,14 @@ Full request/response detail is in [API.md](API.md). Summary:
   day's covered minutes vs the employee's `shift_min` (respecting overrides; DAY_OFF and unscheduled
   days are skipped; unclosed days are skipped until the missing punch is corrected). Computed on the
   fly (not stored); an admin **waiver** removes one.
+- **A penalty can zero a day but never reach past it**: `amount_cent` is clamped to that day's
+  own `grossCent`, which `computeCoverage` builds with the **same per-interval walk**
+  `payout.ts` uses — each IN/OUT pair at the rate in force when it closed, each floored on its
+  own. The minute ceiling alone is not enough: a `RateChange` is stamped `effective_from` the
+  instant it is saved, so a raise entered mid-shift makes "worked minutes x one rate" disagree
+  with what payroll actually paid, and the penalty could exceed the day and start taking the
+  next one. Sum-of-floors also sits below floor-of-sum by up to a cent per session. The clamp
+  closes both, which is what makes "the worst day is zero pay" exact rather than approximate.
 - **A day is only judged once it is over**: the **current shift-day** raises no shortfall, whatever
   its coverage says. That day is `currentShiftDayMinutes`'s answer - the Beirut day of the
   employee's open arrival, or today when nothing is open - so there is one definition of "the day

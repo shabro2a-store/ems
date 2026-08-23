@@ -323,6 +323,9 @@ interface PenaltyItem {
 function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: string; onClose: () => void; onChanged: () => void }) {
   const [items, setItems] = useState<PenaltyItem[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Restore deletes the owner's removal and starts a deduction, so it arms
+  // first like every other irreversible action in this app.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   async function load() {
@@ -334,7 +337,9 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
 
   async function setWaived(p: PenaltyItem, waived: boolean) {
     const id = `${p.date}|${p.kind}`;
-    setBusy(id); setErr(null);
+    // Keyed per action, not per row: two buttons sharing one key spin together
+    // and neither says which one is running.
+    setBusy(`${id}|${waived ? 'remove' : 'restore'}`); setErr(null);
     const res = await apiSend('/api/admin/penalties/waive', {
       // This modal does not poll, so a punch corrected while it sits open can
       // move the figure on screen. Sending it lets the server refuse a ruling
@@ -342,6 +347,7 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
       body: { userId: row.user_id, date: p.date, kind: p.kind, waived, penaltyMin: p.penaltyMin },
     });
     setBusy(null);
+    setConfirming(null);
     if (!res.ok) {
       setErr(errorMessage(res));
       await load(); // the refused ruling means the list is out of date - show the new figure
@@ -376,7 +382,10 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
                     {p.waived && <span className="ml-2 text-xs font-normal text-muted">(removed)</span>}
                   </div>
                   <div className="text-xs text-muted">
-                    {p.date} · {p.penaltyMin} min docked × {centsToUsd(p.rate_cent)}/h = <span className="text-danger">−{centsToUsd(p.amount_cent)}</span>
+                    {/* Not written as minutes x rate: the amount is clamped to what
+                        the day earned, so on a day split by a mid-shift raise the
+                        equation would not add up on screen. */}
+                    {p.date} · {p.penaltyMin} min docked · <span className="text-danger">−{centsToUsd(p.amount_cent)}</span>
                   </div>
                   {p.waived && p.waiverStale && (
                     <div className="mt-1 text-xs text-warning">
@@ -387,12 +396,28 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
                 </div>
                 <div className="flex shrink-0 gap-2">
                   {p.waived && p.waiverStale && (
-                    <Button size="sm" variant="secondary" loading={busy === id} onClick={() => setWaived(p, true)}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={busy === `${id}|remove`}
+                      onClick={() => setWaived(p, true)}
+                    >
                       Confirm removal
                     </Button>
                   )}
-                  <Button size="sm" variant={p.waived ? 'secondary' : 'ghost'} loading={busy === id} onClick={() => setWaived(p, !p.waived)}>
-                    {p.waived ? 'Restore' : 'Remove'}
+                  <Button
+                    size="sm"
+                    variant={confirming === id ? 'danger' : p.waived ? 'secondary' : 'ghost'}
+                    loading={busy === (p.waived ? `${id}|restore` : `${id}|remove`)}
+                    onClick={() => {
+                      if (p.waived && confirming !== id) {
+                        setConfirming(id);
+                        return;
+                      }
+                      void setWaived(p, !p.waived);
+                    }}
+                  >
+                    {p.waived ? (confirming === id ? 'Tap again to dock it' : 'Restore') : 'Remove'}
                   </Button>
                 </div>
               </li>

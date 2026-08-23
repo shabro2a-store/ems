@@ -24,7 +24,16 @@ const Body = z.object({
   // the server's own, and the two must agree or the ruling is refused -
   // otherwise a punch corrected while the screen sits open turns a click on a
   // $2.00 row into a ruling on $9.00.
-  penaltyMin: z.number().int().min(0),
+  penaltyMin: z
+    .number()
+    .int()
+    // Not min(0). penaltyMinForDay answers 0 for a day with no penalty - inside
+    // the grace, still open, or the current shift-day - so a body of 0 would
+    // match and land a ruling on a day no screen ever rendered: on ack that
+    // deletes a waiver, on waive it stamps a forgiveness of nothing that then
+    // covers whatever the day later grows into. Overtime tolerates the same
+    // shape only because a zero ruling there is inert.
+    .min(1, 'penaltyMin must name a real penalty: a day with nothing docked cannot be ruled on'),
 });
 
 function formatMinutes(min: number): string {
@@ -69,36 +78,59 @@ export async function POST(req: Request) {
     );
   }
 
-  // "This penalty stands" is the exact opposite of "this penalty is removed",
-  // and a waiver row is what stops the money whatever figure it names. Leaving
-  // one in place would make an ack change nothing at all - which is precisely
-  // the choice the owner is offered on a day whose waiver has gone stale: keep
-  // it removed, or apply it at the amount the day actually has now.
-  const clearedWaiver = await prisma.penaltyWaiver.deleteMany({
-    where: { user_id: body.userId, date, kind: body.kind },
+  const key = { user_id_date_kind: { user_id: body.userId, date, kind: body.kind } };
+
+  // One transaction, because this is the only path here that destroys a row.
+  // A failure between the delete and the ack would leave the waiver gone, the
+  // deduction started, and nothing on record saying why.
+  const clearedWaiver = await prisma.$transaction(async (tx) => {
+    // Read before deleting. "This penalty stands" is the exact opposite of
+    // "this penalty is removed", and a waiver row is what stops the money
+    // whatever figure it names - so an ack has to clear it or it changes
+    // nothing at all. But the owner's stated reason for forgiving that day is
+    // his record, and deleting it unrecorded makes it unrecoverable.
+    const priorWaiver = await tx.penaltyWaiver.findUnique({ where: key });
+    const priorAck = await tx.penaltyAck.findUnique({ where: key });
+    if (priorWaiver) {
+      await tx.penaltyWaiver.delete({ where: key });
+    }
+
+    await tx.penaltyAck.upsert({
+      where: key,
+      create: { user_id: body.userId, date, kind: body.kind, penalty_min: penaltyMin, acknowledged_by: adminId },
+      update: { penalty_min: penaltyMin, acknowledged_by: adminId },
+    });
+
+    await writeAuditLog({
+      db: tx,
+      actorId: adminId,
+      action: 'penalty.acknowledge',
+      entity: 'PenaltyAck',
+      entityId: `${body.userId}:${body.date}:${body.kind}`,
+      before: {
+        waiver: priorWaiver
+          ? {
+              penalty_min: priorWaiver.penalty_min,
+              reason: priorWaiver.reason,
+              waived_by: priorWaiver.waived_by,
+              created_at: priorWaiver.created_at.toISOString(),
+            }
+          : null,
+        ack: priorAck ? { penalty_min: priorAck.penalty_min, acknowledged_by: priorAck.acknowledged_by } : null,
+      },
+      after: {
+        user_id: body.userId,
+        date: body.date,
+        kind: body.kind,
+        penalty_min: penaltyMin,
+        cleared_waiver: priorWaiver !== null,
+      },
+    });
+
+    return priorWaiver !== null;
   });
 
-  await prisma.penaltyAck.upsert({
-    where: { user_id_date_kind: { user_id: body.userId, date, kind: body.kind } },
-    create: { user_id: body.userId, date, kind: body.kind, penalty_min: penaltyMin, acknowledged_by: adminId },
-    update: { penalty_min: penaltyMin, acknowledged_by: adminId },
-  });
-
-  await writeAuditLog({
-    actorId: adminId,
-    action: 'penalty.acknowledge',
-    entity: 'PenaltyAck',
-    entityId: `${body.userId}:${body.date}:${body.kind}`,
-    after: {
-      user_id: body.userId,
-      date: body.date,
-      kind: body.kind,
-      penalty_min: penaltyMin,
-      cleared_waiver: clearedWaiver.count > 0,
-    },
-  });
-
-  return NextResponse.json({ ok: true, data: { acknowledged: true } });
+  return NextResponse.json({ ok: true, data: { acknowledged: true, cleared_waiver: clearedWaiver } });
 }
 
 export const dynamic = 'force-dynamic';

@@ -33,6 +33,9 @@ const OUT_CORRECTED = new Date('2026-07-01T10:00:00Z');
 const OUT_SMALL = new Date('2026-07-01T12:30:00Z');
 // Out 12:00 Beirut: 240 worked, 240 short -> ceilinged to 240 docked, $8.00.
 const OUT_BIG = new Date('2026-07-01T09:00:00Z');
+// Out 16:00 Beirut: the full 480 minutes, so the day has no penalty at all and
+// penaltyMinForDay answers 0 for it.
+const OUT_FULL = new Date('2026-07-01T13:00:00Z');
 const SMALL_MIN = 60;
 const SMALL_CENT = 200;
 const BIG_MIN = 240;
@@ -122,11 +125,12 @@ async function waive(
   userId: string,
   waived: boolean,
   penaltyMin: number,
+  reason?: string,
 ): Promise<Response> {
   return fetch(`${BASE_URL}/api/admin/penalties/waive`, {
     method: 'POST',
     headers: headersFor(session),
-    body: JSON.stringify({ userId, date: DAY, kind: 'SHORTFALL', waived, penaltyMin }),
+    body: JSON.stringify({ userId, date: DAY, kind: 'SHORTFALL', waived, penaltyMin, reason }),
   });
 }
 
@@ -261,6 +265,77 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     const rows = await getTestPrisma().penaltyWaiver.findMany({ where: { user_id: emp.id } });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.penalty_min).toBe(BIG_MIN);
+  });
+
+  it('records the removal it destroys, with the reason the owner gave', async () => {
+    // Accepting deletes the waiver. Its penalty_min, reason, who granted it and
+    // when are the owner's own record of why that day was forgiven - deleting
+    // them with nothing but a boolean makes the reason unrecoverable.
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    await setCheckout(emp.id, OUT_SMALL);
+    expect((await waive(aSession, emp.id, true, SMALL_MIN, 'gave notice, family funeral')).status).toBe(200);
+    const granted = (await getTestPrisma().penaltyWaiver.findFirst({ where: { user_id: emp.id } }))!;
+    await setCheckout(emp.id, OUT_BIG);
+
+    expect((await ack(aSession, emp.id, BIG_MIN)).status).toBe(200);
+
+    const audit = await getTestPrisma().auditLog.findFirst({
+      where: { entity: 'PenaltyAck', entity_id: `${emp.id}:${DAY}:SHORTFALL`, action: 'penalty.acknowledge' },
+    });
+    expect(audit?.before_json).toMatchObject({
+      waiver: {
+        penalty_min: SMALL_MIN,
+        reason: 'gave notice, family funeral',
+        waived_by: admin.id,
+        created_at: granted.created_at.toISOString(),
+      },
+    });
+    expect(audit?.after_json).toMatchObject({ cleared_waiver: true });
+  });
+
+  it('leaves no half-done state: the removal survives a ruling that never lands', async () => {
+    // The delete, the ack and the audit row are one transaction. A ruling that
+    // is refused before any of them runs must leave the removal untouched.
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    await setCheckout(emp.id, OUT_SMALL);
+    expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
+    await setCheckout(emp.id, OUT_BIG);
+
+    expect((await ack(aSession, emp.id, SMALL_MIN)).status).toBe(409);
+    expect(await getTestPrisma().penaltyWaiver.findMany({ where: { user_id: emp.id } })).toHaveLength(1);
+    expect(await getTestPrisma().penaltyAck.findMany({ where: { user_id: emp.id } })).toHaveLength(0);
+    expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(0);
+  });
+
+  it('refuses a ruling that names a penalty of nothing', async () => {
+    // penaltyMinForDay answers 0 for a day with no penalty at all, so a body of
+    // 0 MATCHES on such a day and the ruling lands. Here the correction wipes
+    // the shortfall entirely: a zero ack would then delete the owner's removal
+    // on a day no screen renders, and a zero waiver would stamp a forgiveness
+    // of nothing that sits there covering whatever the day later grows into.
+    const { emp, admin } = await setup();
+    const aSession = await loginAs(admin.username, 'change-me');
+    await setCheckout(emp.id, OUT_SMALL);
+    expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
+
+    await setCheckout(emp.id, OUT_FULL);
+    expect(await listedPenalties(aSession, emp.id)).toHaveLength(0); // nothing to rule on
+
+    const zeroAck = await ack(aSession, emp.id, 0);
+    expect(zeroAck.status).toBe(400);
+    expect((await zeroAck.json()).error.code).toBe('INVALID_INPUT');
+
+    const zeroWaive = await waive(aSession, emp.id, true, 0);
+    expect(zeroWaive.status).toBe(400);
+    expect((await zeroWaive.json()).error.code).toBe('INVALID_INPUT');
+
+    // Nothing touched: the removal still stands and no ack was written.
+    expect(await getTestPrisma().penaltyAck.findMany({ where: { user_id: emp.id } })).toHaveLength(0);
+    const waivers = await getTestPrisma().penaltyWaiver.findMany({ where: { user_id: emp.id } });
+    expect(waivers).toHaveLength(1);
+    expect(waivers[0]!.penalty_min).toBe(SMALL_MIN);
   });
 
   it('applies the penalty at the new figure when the owner accepts it instead', async () => {

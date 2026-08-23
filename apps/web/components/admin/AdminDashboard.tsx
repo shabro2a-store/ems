@@ -331,18 +331,27 @@ export default function AdminDashboard() {
                         <div className="mt-2 flex gap-2">
                           <Button
                             size="sm"
-                            variant="secondary"
+                            // On a normal row Accept only files a deduction that is
+                            // already happening. On a stale-removal row it is the
+                            // destructive one: it deletes the owner's waiver and
+                            // starts the deduction, so it gets the same two-step
+                            // guard every other irreversible action here has.
+                            variant={confirming === `pen-ok:${key}` ? 'danger' : 'secondary'}
                             loading={busy === `pen-ok:${key}`}
-                            onClick={() =>
-                              act(`pen-ok:${key}`, '/api/admin/penalties/ack', {
+                            onClick={() => {
+                              if (p.waived && confirming !== `pen-ok:${key}`) {
+                                setConfirming(`pen-ok:${key}`);
+                                return;
+                              }
+                              void act(`pen-ok:${key}`, '/api/admin/penalties/ack', {
                                 body,
                                 success: p.waived
                                   ? `Penalty for ${p.username} applied — ${centsToUsd(p.amount_cent)} docked, your earlier removal cleared.`
                                   : `Penalty for ${p.username} stands — ${centsToUsd(p.amount_cent)} stays docked.`,
-                              })
-                            }
+                              });
+                            }}
                           >
-                            Accept
+                            {confirming === `pen-ok:${key}` ? 'Tap again to dock it' : 'Accept'}
                           </Button>
                           <Button
                             size="sm"
