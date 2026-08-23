@@ -1,6 +1,12 @@
 import type { PrismaClient } from '@prisma/client';
 import { rateAt, monthRangeUtc } from './payout';
-import { computeCoverage, type DayCoverage, type OverrideLite, type PunchLite } from './coverage';
+import {
+  computeCoverage,
+  currentShiftDayMinutes,
+  type DayCoverage,
+  type OverrideLite,
+  type PunchLite,
+} from './coverage';
 
 /**
  * Minutes docked for covering fewer than the day required.
@@ -45,18 +51,42 @@ interface RateChangeLite {
 }
 
 /**
- * Shortfall penalties from a day's coverage. Unclosed days are skipped - their
- * hours are unknowable until the missing punch is corrected.
+ * The shift-day the employee is on right now, which is the day a shortfall must
+ * not be judged on yet. Delegated to currentShiftDayMinutes so there is one
+ * definition of "the day they are currently working": the Beirut day of their
+ * open arrival, or today when nothing is open.
+ *
+ * Callers pass the punches they already loaded. A month window always contains
+ * an open arrival belonging to that month, which is the only one that can name
+ * a day inside that month's coverage.
+ */
+export function currentShiftDate(punches: PunchLite[], now: Date): string {
+  return currentShiftDayMinutes({ punches, now }).date;
+}
+
+/**
+ * Shortfall penalties from a day's coverage.
+ *
+ * Two kinds of day are not judged. An unclosed day, because its hours are
+ * unknowable until the missing punch is corrected. And the current shift-day,
+ * because it is not over: staff work split shifts, so punching out after the
+ * morning session used to raise a full shortfall against the whole day's hours
+ * the instant it closed, only for it to vanish when they came back in the
+ * evening. Both conditions are needed - a split-shift worker between sessions
+ * has no open punch, so `closed` is true and only the shift-day check saves
+ * them; someone still clocked in on a past day is caught by `closed` alone.
  */
 export function shortfallPenalties(args: {
   coverage: DayCoverage[];
   rateChanges: RateChangeLite[];
   graceMin: number;
+  currentShiftDate: string;
   waivedKeys: Set<string>; // `${date}|SHORTFALL`
 }): PenaltyItem[] {
   const items: PenaltyItem[] = [];
   for (const day of args.coverage) {
     if (!day.closed) continue;
+    if (day.date === args.currentShiftDate) continue;
     if (day.deltaMin >= 0) continue;
     const shortfallMin = -day.deltaMin;
     const penaltyMin = penaltyMinutes(shortfallMin, day.workedMin, args.graceMin);
@@ -81,6 +111,7 @@ export async function penaltiesForUser(
   userId: string,
   month: string,
   db: PrismaClient,
+  opts: { now?: Date } = {},
 ): Promise<PenaltyItem[]> {
   const { start, end } = monthRangeUtc(month);
   const [punches, schedules, overrides, rateChanges, waivers, user] = await Promise.all([
@@ -136,6 +167,7 @@ export async function penaltiesForUser(
     coverage,
     rateChanges: rateChanges as RateChangeLite[],
     graceMin: user?.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN,
+    currentShiftDate: currentShiftDate(punches as PunchLite[], opts.now ?? new Date()),
     waivedKeys,
   });
 }
@@ -161,6 +193,7 @@ export async function pendingPenaltyNotices(
 ): Promise<PenaltyNotice[]> {
   if (users.length === 0) return [];
   const ids = users.map((u) => u.id);
+  const now = opts.now ?? new Date();
   const { start, end } = monthRangeUtc(month);
 
   const [punches, schedules, overrides, rateChanges, waivers, acks, userBranches] = await Promise.all([
@@ -236,8 +269,9 @@ export async function pendingPenaltyNotices(
       waivedKeys.add(`${w.date.toISOString().slice(0, 10)}|${w.kind}`);
     }
 
+    const userPunches = (punchesBy.get(u.id) ?? []) as PunchLite[];
     const coverage = computeCoverage({
-      punches: (punchesBy.get(u.id) ?? []) as PunchLite[],
+      punches: userPunches,
       shiftMinByWeekday,
       overridesByDate,
     });
@@ -245,6 +279,7 @@ export async function pendingPenaltyNotices(
       coverage,
       rateChanges: (ratesBy.get(u.id) ?? []) as RateChangeLite[],
       graceMin: graceByUser.get(u.id) ?? DEFAULT_GRACE_MIN,
+      currentShiftDate: currentShiftDate(userPunches, now),
       waivedKeys,
     });
 

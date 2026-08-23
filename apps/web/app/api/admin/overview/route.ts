@@ -236,7 +236,7 @@ export async function GET(req: Request) {
   const months = lookbackMonths(since, todayStr);
 
   const [penaltyBatches, overtimeBatches] = await Promise.all([
-    Promise.all(months.map((m) => pendingPenaltyNotices(penaltyUsers, m, prisma, { since }))),
+    Promise.all(months.map((m) => pendingPenaltyNotices(penaltyUsers, m, prisma, { since, now: nowDate }))),
     Promise.all(months.map((m) => pendingOvertimeNotices(penaltyUsers, m, prisma, { since }))),
   ]);
 

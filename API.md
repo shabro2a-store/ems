@@ -236,6 +236,9 @@ threshold, not forgiveness — the whole shortfall is doubled once it is crossed
 and the ceiling at the day's own worked minutes means a penalty can zero a day's
 pay but never reach into another day's. They surface in payroll as
 `penalties_cent` and reduce `net_cent`.
+A day is only judged once it is over: the employee's **current shift-day** (the
+Beirut day of their open check-in, else today) never appears, so a split shift
+raises no shortfall between its sessions. Unclosed days stay out too.
 - **GET /api/admin/penalties?userId=&month=YYYY-MM** → `{ penalties: [{ date, kind:
   "SHORTFALL", shortfallMin, penaltyMin, rate_cent, amount_cent, waived }] }`.
 - **POST /api/admin/penalties/waive** *(CSRF)* `{ userId, date: "YYYY-MM-DD", kind:

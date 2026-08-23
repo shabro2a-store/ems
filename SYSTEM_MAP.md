@@ -165,6 +165,15 @@ Full request/response detail is in [API.md](API.md). Summary:
   day's covered minutes vs the employee's `shift_min` (respecting overrides; DAY_OFF and unscheduled
   days are skipped; unclosed days are skipped until the missing punch is corrected). Computed on the
   fly (not stored); an admin **waiver** removes one.
+- **A day is only judged once it is over**: the **current shift-day** raises no shortfall, whatever
+  its coverage says. That day is `currentShiftDayMinutes`'s answer - the Beirut day of the
+  employee's open arrival, or today when nothing is open - so there is one definition of "the day
+  they are on". Staff work split shifts, and `closed` alone is not enough: punching out after the
+  morning session leaves nothing open, so the day used to raise a full shortfall against the whole
+  day's hours that vanished again when they came back in the evening. Both conditions are needed.
+  Penalties are computed live, so nothing needs a worker job to release the day - it simply becomes
+  judgeable when the Beirut day turns over, everywhere at once (attention queue, `payoutForUser`,
+  the employee payslip, the advance entitlement cap).
 - **Overtime (`overtime.ts`)**: covering more than the day required by more than the branch's
   `shift_grace_min` (default 15) raises a notice — the same `DayCoverage` as a shortfall,
   just `deltaMin` positive past the grace instead of negative. The grace only decides whether
