@@ -19,7 +19,10 @@ import { computePayoutFromRows, monthRangeUtc } from './payout';
 const RATE = [{ user_id: 'u1', rate_cent: 300, effective_from: new Date('2020-01-01T00:00:00Z') }];
 const PAIR_LOOKAROUND_MS = 2 * 86_400_000;
 
-function payoutForMonth(month: string, punches: Array<{ kind: 'IN' | 'OUT'; at: Date }>) {
+function payoutForMonth(
+  month: string,
+  punches: Array<{ kind: 'IN' | 'OUT'; at: Date; branch_id?: string }>,
+) {
   const { start, end } = monthRangeUtc(month);
   // Exactly the window payoutForUser sends to Postgres.
   const from = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
@@ -28,7 +31,10 @@ function payoutForMonth(month: string, punches: Array<{ kind: 'IN' | 'OUT'; at: 
     userId: 'u1',
     punches: punches
       .filter((p) => p.at >= from && p.at < to)
-      .map((p, i) => ({ id: `p${i}`, user_id: 'u1', kind: p.kind, at: p.at })),
+      // branch_id rides along deliberately: it must reach the pairing and be
+      // ignored by it. Payroll pairs a person's punches in time order and asks
+      // nothing about where each one was made.
+      .map((p, i) => ({ id: `p${i}`, user_id: 'u1', kind: p.kind, at: p.at, branch_id: p.branch_id })),
     rateChanges: RATE,
     adjustments: [],
     approvedAdvances: [],
@@ -115,5 +121,20 @@ describe('a night shift across the month boundary', () => {
     ];
     expect(payoutForMonth('2026-01', nights).hours).toBe(20);
     expect(payoutForMonth('2026-02', nights).hours).toBe(10);
+  });
+
+  it('pairs across branches as readily as across the month', () => {
+    // A roaming employee starts the night at Hamra on the 31st and finishes at
+    // Achrafieh on the 1st. Two branches, two months, one shift: ten hours, all
+    // of them January's. Payroll pairs a person's punches in time order and has
+    // no branch in its row type at all, so the shift cannot be split by where
+    // it happened - and no query in the money path filters punches by branch.
+    const crossBranch = [
+      { kind: 'IN' as const, at: new Date('2026-01-31T19:00:00Z'), branch_id: 'hamra' },
+      { kind: 'OUT' as const, at: new Date('2026-02-01T05:00:00Z'), branch_id: 'achrafieh' },
+    ];
+    expect(payoutForMonth('2026-01', crossBranch).hours).toBe(10);
+    expect(payoutForMonth('2026-01', crossBranch).grossCent).toBe(3000);
+    expect(payoutForMonth('2026-02', crossBranch).grossCent).toBe(0);
   });
 });
