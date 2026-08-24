@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
 import { abandonedTripClose } from './tripClose';
+import { GEO_BRANCH_SELECT, type GeoBranch } from './branchScope';
 
 export type TripErrorCode =
   | 'USER_NOT_FOUND'
@@ -60,25 +61,23 @@ export async function startTrip(
       created_at: { gte: new Date(now.getTime() - DISPATCH_WINDOW_MS) },
     },
     orderBy: { created_at: 'desc' },
-    select: { id: true },
+    select: { id: true, branch_id: true },
   });
   if (!call) return { ok: false, code: 'NOT_DISPATCHED' };
 
-  const geo = verifyWithinGeofence(
-    input.lat,
-    input.lng,
-    [
-      {
-        id: user.branch.id,
-        lat: user.branch.lat,
-        lng: user.branch.lng,
-        gps_radius_m: user.branch.gps_radius_m,
-        gps_accuracy_max_m: user.branch.gps_accuracy_max_m,
-        is_active: user.branch.is_active,
-      },
-    ],
-    input.accuracy,
-  );
+  // The order belongs to the branch that rang, and the driver has to be
+  // standing at THAT branch to take it - not merely at some branch. For a
+  // driver who cannot roam this is always their own branch, because ringDriver
+  // refuses a ring from anywhere else; for one who can, it is what stops a
+  // driver at Hamra collecting an Achrafieh order they were rung for.
+  const dispatchBranch: GeoBranch = call.branch_id
+    ? ((await db.branch.findUnique({
+        where: { id: call.branch_id },
+        select: GEO_BRANCH_SELECT,
+      })) ?? user.branch)
+    : user.branch;
+
+  const geo = verifyWithinGeofence(input.lat, input.lng, [dispatchBranch], input.accuracy);
   if (!geo.ok) {
     if (geo.reason === 'LOW_GPS_ACCURACY') return { ok: false, code: 'LOW_GPS_ACCURACY' };
     return { ok: false, code: 'OUT_OF_GEOFENCE' };
@@ -88,7 +87,7 @@ export async function startTrip(
     const t = await tx.trip.create({
       data: {
         driver_id: user.id,
-        branch_id: user.branch!.id,
+        branch_id: dispatchBranch.id,
         out_at: now,
         out_lat: input.lat,
         out_lng: input.lng,
@@ -134,22 +133,17 @@ export async function endTrip(
   const open = await db.trip.findFirst({
     where: { driver_id: user.id, back_at: null },
     orderBy: { out_at: 'desc' },
+    include: { branch: { select: GEO_BRANCH_SELECT } },
   });
   if (!open) return { ok: false, code: 'NO_OPEN_TRIP' };
 
+  // Come back where you went out from. The trip's own branch, not the driver's:
+  // identical for anyone who cannot roam, and for anyone who can it is what
+  // stops an Achrafieh order being closed by arriving at Hamra.
   const geo = verifyWithinGeofence(
     input.lat,
     input.lng,
-    [
-      {
-        id: user.branch.id,
-        lat: user.branch.lat,
-        lng: user.branch.lng,
-        gps_radius_m: user.branch.gps_radius_m,
-        gps_accuracy_max_m: user.branch.gps_accuracy_max_m,
-        is_active: user.branch.is_active,
-      },
-    ],
+    [open.branch ?? user.branch],
     input.accuracy,
   );
   if (!geo.ok) {

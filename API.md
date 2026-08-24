@@ -55,6 +55,16 @@ Body `{ kind: "IN"|"OUT", lat, lng, accuracy, deviceFp }`. Enforces the
 driver-open-trip block, geofence (accuracy + radius) and open-session rules; records
 a punch with full GPS evidence and audit; may resolve a WATCHED flag. An approved
 day-off does **not** block punching (staff may come in to help).
+
+**Which branch counts.** Normally only the employee's own. With
+`can_roam_branches` the geofence is checked against **every active branch** and the
+punch records the one they were actually standing at — so a shift can start at Hamra
+and end at Achrafieh, and `/api/admin/now` files them where they really are. The
+check itself never goes away: they must still be inside a real branch's radius with
+acceptable GPS, which is what keeps a `BlockedPunchAttempt` (paid time) unforgeable.
+A clock-**OUT** additionally always accepts the branch of the open check-in, whatever
+the flag says now, so revoking the privilege mid-cover cannot strand somebody.
+
 → `200 { at, kind, minutes_since_in }`. Errors:
 `OPEN_TRIP_EXISTS` 409, `ALREADY_PUNCHED_IN` 409, `NOT_PUNCHED_IN` 409,
 `LOW_GPS_ACCURACY` 422, `OUT_OF_GEOFENCE` 422, plus the common ones. Every one
@@ -128,8 +138,15 @@ Summary `{ pending, upcoming: [...] }`; request body
   Requires the driver to have been **rung by the caller** in the last 30 min (an unconsumed
   `DriverCall`); starting the trip consumes that ring. → `200 { trip_id, out_at }`. Errors:
   `NOT_DISPATCHED` 409 (no ring), `OPEN_TRIP_EXISTS` 409, geofence 422, `NOT_DRIVER` 403.
+  The geofence is checked against **the branch that rang**, and the trip is filed there.
+  Identical to the driver's own branch for anyone who cannot roam (`ringDriver` refuses a
+  ring from elsewhere); for a driver covering at another branch it is what stops them
+  collecting an order they were rung for while standing somewhere else.
 - **POST /api/me/trip/end** *(CSRF, Idempotent)* `{ lat, lng, accuracy }`
-  → `200 { trip_id, back_at, duration_min }`. Error: `NO_OPEN_TRIP` 409.
+  Geofenced against **the trip's own branch** — come back where you went out from.
+  → `200 { trip_id, back_at, duration_min }`. Error: `NO_OPEN_TRIP` 409, which is now
+  reachable without the driver doing anything wrong (the abandoned-trip sweep may have
+  closed it), so it carries a message saying so.
 - **GET /api/me/trip/current** → `200 { open, since_min?, threshold_min }`.
 
 ### GET /api/me/calls  ·  POST /api/me/calls/ack  *(ack: CSRF)*
@@ -217,16 +234,22 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 ### Employees
 - **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`).
 - **POST /api/admin/users** *(CSRF, Idempotent)* `{ username, name?, password, role:
-  "EMPLOYEE"|"DRIVER"|"CALLER", branchId, hourlyRateCent }` → `{ user, temp_password }`.
+  "EMPLOYEE"|"DRIVER"|"CALLER", branchId, hourlyRateCent, canRoamBranches? }` →
+  `{ user, temp_password }`. `canRoamBranches` defaults to **false**: a new account is
+  single-branch until the owner grants otherwise.
   `username` is the login; `name` is the display name. Creating an **ADMIN is
   rejected (403)**. **CALLER** needs a branch, gets no pay rate/RateChange, and is capped at
   **one active caller per branch** → `409 CALLER_EXISTS`.
 - **PATCH /api/admin/users/[id]** *(CSRF)* `{ username?, name?, role?, branchId?,
-  hourlyRateCent?, expectedMonthlySalaryCent? }` (a rate change inserts a new `RateChange`;
+  hourlyRateCent?, expectedMonthlySalaryCent?, canRoamBranches? }` (a rate change inserts a
+  new `RateChange`;
   `username` is uniqueness-checked → `409 USERNAME_TAKEN`). Promoting to admin, or changing the
   admin's role, is **rejected (403)** (the admin's username/name are still editable).
   `expectedMonthlySalaryCent` (or `null` to clear) is a reference figure only — it is never
   read by any payroll calculation, just displayed on `/admin/payroll` next to actual earnings.
+  `canRoamBranches` lets this person clock in and out at any active branch and be dispatched
+  from whichever branch rang them; audited on both sides. Nothing about it is cached or
+  copied onto a token, so revoking takes effect on the very next punch.
 - **POST /api/admin/users/[id]/reset-password** *(CSRF)* optional `{ password }` —
   sets that password, or generates a random one. → `{ temp_password }`.
 - **POST /api/admin/users/[id]/deactivate** *(CSRF)* toggles active. Deactivating an
@@ -405,7 +428,10 @@ The POS caller's board. A caller belongs to one branch and can only see/ring dri
 
 ### GET /api/caller/drivers
 → `{ branch, drivers: [{ id, username, name, clocked_in, available, open_trip_since,
-trips_today, ringing, last_trip_at }] }`. `available` = clocked in and not on a trip;
+trips_today, ringing, last_trip_at, roaming }] }`. `available` = clocked in and not on a trip;
+`roaming` = belongs to another branch and is covering here. A visiting driver appears on
+exactly one board — the branch their open check-in was made at — and sorts behind the
+branch's own drivers at equal availability;
 `trips_today` counts trips since this shift's clock-in.
 
 **Order is meaningful — the board renders it as-is.** Available drivers come first, then
@@ -416,7 +442,9 @@ anyone.
 
 ### POST /api/caller/ring  *(CSRF)*
 Body `{ driverId }`. Records a ring the driver's app picks up. → `{ rang: true }`.
-Errors: `WRONG_BRANCH` 403 (driver not in caller's branch), `NOT_FOUND` 404.
+Errors: `WRONG_BRANCH` 403, `NOT_FOUND` 404. A driver from another branch may be rung only
+while `can_roam_branches` **and** their open check-in is at this branch — roaming alone is
+not enough, since the ring is what authorises the trip.
 
 ## Telegram
 

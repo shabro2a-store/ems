@@ -7,6 +7,7 @@ type Store = {
     is_active: boolean;
     role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
     branch_id: string;
+    can_roam_branches: boolean;
     branch: {
       id: string;
       name: string;
@@ -103,6 +104,7 @@ const mocks = vi.hoisted(() => ({
   user: { findUnique: vi.fn() },
   scheduleOverride: { findUnique: vi.fn() },
   trip: { findFirst: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
+  branch: { findMany: vi.fn(), findUnique: vi.fn() },
   punch: { findFirst: vi.fn(), create: vi.fn() },
   blockedPunchAttempt: { create: vi.fn() },
   auditLog: { create: vi.fn() },
@@ -189,6 +191,7 @@ function makeUser(id: string, branch: ReturnType<typeof makeBranch>, role: 'EMPL
     branch_id: branch.id,
     branch,
     hourly_rate_cent: 200,
+    can_roam_branches: false,
     password_hash: 'x',
     telegram_chat_id: null as string | null,
     notify_daily_summary: true,
@@ -226,6 +229,13 @@ beforeEach(() => {
           o.date.getTime() === where.user_id_date.date.getTime(),
       ) ?? null
     );
+  });
+
+  mocks.branch.findMany.mockImplementation(async ({ where }: { where: { is_active: boolean } }) => {
+    return [...store.branches.values()].filter((b) => b.is_active === where.is_active);
+  });
+  mocks.branch.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => {
+    return store.branches.get(where.id) ?? null;
   });
 
   mocks.trip.findFirst.mockImplementation(async ({ where }: { where: { driver_id: string; back_at: null } }) => {
@@ -1098,5 +1108,117 @@ describe('a trip nobody ended stops blocking the driver', () => {
 
     expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
     expect(store.trips[0]!.back_at).toEqual(new Date(OUT_AT.getTime() + 30 * 60_000));
+  });
+});
+
+// Covering at another branch. The privilege widens WHICH branch counts; it
+// never removes the geofence, which is what keeps a BlockedPunchAttempt worth
+// paying on - those rows mean "was at a branch and the system refused them".
+describe('an employee the owner lets cover at any branch', () => {
+  const HAMRA = { lat: 33.8962, lng: 35.4827 };
+  const ACHRAFIEH = { lat: 33.8886, lng: 35.52 }; // ~3.4km away, well outside 50m
+  const NOW = new Date('2026-08-24T08:00:00Z');
+
+  function seedTwoBranches() {
+    const hamra = makeBranch({ id: 'b1', name: 'Hamra', ...HAMRA });
+    const achrafieh = makeBranch({ id: 'b2', name: 'Achrafieh', ...ACHRAFIEH });
+    store.branches.set(hamra.id, hamra);
+    store.branches.set(achrafieh.id, achrafieh);
+    return { hamra, achrafieh };
+  }
+
+  it('refuses another branch while the privilege is off', async () => {
+    const { hamra } = seedTwoBranches();
+    const user = makeUser('u1', hamra);
+    store.users.set(user.id, user);
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', ...ACHRAFIEH, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: NOW,
+    });
+    expect('code' in r && r.code).toBe('OUT_OF_GEOFENCE');
+  });
+
+  it('accepts another branch and records the hours THERE', async () => {
+    const { hamra, achrafieh } = seedTwoBranches();
+    const user = makeUser('u1', hamra);
+    user.can_roam_branches = true;
+    store.users.set(user.id, user);
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', ...ACHRAFIEH, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: NOW,
+    });
+
+    expect('punch' in r).toBe(true);
+    // Not the branch they are posted to. A punch says where the hours were
+    // worked, and "who is at Achrafieh right now" is only true if it does.
+    if ('punch' in r) expect(r.punch.branch_id).toBe(achrafieh.id);
+  });
+
+  it('is still refused when they are at no branch at all', async () => {
+    seedTwoBranches();
+    const user = makeUser('u1', makeBranch({ id: 'b1', name: 'Hamra', ...HAMRA }));
+    user.can_roam_branches = true;
+    store.users.set(user.id, user);
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.95, lng: 35.7, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: NOW,
+    });
+    expect('code' in r && r.code).toBe('OUT_OF_GEOFENCE');
+  });
+
+  it('starts at one branch and finishes at the other, one shift', async () => {
+    // The whole point of the toggle, in one test.
+    const { hamra, achrafieh } = seedTwoBranches();
+    const user = makeUser('u1', hamra);
+    user.can_roam_branches = true;
+    store.users.set(user.id, user);
+
+    await punchEmployee({
+      userId: 'u1', kind: 'IN', ...HAMRA, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: NOW,
+    });
+    const out = await punchEmployee({
+      userId: 'u1', kind: 'OUT', ...ACHRAFIEH, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: new Date(NOW.getTime() + 6 * 60 * 60_000),
+    });
+
+    expect('punch' in out).toBe(true);
+    if ('punch' in out) {
+      expect(out.punch.branch_id).toBe(achrafieh.id);
+      expect(out.minutes_since_in).toBe(360);
+    }
+  });
+
+  it('can still clock out where it clocked in after the privilege is revoked', async () => {
+    // The owner restricts them while they are standing at the other branch.
+    // Without the carve-out in punchableBranches this is a lockout until they
+    // drive back or the 30h sweep closes the session for them.
+    const { hamra, achrafieh } = seedTwoBranches();
+    const user = makeUser('u1', hamra);
+    user.can_roam_branches = true;
+    store.users.set(user.id, user);
+
+    await punchEmployee({
+      userId: 'u1', kind: 'IN', ...ACHRAFIEH, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: NOW,
+    });
+    user.can_roam_branches = false;
+
+    const out = await punchEmployee({
+      userId: 'u1', kind: 'OUT', ...ACHRAFIEH, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: new Date(NOW.getTime() + 4 * 60 * 60_000),
+    });
+    expect('punch' in out).toBe(true);
+    if ('punch' in out) expect(out.punch.branch_id).toBe(achrafieh.id);
+
+    // And the next check-in there is refused, so nothing was actually widened.
+    const nextIn = await punchEmployee({
+      userId: 'u1', kind: 'IN', ...ACHRAFIEH, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: new Date(NOW.getTime() + 5 * 60 * 60_000),
+    });
+    expect('code' in nextIn && nextIn.code).toBe('OUT_OF_GEOFENCE');
   });
 });

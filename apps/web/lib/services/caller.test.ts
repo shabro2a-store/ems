@@ -11,6 +11,7 @@ function driver(over: Partial<DriverStatus> & { name: string }): DriverStatus {
     trips_today: 0,
     ringing: false,
     last_trip_at: null,
+    roaming: false,
     ...over,
   };
 }
@@ -67,5 +68,28 @@ describe('caller board rotation', () => {
   it('falls back to name only when turn order is genuinely tied', () => {
     const board = [driver({ name: 'zoe' }), driver({ name: 'adam' })];
     expect(order(board)).toEqual(['adam', 'zoe']);
+  });
+});
+
+describe('a driver covering from another branch', () => {
+  it('sorts behind the branch own drivers at equal availability', () => {
+    // The visitor went out longer ago, so pure rotation would put them first.
+    // They are help, not part of the rota - the caller can still ring them.
+    expect(
+      order([
+        driver({ name: 'local', last_trip_at: '2026-08-02T11:00:00.000Z' }),
+        driver({ name: 'visitor', roaming: true, last_trip_at: '2026-08-02T09:00:00.000Z' }),
+      ]),
+    ).toEqual(['local', 'visitor']);
+  });
+
+  it('still ranks below anyone actually available', () => {
+    // Availability outranks belonging: an idle visitor beats a local who is out.
+    expect(
+      order([
+        driver({ name: 'local-out', available: false, open_trip_since: '2026-08-02T12:00:00.000Z' }),
+        driver({ name: 'visitor-free', roaming: true }),
+      ]),
+    ).toEqual(['visitor-free', 'local-out']);
   });
 });

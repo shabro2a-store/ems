@@ -14,6 +14,10 @@ const Patch = z.object({
   hourlyRateCent: z.number().int().nonnegative().optional(),
   // Reference only (see schema.prisma). null clears it back to unset.
   expectedMonthlySalaryCent: z.number().int().nonnegative().nullable().optional(),
+  // Clock in and out at any active branch, not only their own. Revoking it
+  // bites on the very next punch - nothing about it is cached or copied onto a
+  // token, so a shift already in progress finishes under the new rule.
+  canRoamBranches: z.boolean().optional(),
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -81,6 +85,9 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         ...(body.expectedMonthlySalaryCent !== undefined
           ? { expected_monthly_salary_cent: body.expectedMonthlySalaryCent }
           : {}),
+        ...(body.canRoamBranches !== undefined
+          ? { can_roam_branches: body.canRoamBranches }
+          : {}),
       },
     });
     if (body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent) {
@@ -106,6 +113,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       branch_id: before.branch_id,
       hourly_rate_cent: before.hourly_rate_cent,
       expected_monthly_salary_cent: before.expected_monthly_salary_cent,
+      can_roam_branches: before.can_roam_branches,
     },
     after: {
       username: user.username,
@@ -113,6 +121,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       branch_id: user.branch_id,
       hourly_rate_cent: user.hourly_rate_cent,
       expected_monthly_salary_cent: user.expected_monthly_salary_cent,
+      can_roam_branches: user.can_roam_branches,
     },
   });
 

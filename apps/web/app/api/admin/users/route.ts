@@ -14,6 +14,9 @@ const Create = z.object({
   role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN', 'CALLER']),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative(),
+  // Omitted on every normal create, and the column defaults to false: a new
+  // account is single-branch until the owner deliberately grants otherwise.
+  canRoamBranches: z.boolean().optional(),
 });
 
 // Roles that belong to a branch. Callers (POS cashiers) are branch-scoped too but
@@ -41,6 +44,7 @@ export async function GET() {
       branch_id: true,
       hourly_rate_cent: true,
       is_active: true,
+      can_roam_branches: true,
       telegram_chat_id: true,
       notify_daily_summary: true,
       notify_routine_pings: true,
@@ -100,6 +104,7 @@ export async function POST(req: Request) {
         role: body.role,
         branch_id: ROLES_FOR_BRANCH.has(body.role) ? body.branchId : null,
         hourly_rate_cent: body.hourlyRateCent,
+        can_roam_branches: body.canRoamBranches ?? false,
         is_active: true,
       },
     });

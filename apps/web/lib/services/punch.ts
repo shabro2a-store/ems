@@ -10,6 +10,7 @@ import {
   writeSystemCheckout,
 } from './autoClose';
 import { abandonedTripClose, writeSystemTripClose, MAX_OPEN_TRIP_MIN } from './tripClose';
+import { punchableBranches } from './branchScope';
 import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
@@ -135,19 +136,19 @@ export async function punchEmployee(
     }
   }
 
+  // One branch normally, every active branch for somebody the owner has let
+  // roam. verifyWithinGeofence already picks the nearest and drops inactive
+  // branches, so the two cases are the same code with a longer list.
   const geo = verifyWithinGeofence(
     input.lat,
     input.lng,
-    [
-      {
-        id: user.branch.id,
-        lat: user.branch.lat,
-        lng: user.branch.lng,
-        gps_radius_m: user.branch.gps_radius_m,
-        gps_accuracy_max_m: user.branch.gps_accuracy_max_m,
-        is_active: user.branch.is_active,
-      },
-    ],
+    // `user.branch` is proved non-null above; spreading the record does not
+    // carry that narrowing, so the field is passed explicitly.
+    await punchableBranches(
+      db,
+      { id: user.id, can_roam_branches: user.can_roam_branches, branch: user.branch },
+      input.kind,
+    ),
     input.accuracy,
   );
   if (!geo.ok) {
@@ -155,12 +156,21 @@ export async function punchEmployee(
     return { code: 'OUT_OF_GEOFENCE' };
   }
 
+  // The branch they are actually standing at, which for a roaming employee is
+  // not their own. Every row this request writes is attributed here rather than
+  // to user.branch_id: a punch says where the hours were worked, and "who is at
+  // Hamra right now" is only true if the punches say so. Identical to
+  // user.branch.id for everybody else, since that is the only candidate.
+  const atBranch = geo.nearest;
+
   const openIn = await db.punch.findFirst({
     where: { user_id: user.id, kind: 'IN' },
     orderBy: { at: 'desc' },
     // branch_id so a system checkout is attributed to the branch the shift was
-    // actually worked at, which is not always the employee's current branch.
-    select: { id: true, at: true, branch_id: true },
+    // actually worked at, which is not always the employee's current branch -
+    // nor, once roaming exists, the branch they are standing at now. Its
+    // coordinates travel with it for the same reason.
+    select: { id: true, at: true, branch_id: true, branch: { select: { lat: true, lng: true } } },
   });
   const laterOpenOut = openIn
     ? await db.punch.findFirst({
@@ -214,8 +224,8 @@ export async function punchEmployee(
       systemClosed = await writeSystemCheckout(db, {
         userId: user.id,
         branchId: openIn!.branch_id,
-        branchLat: user.branch.lat,
-        branchLng: user.branch.lng,
+        branchLat: openIn!.branch?.lat ?? atBranch.lat,
+        branchLng: openIn!.branch?.lng ?? atBranch.lng,
         arrivalAt: openIn!.at,
         arrivalPunchId: openIn!.id,
         closeAt: stale.closeAt,
@@ -252,7 +262,7 @@ export async function punchEmployee(
     // A self-resolved stale session records nothing: nothing was refused, and
     // the check-in punch that follows is stronger evidence than a row saying it
     // was turned away would be.
-    await recordBlockedAttempt(db, user, openIn!.at, input, now);
+    await recordBlockedAttempt(db, user, atBranch.id, openIn!.at, input, now);
     return { code: 'ALREADY_PUNCHED_IN', openInAt: openIn!.at };
   }
   if (input.kind === 'OUT' && !hasOpenSession) {
@@ -283,7 +293,7 @@ export async function punchEmployee(
   const punch = await db.punch.create({
     data: {
       user_id: user.id,
-      branch_id: user.branch.id,
+      branch_id: atBranch.id,
       kind: input.kind,
       at: now,
       lat: input.lat,
@@ -345,13 +355,14 @@ export async function punchEmployee(
  */
 async function recordBlockedAttempt(
   db: PrismaClient,
-  user: { id: string; branch: { id: string } | null },
+  user: { id: string },
+  branchId: string,
   openInAt: Date,
   input: PunchInput,
   at: Date,
 ): Promise<void> {
   try {
-    await writeBlockedAttempt(db, user, openInAt, input, at);
+    await writeBlockedAttempt(db, user, branchId, openInAt, input, at);
   } catch (e) {
     console.error('[punch] could not record blocked attempt', e);
   }
@@ -359,7 +370,8 @@ async function recordBlockedAttempt(
 
 async function writeBlockedAttempt(
   db: PrismaClient,
-  user: { id: string; branch: { id: string } | null },
+  user: { id: string },
+  branchId: string,
   openInAt: Date,
   input: PunchInput,
   at: Date,
@@ -367,7 +379,7 @@ async function writeBlockedAttempt(
   const attempt = await db.blockedPunchAttempt.create({
     data: {
       user_id: user.id,
-      branch_id: user.branch!.id,
+      branch_id: branchId,
       at,
       open_in_at: openInAt,
       lat: input.lat,

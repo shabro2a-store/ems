@@ -16,6 +16,7 @@ interface User {
   branch: { id: string; name: string } | null;
   hourly_rate_cent: number;
   is_active: boolean;
+  can_roam_branches: boolean;
 }
 interface Branch { id: string; name: string }
 interface Status { status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT'; since_min: number; over: boolean }
@@ -89,6 +90,24 @@ export default function AdminEmployeesPage() {
     await load();
   }
 
+  // Granting is one tap; revoking asks, because it is the tap that quietly
+  // changes where somebody is allowed to stand tomorrow morning. They can still
+  // always clock OUT where they clocked in, so nobody covering right now is
+  // stranded by this - see punchableBranches.
+  async function toggleRoam(u: User) {
+    if (u.can_roam_branches && !window.confirm(
+      `Restrict ${u.name || u.username} to ${u.branch?.name ?? 'their own branch'}? ` +
+      `They will not be able to clock in anywhere else from now on.`,
+    )) return;
+    setErr(null);
+    const res = await apiSend(`/api/admin/users/${u.id}`, {
+      method: 'PATCH',
+      body: { canRoamBranches: !u.can_roam_branches },
+    });
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    await load();
+  }
+
   return (
     <>
       <PageHeader
@@ -149,6 +168,7 @@ export default function AdminEmployeesPage() {
                                 {u.name && <span className="ml-1.5 text-xs text-muted">@{u.username}</span>}
                               </span>
                               {!u.is_active && <Badge tone="neutral">inactive</Badge>}
+                              {u.can_roam_branches && <Badge tone="warning">any branch</Badge>}
                             </div>
                           </td>
                           <td className="px-4 py-2.5"><Badge tone={ROLE_TONE[u.role]}>{u.role.toLowerCase()}</Badge></td>
@@ -161,6 +181,20 @@ export default function AdminEmployeesPage() {
                               <Button size="sm" variant="secondary" onClick={() => { setErr(null); setEditUser(u); }}>Edit</Button>
                               {PAID_ROLES.has(u.role) && (
                                 <Button size="sm" variant="secondary" onClick={() => setSchedUser(u)}>Schedule</Button>
+                              )}
+                              {PAID_ROLES.has(u.role) && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  title={
+                                    u.can_roam_branches
+                                      ? 'Clocks in and out at any branch. Click to restrict to their own.'
+                                      : 'Clocks in and out only at their own branch. Click to allow covering at any branch.'
+                                  }
+                                  onClick={() => toggleRoam(u)}
+                                >
+                                  {u.can_roam_branches ? 'Own branch only' : 'Any branch'}
+                                </Button>
                               )}
                               <Button size="sm" variant="ghost" onClick={() => setPwTarget(u)}>Set password</Button>
                               {u.role !== 'ADMIN' && (

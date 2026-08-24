@@ -75,6 +75,15 @@ model User {
   // screen to display next to actual earnings. Edited freely, no history kept.
   expected_monthly_salary_cent Int?
   is_active            Boolean            @default(true)
+  // Cover at another branch: the geofence is checked against every active
+  // branch instead of only this user's, and each punch records the branch they
+  // were actually standing at. They must still be AT a branch - this widens
+  // which one counts, it does not remove the check.
+  //
+  // Off by default, and that default is the point: a new account is
+  // single-branch until the owner grants this, and revoking it takes effect on
+  // the very next punch because nothing is cached.
+  can_roam_branches    Boolean            @default(false)
   telegram_chat_id     String?
   notify_daily_summary Boolean            @default(true)
   notify_routine_pings Boolean            @default(true)

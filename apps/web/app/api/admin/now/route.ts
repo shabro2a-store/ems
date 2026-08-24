@@ -66,7 +66,9 @@ export async function GET() {
             punches: {
               orderBy: { at: 'desc' },
               take: 1,
-              select: { kind: true, at: true },
+              // branch_id: somebody covering elsewhere is present THERE, and
+              // this board answers "who is standing in my shop right now".
+              select: { kind: true, at: true, branch_id: true },
             },
           },
         },
@@ -116,32 +118,49 @@ export async function GET() {
     branchDriverMap.set(t.branch_id, list);
   }
 
-  const branches = branchesRaw.map((b) => {
-    const present: PresentUser[] = [];
-    const absent: { id: string; username: string; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER' }[] = [];
+  // Present is filed under the branch the check-in was MADE at, not the branch
+  // the person is posted to. For everybody who cannot roam those are the same
+  // branch; for somebody covering elsewhere, filing them at home would show the
+  // owner a full shop floor at Hamra while they are all at Achrafieh. Absent
+  // stays with the home branch - that is where they were expected.
+  const branchIds = new Set(branchesRaw.map((b) => b.id));
+  const presentByBranch = new Map<string, PresentUser[]>();
+  const absentByBranch = new Map<
+    string,
+    { id: string; username: string; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER' }[]
+  >();
+
+  for (const b of branchesRaw) {
     for (const u of b.users) {
       const last = u.punches[0];
       if (last && last.kind === 'IN') {
-        const minutes_since_in = Math.max(0, Math.floor((now - last.at.getTime()) / 60_000));
-        present.push({
+        // A check-in at a branch since deactivated is not in this list; fall
+        // back to the home branch rather than dropping the person entirely.
+        const at = branchIds.has(last.branch_id) ? last.branch_id : b.id;
+        const list = presentByBranch.get(at) ?? [];
+        list.push({
           id: u.id,
           username: u.username,
           in_at: last.at.toISOString(),
-          minutes_since_in,
-          branch_id: b.id,
+          minutes_since_in: Math.max(0, Math.floor((now - last.at.getTime()) / 60_000)),
+          branch_id: at,
         });
+        presentByBranch.set(at, list);
       } else {
-        absent.push({ id: u.id, username: u.username, role: u.role });
+        const list = absentByBranch.get(b.id) ?? [];
+        list.push({ id: u.id, username: u.username, role: u.role });
+        absentByBranch.set(b.id, list);
       }
     }
-    return {
-      id: b.id,
-      name: b.name,
-      present,
-      absent,
-      driversOut: branchDriverMap.get(b.id) ?? [],
-    };
-  });
+  }
+
+  const branches = branchesRaw.map((b) => ({
+    id: b.id,
+    name: b.name,
+    present: presentByBranch.get(b.id) ?? [],
+    absent: absentByBranch.get(b.id) ?? [],
+    driversOut: branchDriverMap.get(b.id) ?? [],
+  }));
 
   const flags: FlagOut[] = todayFlags.map((f) => ({
     id: f.id,
