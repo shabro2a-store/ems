@@ -155,10 +155,16 @@ importers:
       '@prisma/client':
         specifier: ^5.17.0
         version: 5.22.0(prisma@5.22.0)
+      web-push:
+        specifier: ^3.6.7
+        version: 3.6.7
     devDependencies:
       '@types/node':
         specifier: ^20.14.10
         version: 20.19.43
+      '@types/web-push':
+        specifier: ^3.6.4
+        version: 3.6.4
       typescript:
         specifier: ^5.5.3
         version: 5.9.3

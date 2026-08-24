@@ -160,9 +160,21 @@ export async function ringDriver(
   });
   // Also fire a web-push so a locked/closed phone rings (best-effort; the in-app
   // alarm covers the app-open case regardless).
+  // `ring: true` is what makes the service worker treat this as a call rather
+  // than a notice: it re-alerts one notification instead of stacking them, and
+  // wakes any open tab so the siren starts on the push instead of on the next
+  // three-second poll. The worker's ringRepeater keeps sending it every five
+  // seconds until the driver acknowledges - see runRingRepeater for why one
+  // push was never enough, and for what the web platform will not do at all.
   await sendPushToUser(
     args.driverId,
-    { title: '📞 Order ready!', body: 'The counter is calling you to collect an order.', url: '/driver' },
+    {
+      title: '📞 Order ready!',
+      body: 'The counter is calling you. Open the app to answer.',
+      url: '/driver',
+      ring: true,
+      attempt: 0,
+    },
     db,
   ).catch(() => {});
   return { ok: true, id: call.id };

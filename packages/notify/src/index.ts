@@ -54,3 +54,5 @@ export function getNotifier(): Notifier {
 
 export const notifier: Notifier = new ConsoleNotifier(); // default export; worker uses getNotifier()
 export type { Notifier, NotificationPayload } from './types';
+export { sendPushToUser, vapidPublicKey } from './push';
+export type { PushPayload, PushSubscriptionStore } from './push';

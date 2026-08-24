@@ -225,6 +225,9 @@ Run once on the VPS after first deploy:
   trip-threshold alerts, or daily summary run.
 - Restart with `docker compose start worker`.
 - The owner dashboard stays available; only cron-side alerts pause.
+- `ringRepeater` also stops, which matters within seconds rather than hours: a
+  driver still gets the first push from the ring itself, but it will not repeat,
+  so a missed ring stays missed. Restart the worker before a busy service.
 - Two of the halted jobs write rather than alert: `autoCloseAbandoned` closes a
   check-in left open past 30h, and `autoCloseAbandonedTrips` closes a delivery
   left open past 6h. Neither is load-bearing for staff — an employee's next
@@ -233,6 +236,56 @@ Run once on the VPS after first deploy:
   clear the sessions and trips of people who do not come back at all, so a long
   worker outage shows up as drivers the counter cannot ring and a payroll month
   with open sessions in it. Both jobs are idempotent; they catch up on restart.
+
+### Making the driver ring loud
+The single most common complaint, and half the fix is on the handset, not in
+the code. Read this before changing anything.
+
+**What the app cannot do.** No web page can play a siren while the browser is
+closed. A service worker has no audio output and there is no API that gives it
+one. With the phone locked, all a push can raise is a *notification*, and how
+loud a notification is belongs to the Android **notification channel** — its
+importance, its sound, whether it overrides Do Not Disturb. No website can set
+those. This is a platform limit, not a bug, and no amount of code moves it.
+
+**What the app does do.** A ring now repeats every 5 seconds for 45 seconds
+(`ringRepeater`) and stops the moment the driver taps, so it behaves like a
+phone ringing rather than one notification nobody heard. Each repeat re-alerts
+the same notification rather than stacking ten of them, buzzes a long pattern,
+never auto-dismisses, and wakes any open tab so the in-app siren starts on the
+push instead of on the next poll.
+
+**Set up each driver's phone once — this is what makes it loud.** Android:
+1. Open the app in Chrome → ⋮ → **Install app** / *Add to Home screen*, and use
+   it from the home-screen icon afterwards. An installed PWA gets its own
+   notification channel and far more reliable push delivery.
+2. Settings → **Apps** → the app (or Chrome, if not installed) → **Notifications**
+   → the site's channel:
+   - Importance / behaviour: **Urgent** — pop on screen and make a sound
+   - **Sound: pick a ringtone**, not a notification blip. This one line is the
+     difference between a faint ping and something audible in a shop.
+   - Vibration: on
+   - **Override Do Not Disturb**: on
+3. Settings → Apps → the app → **Battery** → **Unrestricted**. Android otherwise
+   delays or drops pushes to a backgrounded app, which reads as "it rang late"
+   or "it never rang".
+4. Turn the phone's **notification volume** up. On Android it is a separate
+   slider from media volume — press volume, then the ⋮/gear, and raise
+   *Notification*. The in-app siren uses the *media* slider, so raise both.
+
+**iPhone is a poor choice for a driver handset.** Push needs the site added to
+the Home Screen (iOS 16.4+) to work at all, and iOS allows no custom
+notification sound and no Do Not Disturb override. Use Android.
+
+**Verify it.** Ring the driver from the caller board with their phone locked in
+a pocket. Expect roughly nine alerts over 45 seconds, stopping as soon as they
+open the app and press *Got it — stop*.
+
+**If that is still not enough**, the only route to a true incoming-call
+experience — full-screen, ringer volume, ignores silent mode — is a small
+Android app wrapping this one (a TWA plus a high-priority FCM message and a
+full-screen intent). That is a separate build and a Play Store account, not a
+setting.
 
 ### Check what the containers actually received
 Env vars must be listed in `docker-compose.yml`, not just present in `.env`:

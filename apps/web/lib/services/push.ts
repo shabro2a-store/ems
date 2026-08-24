@@ -1,55 +1,26 @@
-import webpush from 'web-push';
-import type { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
+import {
+  sendPushToUser as send,
+  vapidPublicKey,
+  type PushPayload,
+  type PushSubscriptionStore,
+} from 'notify';
+import type { PrismaClient } from '@prisma/client';
 
-// Web Push is optional: if VAPID keys aren't configured, sends are silently
-// skipped and the in-app alarm still works.
-let configured: boolean | null = null;
+// Web Push moved into `notify` so the cron worker can send it too - the ring
+// repeater lives there, because a caller's ring has to keep pushing until the
+// driver answers and the web app is not running a timer for that. This wrapper
+// keeps the app's existing call sites and the default prisma client.
+export { vapidPublicKey };
+export type { PushPayload };
 
-function ensureConfigured(): boolean {
-  if (configured !== null) return configured;
-  const pub = process.env.VAPID_PUBLIC_KEY;
-  const priv = process.env.VAPID_PRIVATE_KEY;
-  if (!pub || !priv) {
-    configured = false;
-    return false;
-  }
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:admin@shabro2a.com', pub, priv);
-  configured = true;
-  return true;
-}
-
-export function vapidPublicKey(): string | null {
-  return process.env.VAPID_PUBLIC_KEY ?? null;
-}
-
-export interface PushPayload {
-  title: string;
-  body: string;
-  url?: string;
-}
-
-// Best-effort push to every device a user has subscribed. Prunes dead subscriptions.
 export async function sendPushToUser(
   userId: string,
   payload: PushPayload,
   db: PrismaClient = defaultPrisma,
 ): Promise<void> {
-  if (!ensureConfigured()) return;
-  const subs = await db.pushSubscription.findMany({ where: { user_id: userId } });
-  await Promise.all(
-    subs.map(async (s) => {
-      try {
-        await webpush.sendNotification(
-          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          JSON.stringify(payload),
-        );
-      } catch (err) {
-        const status = (err as { statusCode?: number }).statusCode;
-        if (status === 404 || status === 410) {
-          await db.pushSubscription.delete({ where: { endpoint: s.endpoint } }).catch(() => {});
-        }
-      }
-    }),
-  );
+  // `notify` describes only the two methods it calls so the package needs no
+  // generated-schema import; Prisma's own generic signatures do not structurally
+  // match that. Same cast the package already uses for its recipient lookup.
+  return send(userId, payload, db as unknown as PushSubscriptionStore);
 }
