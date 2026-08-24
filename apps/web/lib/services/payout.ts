@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { inBeirut } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
@@ -46,6 +47,30 @@ interface AdvanceRow {
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
+/**
+ * How far either side of the month punches must be loaded before pairing.
+ *
+ * A shift belongs to the Beirut day it checked IN, which means the pair that
+ * decides the last night of the month has its checkout in the NEXT month, and
+ * the first night of the month has its arrival in the previous one. Querying
+ * the month alone hands `pairHours` an arrival with no checkout at one end and
+ * a checkout with no arrival at the other, and it drops both - so a night shift
+ * across the boundary was paid nothing, in either month. Not misfiled: lost.
+ *
+ * Two days is far past MAX_OPEN_SESSION_MIN (30h), which is the longest a
+ * session can be before the system closes it, so no real pair reaches outside
+ * this window.
+ */
+const PAIR_LOOKAROUND_MS = 2 * 86_400_000;
+
+/**
+ * The UTC calendar month.
+ *
+ * Correct for the date-keyed rows that use it - ScheduleOverride.date, penalty
+ * and credit dates are all stored as a Beirut date pinned to UTC midnight, so a
+ * UTC month selects exactly the right ones. It is NOT the window to pair
+ * punches in; see PAIR_LOOKAROUND_MS and pairHours.
+ */
 export function monthRangeUtc(month: string): { start: Date; end: Date } {
   const match = /^(\d{4})-(\d{2})$/.exec(month);
   if (!match) throw new Error(`invalid month format: ${month}`);
@@ -65,7 +90,24 @@ export function rateAt(rateChanges: { rate_cent: number; effective_from: Date }[
   return 0;
 }
 
-function pairHours(punches: PunchRow[], rateChanges: RateChangeRow[]): { minutes: number; grossCent: number } {
+/**
+ * Pair IN/OUT and price each pair, keeping only the pairs that belong to
+ * `month` - which is decided by the Beirut day of the ARRIVAL, never by the
+ * timestamp of either punch.
+ *
+ * That rule is the same one coverage.ts, the penalty engine and the auto-close
+ * all use, and applying it here is what makes a 21:00-07:00 shift on the last
+ * night of the month land whole in the month it started, instead of being
+ * split down the middle by the boundary and dropped by both sides.
+ *
+ * With `month` omitted every pair counts, which is what the day-level callers
+ * and the property tests want.
+ */
+function pairHours(
+  punches: PunchRow[],
+  rateChanges: RateChangeRow[],
+  month?: string,
+): { minutes: number; grossCent: number } {
   const sorted = [...punches].sort((a, b) => a.at.getTime() - b.at.getTime());
   let totalMinutes = 0;
   let grossCent = 0;
@@ -75,10 +117,15 @@ function pairHours(punches: PunchRow[], rateChanges: RateChangeRow[]): { minutes
       if (!openIn) openIn = p;
     } else {
       if (openIn) {
-        const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
-        totalMinutes += minutes;
-        const rateCent = rateAt(rateChanges, p.at);
-        grossCent += Math.floor((minutes * rateCent) / 60);
+        // The arrival's Beirut month, so an overnight pair is counted once, in
+        // the month it began. A checkout at 07:00 on the 1st does not move it.
+        const belongs = month === undefined || inBeirut(openIn.at).date.slice(0, 7) === month;
+        if (belongs) {
+          const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
+          totalMinutes += minutes;
+          const rateCent = rateAt(rateChanges, p.at);
+          grossCent += Math.floor((minutes * rateCent) / 60);
+        }
         openIn = null;
       }
     }
@@ -100,8 +147,9 @@ function grossWithCredit(
   punches: PunchRow[],
   rateChanges: RateChangeRow[],
   creditedIntervals: WorkInterval[],
+  month?: string,
 ): { hours: number; grossCent: number } {
-  const paired = pairHours(punches, rateChanges);
+  const paired = pairHours(punches, rateChanges, month);
   const minutes = paired.minutes + sumIntervalMinutes(creditedIntervals);
   return {
     hours: Math.round((minutes / 60) * 100) / 100,
@@ -123,6 +171,11 @@ export function computePayoutFromRows(args: {
   // it - the two would disagree otherwise, and the penalty ceiling is clamped
   // to that per-day figure.
   creditedIntervals?: WorkInterval[];
+  // The month these punches are being paid for, 'YYYY-MM'. Given it, a pair is
+  // counted only if its ARRIVAL falls in that Beirut month - which is what
+  // stops the night across the boundary being counted twice, or (as it was)
+  // zero times. Omit it and every pair counts.
+  month?: string;
 }): PayoutForUserResult {
   const adjustmentsCent = args.adjustments.reduce((s, a) => {
     return s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent);
@@ -133,7 +186,7 @@ export function computePayoutFromRows(args: {
   const penaltiesCent = args.penaltiesCent ?? 0;
   const overtimeDeductionCent = args.overtimeDeductionCent ?? 0;
   const credited = args.creditedIntervals ?? [];
-  const { hours, grossCent } = grossWithCredit(args.punches, args.rateChanges, credited);
+  const { hours, grossCent } = grossWithCredit(args.punches, args.rateChanges, credited, args.month);
   const netCent = grossCent + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
   return {
     hours,
@@ -154,9 +207,14 @@ export async function payoutForUser(
   db: PrismaClient,
 ): Promise<PayoutForUserResult> {
   const { start, end } = monthRangeUtc(month);
+  // Punches are read wider than the month and then filtered by arrival month
+  // inside pairHours; every other row here is date-keyed and takes the month
+  // window as-is.
+  const pairFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
   const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent, credits] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: start, lt: end } },
+      where: { user_id: userId, at: { gte: pairFrom, lt: pairTo } },
       orderBy: { at: 'asc' },
       select: { id: true, user_id: true, kind: true, at: true },
     }),
@@ -186,6 +244,7 @@ export async function payoutForUser(
     penaltiesCent: sumActivePenaltiesCent(penalties),
     overtimeDeductionCent,
     creditedIntervals: grantedIntervals(credits),
+    month,
   });
 }
 
@@ -195,9 +254,11 @@ export async function accruedEarningsThisMonth(
   db: PrismaClient,
 ): Promise<{ hours: number; grossCent: number }> {
   const { start, end } = monthRangeUtc(month);
+  const pairFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
   const [punches, rateChanges, credits] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: start, lt: end } },
+      where: { user_id: userId, at: { gte: pairFrom, lt: pairTo } },
       orderBy: { at: 'asc' },
       select: { id: true, user_id: true, kind: true, at: true },
     }),
@@ -211,5 +272,10 @@ export async function accruedEarningsThisMonth(
     // than payroll is about to pay.
     blockedCreditForUser(userId, month, db),
   ]);
-  return grossWithCredit(punches as PunchRow[], rateChanges as RateChangeRow[], grantedIntervals(credits));
+  return grossWithCredit(
+    punches as PunchRow[],
+    rateChanges as RateChangeRow[],
+    grantedIntervals(credits),
+    month,
+  );
 }
