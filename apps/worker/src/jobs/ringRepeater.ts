@@ -3,14 +3,25 @@ import { sendPushToUser, type PushSubscriptionStore } from 'notify';
 import { prisma as defaultPrisma } from '../db/prisma';
 
 /**
- * How long a ring keeps ringing if nobody answers it.
+ * The backstop on a ring nobody ever answers.
  *
- * A phone call rings for about this long and then stops; so does this. Past it
- * the caller can see on their board that the driver never answered and ring
- * again or pick somebody else, which is a better outcome than a notification
- * that pesters a driver who is mid-delivery on the road.
+ * The owner's rule is that it rings until the driver shuts it off, and that is
+ * what it does - every five seconds, indefinitely as far as any driver standing
+ * in a shop is concerned. This is only the point at which the system accepts
+ * that nobody is going to answer.
+ *
+ * It cannot be removed. An unbounded loop pushes twelve times a minute forever
+ * at a phone that is switched off or locked in a drawer overnight: the driver
+ * comes back to hundreds of queued alerts, the battery is gone, and the VAPID
+ * key is the thing Google rate-limits. Five minutes is far past the point where
+ * the counter has given the order to somebody else, and it stays a single named
+ * constant so raising it is one edit.
+ *
+ * The web app's own RING_WINDOW_MS is pinned to this by ringRepeater.test.ts:
+ * if the in-app alarm gave up before the pushes did, a driver holding an open
+ * app would watch the alarm screen vanish while their phone kept buzzing.
  */
-export const RING_REPEAT_WINDOW_MS = 45_000;
+export const RING_REPEAT_WINDOW_MS = 5 * 60_000;
 
 export interface RingRepeaterOpts {
   db?: PrismaClient;
@@ -31,16 +42,25 @@ export interface RingRepeaterResult {
  * nothing else ever happens - the counter is left watching a board that says
  * the driver was rung, with no way to tell whether the phone made a sound.
  *
- * So the ring repeats on a five-second tick while it is unanswered, exactly
- * like a phone ringing, and stops the instant the driver taps - `acknowledged_at`
- * is set by /api/me/calls/ack and every repeat is filtered on it being null.
+ * So the ring repeats on a five-second tick until the driver acknowledges it,
+ * exactly like a phone ringing, and stops on the very next tick after they tap -
+ * `acknowledged_at` is set by /api/me/calls/ack and every repeat is filtered on
+ * it being null. RING_REPEAT_WINDOW_MS is a backstop for the phone that never
+ * answers at all, not the length of the ring.
  *
- * Note what this cannot do. No web page can play audio while the browser is
- * closed; a service worker has no audio output and there is no API for one. All
- * a push can do on a locked phone is raise a notification, and how loud that is
- * belongs to the Android notification channel, which is a per-handset setting no
- * website can reach. Repeating is the whole of what the platform allows - see
- * RUNBOOK "Making the driver ring loud".
+ * Note precisely what a push can and cannot reach, because the two cases sound
+ * completely different to a driver:
+ *
+ *  - App RUNNING, even backgrounded with the screen off: the service worker
+ *    hands the push to the page, which blasts a looping siren at media volume.
+ *    DriverAlarm keeps the page alive for exactly this. This is the loud case.
+ *  - App SWIPED AWAY, or the phone rebooted: there is no page, so nothing can
+ *    play. A service worker has no audio output and no API grants it one. All
+ *    that is left is the notification, and its loudness belongs to the Android
+ *    channel - a per-handset setting no website can reach.
+ *
+ * The second case is why RUNBOOK "Making the driver ring loud" asks for a
+ * ringtone on the channel rather than a notification blip.
  */
 export async function runRingRepeater(
   opts: RingRepeaterOpts = {},

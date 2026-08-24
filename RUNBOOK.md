@@ -238,54 +238,65 @@ Run once on the VPS after first deploy:
   with open sessions in it. Both jobs are idempotent; they catch up on restart.
 
 ### Making the driver ring loud
-The single most common complaint, and half the fix is on the handset, not in
-the code. Read this before changing anything.
+The most common complaint. There are two completely different cases and they
+sound nothing alike, so establish which one you are in before changing anything.
 
-**What the app cannot do.** No web page can play a siren while the browser is
-closed. A service worker has no audio output and there is no API that gives it
-one. With the phone locked, all a push can raise is a *notification*, and how
-loud a notification is belongs to the Android **notification channel** — its
-importance, its sound, whether it overrides Do Not Disturb. No website can set
-those. This is a platform limit, not a bug, and no amount of code moves it.
+**Case A — the app is running (even backgrounded, screen off, phone in pocket).**
+A real looping siren blasts at media volume and does not stop until the driver
+presses *Got it — stop*. This is the loud case, and it is the one to aim for.
+It works because `DriverAlarm` holds an inaudible keep-alive loop playing from
+the first tap of the shift: Android freezes a backgrounded page after a few
+minutes, and active media playback is one of the few things that prevents it, so
+the page is still alive to blast when the push lands.
 
-**What the app does do.** A ring now repeats every 5 seconds for 45 seconds
-(`ringRepeater`) and stops the moment the driver taps, so it behaves like a
-phone ringing rather than one notification nobody heard. Each repeat re-alerts
-the same notification rather than stacking ten of them, buzzes a long pattern,
-never auto-dismisses, and wakes any open tab so the in-app siren starts on the
-push instead of on the next poll.
+**Case B — the app was swiped away, or the phone rebooted.** There is no page,
+so nothing can play a sound of its own. A service worker has no audio output and
+no API grants it one. All that is left is the push notification, and how loud
+*that* is belongs to the Android notification channel — a per-handset setting no
+website can reach.
 
-**Set up each driver's phone once — this is what makes it loud.** Android:
-1. Open the app in Chrome → ⋮ → **Install app** / *Add to Home screen*, and use
-   it from the home-screen icon afterwards. An installed PWA gets its own
-   notification channel and far more reliable push delivery.
-2. Settings → **Apps** → the app (or Chrome, if not installed) → **Notifications**
-   → the site's channel:
-   - Importance / behaviour: **Urgent** — pop on screen and make a sound
-   - **Sound: pick a ringtone**, not a notification blip. This one line is the
-     difference between a faint ping and something audible in a shop.
-   - Vibration: on
-   - **Override Do Not Disturb**: on
-3. Settings → Apps → the app → **Battery** → **Unrestricted**. Android otherwise
-   delays or drops pushes to a backgrounded app, which reads as "it rang late"
-   or "it never rang".
-4. Turn the phone's **notification volume** up. On Android it is a separate
-   slider from media volume — press volume, then the ⋮/gear, and raise
-   *Notification*. The in-app siren uses the *media* slider, so raise both.
+So the goal is to keep drivers in case A, with case B set up as the fallback.
 
-**iPhone is a poor choice for a driver handset.** Push needs the site added to
-the Home Screen (iOS 16.4+) to work at all, and iOS allows no custom
-notification sound and no Do Not Disturb override. Use Android.
+**Per phone, once.** Android:
+1. Chrome → ⋮ → **Install app**, and use the home-screen icon from then on.
+2. Open it at the start of the shift and **tap the screen once** — the banner
+   says *Tap here to arm the siren*. Nothing can make a sound before that tap;
+   browsers refuse audio until the user has interacted with the page. Once armed
+   it stays armed for as long as the app is running.
+3. **Do not swipe the app away.** Leave it in the background. Swiping it closed
+   drops the phone into case B.
+4. Settings → Apps → the app → **Notifications** → the site's channel:
+   - Importance / behaviour: **Urgent**
+   - **Sound: pick a ringtone**, not a notification blip — this is what case B
+     sounds like
+   - Vibration on, and **Override Do Not Disturb** on
+5. Settings → Apps → the app → **Battery** → **Unrestricted**, or Android delays
+   the pushes and it reads as "it rang late" or "it never rang".
+6. Raise **both** volume sliders. The siren plays on **media**; the notification
+   plays on **notification**. They are separate on Android — press volume, then
+   the ⋮/gear, and raise both.
 
-**Verify it.** Ring the driver from the caller board with their phone locked in
-a pocket. Expect roughly nine alerts over 45 seconds, stopping as soon as they
-open the app and press *Got it — stop*.
+**How long it rings.** Until the driver stops it. The worker re-pushes every five
+seconds while the ring is unacknowledged, and the siren loops continuously. A
+ring nobody ever answers is dropped after `RING_REPEAT_WINDOW_MS` (5 minutes,
+`apps/worker/src/jobs/ringRepeater.ts`, pinned to the web app's `RING_WINDOW_MS`
+by a test) — that backstop exists so a handset switched off or shut in a drawer
+overnight does not collect twelve alerts a minute until morning. Raise it there
+if 5 minutes is short.
 
-**If that is still not enough**, the only route to a true incoming-call
-experience — full-screen, ringer volume, ignores silent mode — is a small
-Android app wrapping this one (a TWA plus a high-priority FCM message and a
-full-screen intent). That is a separate build and a Play Store account, not a
-setting.
+**iPhone is a poor driver handset.** Push needs Add to Home Screen (iOS 16.4+) to
+work at all, and iOS allows no custom notification sound and no Do Not Disturb
+override. Use Android.
+
+**Verify it.** Open the app, tap once to arm, press the home button so it is
+backgrounded, lock the phone, and have the counter ring. Expect a siren within a
+second or two, continuing until *Got it — stop*.
+
+**If case B still is not enough**, the only route to a true incoming-call
+experience with the app fully closed — full screen, ringer volume, ignores silent
+mode — is a small Android app wrapping this one (a TWA plus a high-priority FCM
+message and a full-screen intent). That is a separate build and a Play Store
+account, not a setting.
 
 ### Check what the containers actually received
 Env vars must be listed in `docker-compose.yml`, not just present in `.env`:

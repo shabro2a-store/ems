@@ -19,7 +19,17 @@ export interface DriverStatus {
   roaming: boolean;
 }
 
-const RING_WINDOW_MS = 2 * 60 * 1000;
+/**
+ * How long an unanswered ring stays live - on the caller's board, on the
+ * driver's alarm screen, and in the worker's repeater, which holds its own copy
+ * (it cannot import from apps/web) pinned to this one by ringRepeater.test.ts.
+ *
+ * The ring lasts until the driver shuts it off; this is the backstop for the
+ * phone that never answers. If the board stopped showing "ringing" before the
+ * pushes stopped, the caller would think the ring was over while the driver's
+ * phone was still buzzing.
+ */
+export const RING_WINDOW_MS = 5 * 60 * 1000;
 
 // Live status of every driver in a branch — for the caller board and the admin dashboard.
 export async function branchDriverStatuses(

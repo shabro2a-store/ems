@@ -3,65 +3,93 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
 
-// The caller's ring, as loud as a web page is allowed to make it.
-//
-// Two halves, and they fail in different places. This component is the siren -
-// a real wailing tone, but only while a page is alive, because browsers give a
-// closed tab no audio at all. Web push (see public/sw.js) covers the closed
-// phone, and all it can raise there is a notification whose loudness belongs to
-// the phone's own notification channel. Neither half can be dropped.
+/*
+ * The caller's ring, made to behave like an incoming call.
+ *
+ * Three things had to change from the first version, and the middle one is the
+ * whole difference between "a faint ping" and a siren.
+ *
+ * 1. It is a MEDIA element, not a WebAudio oscillator. A backgrounded page has
+ *    its timers throttled to a crawl, which turned the oscillator's 500ms pitch
+ *    sweep into a stutter, and WebAudio in a hidden page is suspended outright
+ *    on some Android builds. An <audio loop> is playback, not a timer: Android
+ *    treats it the way it treats a music app and keeps it running.
+ *
+ * 2. A silent keep-alive loop runs the whole shift. Chrome freezes a
+ *    backgrounded page after a few minutes and a frozen page can play nothing
+ *    at all - which is why the siren only ever started once somebody opened the
+ *    app. Active media playback is one of the few things that stops the freeze,
+ *    so the page holds an inaudible loop from the first tap onward and is still
+ *    alive, and still able to blast, when the push arrives minutes later.
+ *
+ * 3. It plays until the driver stops it. Not for 45 seconds - until they press
+ *    the button, exactly like a phone.
+ *
+ * What still cannot be done: if the app is swiped away entirely, or the phone
+ * reboots, there is no page and nothing here runs. That case is the push
+ * notification alone, and its loudness is the Android channel's to decide - see
+ * RUNBOOK "Making the driver ring loud".
+ *
+ * NOTE ON VOLUME: this plays on the MEDIA stream. The push notification plays
+ * on the notification stream. They are separate sliders on Android and both
+ * have to be up.
+ */
 export default function DriverAlarm() {
   const [ringing, setRinging] = useState(false);
-  // The browser is holding audio shut because it has had no gesture yet. The
-  // alarm is then SILENT, which used to happen invisibly - the driver saw a
-  // flashing screen and heard nothing, most often when they arrived by tapping
-  // the notification and so never touched the page at all.
-  const [muted, setMuted] = useState(false);
-  const audioCtx = useRef<AudioContext | null>(null);
+  // Audio is still locked: the browser has had no gesture, so the alarm would
+  // flash in silence. It used to do exactly that, invisibly, whenever the
+  // driver arrived by tapping the notification - which never produces a gesture
+  // inside the page.
+  const [armed, setArmed] = useState(false);
+  const siren = useRef<HTMLAudioElement | null>(null);
+  const keepAlive = useRef<HTMLAudioElement | null>(null);
   const vibrateTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const ensureCtx = useCallback((): AudioContext | null => {
-    if (!audioCtx.current) {
-      const Ctx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!Ctx) return null;
-      audioCtx.current = new Ctx();
-    }
-    return audioCtx.current;
+  // Hold the page alive and audio unlocked for the rest of the shift.
+  const arm = useCallback(() => {
+    const ka = keepAlive.current;
+    const s = siren.current;
+    if (!ka || !s) return;
+    ka.volume = 0.02;
+    ka.loop = true;
+    ka.play()
+      .then(() => {
+        setArmed(true);
+        if ('mediaSession' in navigator) {
+          // Honest label: on Android this is what the media notification says,
+          // and "playing" with no explanation reads like a bug.
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'On call — waiting for orders',
+            artist: 'Shabro2a',
+          });
+        }
+      })
+      .catch(() => setArmed(false));
+    // Prime the siren element in the same gesture so its first play() later
+    // needs no permission of its own.
+    s.volume = 1;
+    s.load();
   }, []);
 
-  const unlock = useCallback(() => {
-    const ctx = ensureCtx();
-    if (!ctx) return;
-    ctx
-      .resume()
-      .then(() => setMuted(ctx.state !== 'running'))
-      .catch(() => {});
-  }, [ensureCtx]);
-
-  // Every plausible gesture, not just pointerdown. Arriving from a notification
-  // tap focuses the window without ever producing one inside the page, so the
-  // context stayed suspended and the next ring was mute.
   useEffect(() => {
-    unlock();
     const events: Array<keyof WindowEventMap> = ['pointerdown', 'touchstart', 'keydown', 'focus'];
-    for (const e of events) window.addEventListener(e, unlock);
-    document.addEventListener('visibilitychange', unlock);
+    for (const e of events) window.addEventListener(e, arm);
+    document.addEventListener('visibilitychange', arm);
+    arm();
     return () => {
-      for (const e of events) window.removeEventListener(e, unlock);
-      document.removeEventListener('visibilitychange', unlock);
+      for (const e of events) window.removeEventListener(e, arm);
+      document.removeEventListener('visibilitychange', arm);
     };
-  }, [unlock]);
+  }, [arm]);
 
   const dismiss = useCallback(async () => {
     setRinging(false);
     await apiSend('/api/me/calls/ack');
   }, []);
 
-  // Poll for rings. Three seconds is the floor on how late the siren can be
-  // when the app is already open; a push arriving in a live tab beats it to the
-  // punch through the service worker message below.
+  // Poll while the app is open. The push below beats this to the punch, but a
+  // ring raised while push is unavailable (permission refused, VAPID unset)
+  // still has to reach the driver.
   useEffect(() => {
     let alive = true;
     async function check() {
@@ -76,16 +104,14 @@ export default function DriverAlarm() {
     };
   }, []);
 
-  // The push itself, relayed by the service worker. This is what makes the
-  // siren start on the ring rather than up to three seconds after it - and in a
-  // backgrounded tab, whose timers the browser throttles hard, it may be the
-  // only thing that starts it at all.
+  // The push, relayed by the service worker. This is what starts the siren in a
+  // backgrounded page, where the poll above is throttled to almost nothing.
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     const onMessage = (event: MessageEvent) => {
       const type = (event.data as { type?: string } | null)?.type;
       if (type === 'driver-ring') {
-        unlock();
+        arm();
         setRinging(true);
       } else if (type === 'driver-ring-answered') {
         void dismiss();
@@ -93,47 +119,17 @@ export default function DriverAlarm() {
     };
     navigator.serviceWorker.addEventListener('message', onMessage);
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);
-  }, [unlock, dismiss]);
+  }, [arm, dismiss]);
 
-  // Loud wailing siren + vibration while ringing.
+  // Siren + vibration for as long as the ring stands.
   useEffect(() => {
-    if (!ringing) return;
-    const ctx = ensureCtx();
-    let osc: OscillatorNode | null = null;
-    let gain: GainNode | null = null;
-    let sweep: ReturnType<typeof setInterval> | null = null;
+    const s = siren.current;
+    if (!ringing || !s) return;
 
-    if (ctx) {
-      ctx.resume().catch(() => {});
-      // Read after the resume attempt: 'running' means the tone will be heard,
-      // anything else means the screen is about to flash in silence and the
-      // driver has to be told to tap.
-      setMuted(ctx.state !== 'running');
-
-      osc = ctx.createOscillator();
-      gain = ctx.createGain();
-      osc.type = 'sawtooth'; // harsh, carries like an emergency siren
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.85, ctx.currentTime + 0.05); // loud
-      osc.frequency.setValueAtTime(600, ctx.currentTime);
-      osc.start();
-      // Wail: sweep the pitch up and down continuously.
-      let up = true;
-      const doSweep = () => {
-        const o = osc!;
-        const t = ctx.currentTime;
-        o.frequency.cancelScheduledValues(t);
-        o.frequency.setValueAtTime(o.frequency.value, t);
-        o.frequency.linearRampToValueAtTime(up ? 1400 : 600, t + 0.5);
-        up = !up;
-      };
-      doSweep();
-      sweep = setInterval(doSweep, 500);
-    } else {
-      setMuted(true);
-    }
+    s.loop = true;
+    s.volume = 1;
+    s.currentTime = 0;
+    s.play().catch(() => setArmed(false));
 
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       navigator.vibrate([600, 200, 600]);
@@ -141,48 +137,55 @@ export default function DriverAlarm() {
     }
 
     return () => {
-      if (sweep) clearInterval(sweep);
-      if (osc) {
-        try {
-          osc.stop();
-        } catch {
-          /* already stopped */
-        }
-        osc.disconnect();
-      }
-      if (gain) gain.disconnect();
+      s.pause();
+      s.currentTime = 0;
       if (vibrateTimer.current) clearInterval(vibrateTimer.current);
       if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(0);
     };
-  }, [ringing, ensureCtx]);
-
-  if (!ringing) return null;
+  }, [ringing]);
 
   return (
-    // The whole overlay is a gesture target, so any tap anywhere unlocks audio
-    // and the siren starts even if the driver does not read the instruction.
-    <div
-      onPointerDown={unlock}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 p-6 text-center animate-pulse-alarm"
-    >
-      <div>
-        <div className="text-6xl">📞</div>
-        <h2 className="mt-4 text-3xl font-extrabold text-white drop-shadow">Order ready!</h2>
-        <p className="mt-2 text-lg font-medium text-white/90">
-          The counter is calling you to collect an order.
-        </p>
-        {muted && (
-          <p className="mt-3 rounded-lg bg-black/30 px-3 py-2 text-base font-semibold text-white">
-            🔇 Tap the screen once to turn the siren on.
-          </p>
-        )}
-      </div>
-      <button
-        onClick={() => void dismiss()}
-        className="rounded-2xl bg-white px-10 py-5 text-xl font-bold text-danger shadow-pop active:scale-95"
-      >
-        Got it — stop
-      </button>
-    </div>
+    <>
+      {/* Always mounted, never conditional: the siren element has to exist and
+          be primed by an earlier gesture, or its first play() is refused. */}
+      <audio ref={keepAlive} src="/keepalive.wav" loop preload="auto" playsInline />
+      <audio ref={siren} src="/siren.wav" loop preload="auto" playsInline />
+
+      {!ringing && !armed && (
+        <button
+          onClick={arm}
+          className="w-full rounded-xl border border-warning/30 bg-warning-subtle px-4 py-3 text-left text-sm"
+        >
+          🔔 <b>Tap here to arm the siren.</b> Until you do, an order call can only buzz — it cannot
+          make a sound.
+        </button>
+      )}
+
+      {ringing && (
+        <div
+          onPointerDown={arm}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 p-6 text-center animate-pulse-alarm"
+        >
+          <div>
+            <div className="text-6xl">📞</div>
+            <h2 className="mt-4 text-3xl font-extrabold text-white drop-shadow">Order ready!</h2>
+            <p className="mt-2 text-lg font-medium text-white/90">
+              The counter is calling you to collect an order.
+            </p>
+            {!armed && (
+              <p className="mt-3 rounded-lg bg-black/30 px-3 py-2 text-base font-semibold text-white">
+                🔇 Tap the screen once to turn the siren on.
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => void dismiss()}
+            className="rounded-2xl bg-white px-10 py-5 text-xl font-bold text-danger shadow-pop active:scale-95"
+          >
+            Got it — stop
+          </button>
+        </div>
+      )}
+    </>
   );
 }

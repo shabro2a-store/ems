@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
+import { RING_WINDOW_MS } from '@/lib/services/caller';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-const RING_WINDOW_MS = 2 * 60 * 1000;
 const DISPATCH_WINDOW_MS = 30 * 60 * 1000;
 
 // The driver's app polls this to know when the caller is ringing (alarm) and

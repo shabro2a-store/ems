@@ -11,6 +11,7 @@ vi.mock('notify', () => ({
   },
 }));
 
+import { RING_WINDOW_MS as WEB_RING_WINDOW_MS } from '@/lib/services/caller';
 import { runRingRepeater, RING_REPEAT_WINDOW_MS } from './ringRepeater';
 
 type CallRow = { id: string; driver_id: string; created_at: Date; acknowledged_at: Date | null };
@@ -53,6 +54,13 @@ beforeEach(() => {
 });
 
 describe('runRingRepeater', () => {
+  it('gives up at the same moment the app does', async () => {
+    // If the pushes outlasted the in-app alarm, a driver holding an open app
+    // would watch the alarm screen vanish while the phone kept buzzing; if the
+    // app outlasted the pushes, the screen would flash in silence.
+    expect(RING_REPEAT_WINDOW_MS).toBe(WEB_RING_WINDOW_MS);
+  });
+
   it('keeps pushing an unanswered ring, tick after tick', async () => {
     // One push was the entire alert before this: a driver with the phone in a
     // pocket missed it and nothing else ever happened.
@@ -72,10 +80,16 @@ describe('runRingRepeater', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('gives up at the end of the window rather than pestering forever', async () => {
-    // Past this the caller can see the ring went unanswered and choose somebody
-    // else - better than a phone that will not stop buzzing at a driver who is
-    // already out on the road.
+  it('is still ringing minutes later if nobody has answered', async () => {
+    // The owner's rule: it rings until the driver shuts it off. Two minutes in,
+    // where the old 45-second window had long since given up, it is still going.
+    seedCall();
+    expect((await runRingRepeater({ db: makeDb(), now: at(120) })).repushed).toBe(1);
+  });
+
+  it('stops at the backstop, for the phone that never answers at all', async () => {
+    // Not the length of the ring - the point where a handset switched off or
+    // shut in a drawer overnight stops collecting twelve alerts a minute.
     seedCall();
     const justInside = RING_REPEAT_WINDOW_MS / 1000 - 1;
     expect((await runRingRepeater({ db: makeDb(), now: at(justInside) })).repushed).toBe(1);
