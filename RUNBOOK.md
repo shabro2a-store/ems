@@ -284,9 +284,27 @@ by a test) — that backstop exists so a handset switched off or shut in a drawe
 overnight does not collect twelve alerts a minute until morning. Raise it there
 if 5 minutes is short.
 
-**iPhone is a poor driver handset.** Push needs Add to Home Screen (iOS 16.4+) to
-work at all, and iOS allows no custom notification sound and no Do Not Disturb
-override. Use Android.
+**iPhone cannot do case A. Use Android for driver handsets.** Everything above
+is written for Android and the difference is not cosmetic:
+
+| | Android (installed) | iPhone (Home Screen) |
+|---|---|---|
+| Siren, app on screen | yes | yes |
+| Siren, app backgrounded / phone locked | **yes** | **no** |
+| Push when app is closed | yes (16.4+ equivalent) | yes, iOS 16.4+ only |
+| Custom notification sound (a ringtone) | yes, per channel | **no** — system sound only |
+| Vibration pattern | yes | **no** — ignored |
+| Override Do Not Disturb / Focus | yes | **no** |
+| Notification buttons | yes | **no** |
+
+iOS suspends a backgrounded web app far harder than Android does, and starting a
+NEW sound from a push while suspended is not something it permits — so on an
+iPhone the siren is foreground-only, and a locked phone gets the plain system
+notification tone and nothing else. The driver screen says so on an iPhone
+rather than letting somebody tap "arm" and assume they are covered.
+
+If a driver must use an iPhone, the workaround is to keep the app **open on
+screen** while waiting for orders, with auto-lock set to Never while on shift.
 
 **Verify it.** Open the app, tap once to arm, press the home button so it is
 backgrounded, lock the phone, and have the counter ring. Expect a siren within a

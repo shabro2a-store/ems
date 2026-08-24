@@ -34,8 +34,30 @@ import { apiGet, apiSend } from '@/lib/api';
  * on the notification stream. They are separate sliders on Android and both
  * have to be up.
  */
+/**
+ * iOS cannot do the backgrounded case, and the driver has to be told.
+ *
+ * Everything above is written for Android, where a backgrounded page kept alive
+ * by media playback can be woken by a push and blast. iOS suspends a
+ * backgrounded web app far harder, and starting a NEW sound from a push while
+ * suspended is not something it permits - so on an iPhone the siren is a
+ * foreground-only thing and a locked phone gets the notification alone, with
+ * the standard notification sound, no vibration pattern, and no way to override
+ * a Focus mode. A driver who taps "arm" and believes they are covered is worse
+ * off than one who knows to keep the screen on.
+ */
+function isIos(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    // iPadOS reports itself as a Mac; the touch points give it away.
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
 export default function DriverAlarm() {
   const [ringing, setRinging] = useState(false);
+  const [ios, setIos] = useState(false);
   // Audio is still locked: the browser has had no gesture, so the alarm would
   // flash in silence. It used to do exactly that, invisibly, whenever the
   // driver arrived by tapping the notification - which never produces a gesture
@@ -70,6 +92,8 @@ export default function DriverAlarm() {
     s.volume = 1;
     s.load();
   }, []);
+
+  useEffect(() => setIos(isIos()), []);
 
   useEffect(() => {
     const events: Array<keyof WindowEventMap> = ['pointerdown', 'touchstart', 'keydown', 'focus'];
@@ -159,6 +183,14 @@ export default function DriverAlarm() {
           🔔 <b>Tap here to arm the siren.</b> Until you do, an order call can only buzz — it cannot
           make a sound.
         </button>
+      )}
+
+      {!ringing && armed && ios && (
+        <div className="w-full rounded-xl border border-warning/30 bg-warning-subtle px-4 py-3 text-sm">
+          📱 <b>On iPhone the siren only sounds while this screen is open.</b> Leave the app on
+          screen while you wait for orders — if you switch away or lock the phone, a call arrives as
+          a normal notification instead.
+        </div>
       )}
 
       {ringing && (
