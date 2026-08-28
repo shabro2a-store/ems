@@ -10,6 +10,7 @@ interface BindState {
   bound: boolean;
   bot_configured: boolean;
   webhook_secret_ok?: boolean;
+  bind_url?: string | null;
 }
 
 interface TestResult {
@@ -24,6 +25,7 @@ export function TelegramAlertsCard() {
   const [showCode, setShowCode] = useState(false);
   const [busy, setBusy] = useState<'test' | 'disconnect' | null>(null);
   const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiGet<BindState>('/api/admin/telegram/code');
@@ -151,16 +153,46 @@ export function TelegramAlertsCard() {
 
             {showCode && (
               <div className="space-y-2">
-                <p className="text-sm">
-                  Message the bot on Telegram and send this, code included:
-                </p>
-                <div className="tabular rounded-md border border-border bg-surface-2 px-3 py-2 text-lg font-semibold tracking-widest">
-                  /start {state.code}
-                </div>
+                {state.bind_url ? (
+                  <>
+                    <p className="text-sm">
+                      Send this link to whoever holds the phone that should get the alerts. They tap
+                      it once — Telegram opens and binds itself. They need no login here.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 truncate rounded-md border border-border bg-surface-2 px-3 py-2 text-sm">
+                        {state.bind_url}
+                      </code>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(state.bind_url!).then(() => {
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 2000);
+                          });
+                        }}
+                      >
+                        {copied ? 'Copied' : 'Copy'}
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted">
+                      Or, if they prefer to type it into the bot themselves:{' '}
+                      <span className="tabular font-semibold text-content">/start {state.code}</span>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm">Message the bot on Telegram and send this, code included:</p>
+                    <div className="tabular rounded-md border border-border bg-surface-2 px-3 py-2 text-lg font-semibold tracking-widest">
+                      /start {state.code}
+                    </div>
+                  </>
+                )}
                 <p className="text-xs text-muted">
                   Expires in {Math.max(0, Math.floor(state.expires_in_s / 60))}m{' '}
-                  {state.expires_in_s % 60}s. Anyone with this code can receive your alerts — do not
-                  share it.
+                  {state.expires_in_s % 60}s. Whoever uses it receives your alerts, so send it to the
+                  work phone and nowhere else — you can undo it any time with Disconnect.
                 </p>
               </div>
             )}

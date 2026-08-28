@@ -4,7 +4,20 @@ import { createHmac, timingSafeEqual } from 'crypto';
 // `/start <code>`. It is derived from JWT_SECRET rather than stored, so binding
 // needs no schema change and no cleanup job: possession of a current code
 // proves the sender was looking at an authenticated admin screen moments ago.
-export const BIND_CODE_TTL_MS = 10 * 60 * 1000;
+/**
+ * How long a bind code is good for.
+ *
+ * Thirty minutes, not ten, because the person who reads the code and the person
+ * holding the phone are not the same person. The owner opens the dashboard; the
+ * manager carries the work handset and has no login. The code has to survive
+ * being sent over WhatsApp to somebody who is mid-shift, and ten minutes did
+ * not. `verifyBindCode` also accepts the previous window, so a code is good for
+ * between one and two of these.
+ *
+ * It stays short enough to matter: whoever uses it receives the alert feed, and
+ * the only undo is the owner pressing Disconnect.
+ */
+export const BIND_CODE_TTL_MS = 30 * 60 * 1000;
 const CODE_DIGITS = 6;
 
 function secret(): string {

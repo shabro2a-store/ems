@@ -200,8 +200,15 @@ Without a bot token the app still works — alerts just stay in the dashboard's
    ```
    Expect `{"ok":true,...}`.
 5. In the app as admin: **Dashboard → Telegram alerts → Connect**. It shows a
-   6-digit code; send `/start <code>` to the bot from the phone that should receive
-   alerts.
+   **tap-to-bind link** (`https://t.me/<bot>?start=<code>`). Send that link to whoever
+   holds the phone that should receive the alerts — WhatsApp, SMS, however. They tap it
+   once, Telegram opens and binds itself, and they never need a login here. The 6-digit
+   code is shown underneath for anyone who would rather type `/start <code>` into the bot.
+
+   This is the point of the link: the person with the dashboard and the person with the
+   phone are not the same person. The owner logs in; the manager carries the work handset
+   and has no account. The code is good for 30–60 minutes so it survives being sent to
+   somebody mid-shift.
 6. Press **Send test** on the same card. Nothing before this step proves a message can
    actually be delivered — a token short one character and a bot the phone later blocked
    both read as connected. If it fails, the message names which of the two to fix.
@@ -213,6 +220,10 @@ so replacing it is a new `/start <code>` and nothing else.
 **If the phone is lost or leaves with somebody**, press **Disconnect** on the same card.
 It clears the binding on every admin account, tells the chat it was cut off, and is
 audited. Alerts stop until a phone is bound again.
+
+**Whoever uses the link receives the alerts**, so send it to the work phone and nowhere
+else. There is no lasting harm if it goes astray: press **Disconnect** on the same card and
+the binding is cleared, the chat is told, and it is audited.
 
 **Binding is code-gated on purpose.** The webhook secret only proves a request came
 from Telegram, not *who* messaged the bot, so a bare `/start` is refused — otherwise

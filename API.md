@@ -412,7 +412,11 @@ so it surfaces in payroll only if revoked.
 
 ### Telegram binding
 - **GET /api/admin/telegram/code** → `{ code, expires_in_s, bound, bot_configured,
-  webhook_secret_ok }`. `webhook_secret_ok` is false while `TELEGRAM_WEBHOOK_SECRET` is
+  webhook_secret_ok, bind_url }`. `bind_url` is `https://t.me/<bot>?start=<code>`, which
+  Telegram turns into `/start <code>` on the first tap - the owner sends it to whoever holds
+  the phone, because that person has no login here and the code is useless to them
+  otherwise. Null when the bot username cannot be resolved (no token, or `getMe` failed);
+  the 6-digit code still works by hand. `webhook_secret_ok` is false while `TELEGRAM_WEBHOOK_SECRET` is
   unset or still the literal `docker-compose.yml` falls back to, which is committed to this
   repo — the dashboard says so, because from the outside that state is indistinguishable
   from a correctly configured one and would never fail on its own.

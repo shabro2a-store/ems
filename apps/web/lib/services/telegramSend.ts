@@ -67,3 +67,31 @@ export async function sendToChat(chatId: string, text: string): Promise<Telegram
     };
   }
 }
+
+/**
+ * The bot's @username, asked of Telegram once and remembered.
+ *
+ * Needed only to build the tap-to-bind link. Cached for the life of the
+ * process: it changes when somebody renames the bot in BotFather, which is not
+ * a thing that happens without a redeploy following it.
+ */
+let botUsername: string | null | undefined;
+
+export async function telegramBotUsername(): Promise<string | null> {
+  if (botUsername !== undefined) return botUsername;
+  const token = process.env.TELEGRAM_BOT_TOKEN ?? '';
+  if (!token) {
+    botUsername = null;
+    return null;
+  }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const body = (await res.json()) as { ok?: boolean; result?: { username?: string } };
+    botUsername = body.ok && body.result?.username ? body.result.username : null;
+  } catch {
+    // Leave it unresolved rather than caching a failure: a network blip at
+    // startup should not cost the link for the rest of the process's life.
+    return null;
+  }
+  return botUsername;
+}

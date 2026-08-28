@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
 import { currentBindCode } from '@/lib/services/telegramBind';
+import { telegramBotUsername } from '@/lib/services/telegramSend';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -30,6 +31,18 @@ export async function GET() {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
   const webhookSecretOk = secret.length > 0 && secret !== 'dev_webhook_secret_change_in_prod';
 
+  // A tap-to-bind link, because the person who can read this code and the
+  // person holding the phone are different people: the owner has the dashboard
+  // login, the manager carries the work handset. Telegram turns the `start`
+  // parameter into `/start <code>` and sends it on the first tap, so the owner
+  // can pass this over WhatsApp and nobody types six digits or borrows a login.
+  //
+  // The code still gates the bind. Handing the link to somebody is the owner
+  // choosing who receives the alerts, which is exactly the decision the code
+  // exists to keep in his hands.
+  const username = await telegramBotUsername();
+  const bindUrl = username ? `https://t.me/${username}?start=${code}` : null;
+
   return NextResponse.json({
     ok: true,
     data: {
@@ -38,6 +51,7 @@ export async function GET() {
       bound: Boolean(admin.telegram_chat_id),
       bot_configured: configured,
       webhook_secret_ok: webhookSecretOk,
+      bind_url: bindUrl,
     },
   });
 }
