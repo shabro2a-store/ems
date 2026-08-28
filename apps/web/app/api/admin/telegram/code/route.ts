@@ -23,6 +23,13 @@ export async function GET() {
   const configured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
   const { code, expiresInSec } = currentBindCode(admin.id);
 
+  // The webhook secret is what proves an update really came from Telegram.
+  // docker-compose falls back to a literal that is committed to this repo, so
+  // "unset" looks identical to "set" from the outside and nothing would ever
+  // fail - the owner has to be shown it, or he will never find out.
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
+  const webhookSecretOk = secret.length > 0 && secret !== 'dev_webhook_secret_change_in_prod';
+
   return NextResponse.json({
     ok: true,
     data: {
@@ -30,6 +37,7 @@ export async function GET() {
       expires_in_s: expiresInSec,
       bound: Boolean(admin.telegram_chat_id),
       bot_configured: configured,
+      webhook_secret_ok: webhookSecretOk,
     },
   });
 }

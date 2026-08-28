@@ -30,9 +30,15 @@ interface TelegramUpdate {
 
 export async function POST(req: Request) {
   const h = headers();
+  // Fails CLOSED. This used to be `if (expected && ...)`, which meant an empty
+  // TELEGRAM_WEBHOOK_SECRET skipped the check altogether and left the endpoint
+  // open to the internet - the one shape of mistake where forgetting to set a
+  // variable removes a guard instead of breaking loudly. There is nothing to
+  // guard when no bot exists, so an unconfigured install still answers.
   const provided = req.headers.get('x-telegram-bot-api-secret-token');
-  const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
-  if (expected && provided !== expected) {
+  const expected = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
+  const botConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
+  if (botConfigured && (!expected || provided !== expected)) {
     return jsonError('FORBIDDEN', 'Bad webhook secret', 403);
   }
 

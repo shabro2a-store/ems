@@ -42,6 +42,7 @@ export default function AdminEmployeesPage() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [schedUser, setSchedUser] = useState<User | null>(null);
   const [pwTarget, setPwTarget] = useState<User | null>(null);
+  const [removing, setRemoving] = useState<User | null>(null);
   const [tempPw, setTempPw] = useState<{ username: string; pw: string } | null>(null);
 
   async function load() {
@@ -105,6 +106,28 @@ export default function AdminEmployeesPage() {
       body: { canRoamBranches: !u.can_roam_branches },
     });
     if (!res.ok) { setErr(errorMessage(res)); return; }
+    await load();
+  }
+
+  // Mirrors the branches page: one button, and the server decides whether the
+  // record can go. An account with punches behind it is a month payroll still
+  // has to be able to reconstruct, so it is deactivated instead and the message
+  // says which happened rather than leaving the owner guessing.
+  async function confirmRemove() {
+    if (!removing) return;
+    setErr(null);
+    const res = await apiSend<{ deleted: boolean; deactivated: boolean }>(
+      `/api/admin/users/${removing.id}`,
+      { method: 'DELETE' },
+    );
+    const name = removing.name || removing.username;
+    setRemoving(null);
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    setErr(
+      res.data.deleted
+        ? null
+        : `${name} has punches or payments on record, so they were deactivated instead of deleted — the history has to stay for payroll.`,
+    );
     await load();
   }
 
@@ -202,6 +225,11 @@ export default function AdminEmployeesPage() {
                                   {u.is_active ? 'Deactivate' : 'Activate'}
                                 </Button>
                               )}
+                              {u.role !== 'ADMIN' && (
+                                <Button size="sm" variant="ghost" className="text-danger" onClick={() => setRemoving(u)}>
+                                  Remove
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -233,6 +261,26 @@ export default function AdminEmployeesPage() {
       {schedUser && (
         <ScheduleModal user={schedUser} onClose={() => setSchedUser(null)} onSaved={() => { setSchedUser(null); setNotice('Schedule saved.'); }} />
       )}
+      {removing && (
+        <Modal
+          title={`Remove ${removing.name || removing.username}?`}
+          onClose={() => setRemoving(null)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setRemoving(null)}>Cancel</Button>
+              <Button variant="danger" onClick={confirmRemove}>Remove</Button>
+            </>
+          }
+        >
+          <p className="text-sm text-muted">
+            If this person has any punches, advances or penalties on record they will be{' '}
+            <b className="text-content">deactivated</b> instead — payroll has to be able to rebuild
+            the months they worked. An account with no history is deleted permanently, along with
+            its schedule and pay rate. Either way the audit log keeps the record.
+          </p>
+        </Modal>
+      )}
+
       {pwTarget && (
         <SetPasswordModal user={pwTarget} onClose={() => setPwTarget(null)} onDone={(pw) => { setTempPw({ username: pwTarget.username, pw }); setPwTarget(null); }} />
       )}

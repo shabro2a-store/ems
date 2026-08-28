@@ -250,6 +250,14 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   `canRoamBranches` lets this person clock in and out at any active branch and be dispatched
   from whichever branch rang them; audited on both sides. Nothing about it is cached or
   copied onto a token, so revoking takes effect on the very next punch.
+- **DELETE /api/admin/users/[id]** *(CSRF)* → `{ deleted, deactivated, history? }`. Same rule
+  and shape as the branch delete: a person with **any** punch, trip, advance, adjustment,
+  penalty ruling, blocked attempt or driver call is **deactivated** instead, because payroll
+  has to stay able to rebuild the months they worked. An account with none of that is deleted
+  outright along with its schedule, pay rate, overrides, leave requests, push subscriptions
+  and flags — all of which describe an account rather than record anything it did. Deleting
+  the ADMIN account, or your own, is rejected 403. The audit row outlives the user:
+  `AuditLog.actor_id` carries no foreign key.
 - **POST /api/admin/users/[id]/reset-password** *(CSRF)* optional `{ password }` —
   sets that password, or generates a random one. → `{ temp_password }`.
 - **POST /api/admin/users/[id]/deactivate** *(CSRF)* toggles active. Deactivating an
@@ -403,7 +411,11 @@ so it surfaces in payroll only if revoked.
   (sets `notified_at`); audited. Changes no punch or pay record. → `{ id, resolved_at }`.
 
 ### Telegram binding
-- **GET /api/admin/telegram/code** → `{ code, expires_in_s, bound, bot_configured }`.
+- **GET /api/admin/telegram/code** → `{ code, expires_in_s, bound, bot_configured,
+  webhook_secret_ok }`. `webhook_secret_ok` is false while `TELEGRAM_WEBHOOK_SECRET` is
+  unset or still the literal `docker-compose.yml` falls back to, which is committed to this
+  repo — the dashboard says so, because from the outside that state is indistinguishable
+  from a correctly configured one and would never fail on its own.
   The 6-digit code the admin sends the bot as `/start <code>`. Derived by HMAC from
   `JWT_SECRET` over a 10-minute window, so nothing is stored and nothing expires in the
   DB. A bare `/start`, or a wrong/expired code, is refused — see the webhook below.
@@ -449,7 +461,11 @@ not enough, since the ring is what authorises the trip.
 ## Telegram
 
 ### POST /api/telegram/webhook (public, secret-guarded)
-Guarded by the `x-telegram-bot-api-secret-token` header vs `TELEGRAM_WEBHOOK_SECRET`.
+Guarded by the `x-telegram-bot-api-secret-token` header vs `TELEGRAM_WEBHOOK_SECRET`, and
+**fails closed**: once `TELEGRAM_BOT_TOKEN` is set, a missing or mismatched secret is a 403.
+It used to skip the check entirely when the variable was empty — the one shape of mistake
+where forgetting to set something removes a guard rather than breaking loudly. With no bot
+token configured there is nothing to guard and the endpoint still answers.
 That header proves the request came **from Telegram**, not *who* messaged the bot, so
 binding is additionally gated on a code from `GET /api/admin/telegram/code`:
 

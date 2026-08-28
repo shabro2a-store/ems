@@ -9,6 +9,7 @@ interface BindState {
   expires_in_s: number;
   bound: boolean;
   bot_configured: boolean;
+  webhook_secret_ok?: boolean;
 }
 
 interface TestResult {
@@ -103,6 +104,16 @@ export function TelegramAlertsCard() {
           </p>
         ) : (
           <div className="space-y-3">
+            {state.webhook_secret_ok === false && (
+              <Alert tone="danger">
+                <b>TELEGRAM_WEBHOOK_SECRET is still the default.</b> That value is published in this
+                project&apos;s source, so anyone who knows it can post to the webhook and try codes at
+                it. Alerts still work — this is worth fixing, not urgent. Put a fresh value in{' '}
+                <code>.env</code> (<code>openssl rand -hex 16</code>), restart, then re-run{' '}
+                <code>setWebhook</code> with the same value.
+              </Alert>
+            )}
+
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={state.bound ? 'success' : 'warning'}>
                 {state.bound ? 'Connected' : 'Not connected'}
