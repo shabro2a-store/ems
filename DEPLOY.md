@@ -199,37 +199,30 @@ Without a bot token the app still works — alerts just stay in the dashboard's
    curl -s "https://api.telegram.org/bot<TOKEN>/setWebhook" -d "url=https://app.shabro2a.com/api/telegram/webhook" -d "secret_token=<SECRET>"
    ```
    Expect `{"ok":true,...}`.
-5. In the app as admin: **Dashboard → Telegram alerts → Connect**. It shows a
-   **tap-to-bind link** (`https://t.me/<bot>?start=<code>`). Send that link to whoever
-   holds the phone that should receive the alerts — WhatsApp, SMS, however. They tap it
-   once, Telegram opens and binds itself, and they never need a login here. The 6-digit
-   code is shown underneath for anyone who would rather type `/start <code>` into the bot.
-
-   This is the point of the link: the person with the dashboard and the person with the
-   phone are not the same person. The owner logs in; the manager carries the work handset
-   and has no account. The code is good for 30–60 minutes so it survives being sent to
-   somebody mid-shift.
+5. In the app as admin: **Dashboard → Telegram alerts → Connect**. It shows the bot's
+   link (`https://t.me/<bot>`). Open it on the phone that should receive the alerts and
+   press **START**. That is the whole of it — no code, nothing to expire.
 6. Press **Send test** on the same card. Nothing before this step proves a message can
-   actually be delivered — a token short one character and a bot the phone later blocked
-   both read as connected. If it fails, the message names which of the two to fix.
+   actually be delivered: a token short one character and a bot the phone later blocked
+   both read as connected. If it fails, the message names which to fix.
 
-**There is no chat id to configure.** The phone binds itself with the code; the id it
-reports is stored against the admin account. Nothing about the handset lives in `.env`,
-so replacing it is a new `/start <code>` and nothing else.
+**There is no chat id to configure.** The phone binds itself; the id it reports is stored
+against the admin account. Nothing about the handset lives in `.env`, so replacing it is a
+press of START and nothing else.
 
-**If the phone is lost or leaves with somebody**, press **Disconnect** on the same card.
-It clears the binding on every admin account, tells the chat it was cut off, and is
-audited. Alerts stop until a phone is bound again.
+**Binding is open on purpose.** The person with the dashboard and the person with the phone
+are not the same person — the owner logs in, the manager carries the work handset and has no
+account — so anything that had to be read off a screen could not be used by the person who
+needed it. The bot only ever *sends*; nothing in the app can be reached through it, so a
+wrong chat would see the alert feed, never control of anything.
 
-**Whoever uses the link receives the alerts**, so send it to the work phone and nowhere
-else. There is no lasting harm if it goes astray: press **Disconnect** on the same card and
-the binding is cleared, the chat is told, and it is audited.
+**First come, and that is the only rule.** The first chat to press START keeps the alerts.
+A second chat is told to use Disconnect first, because an open bind that let any later
+`/start` take over would silently move the alerts off the work phone and nothing anywhere
+would say why.
 
-**Binding is code-gated on purpose.** The webhook secret only proves a request came
-from Telegram, not *who* messaged the bot, so a bare `/start` is refused — otherwise
-anyone who discovered the bot could redirect the alert feed to themselves. Codes are
-derived from `JWT_SECRET`, last 10 minutes, and are shown only to a logged-in admin.
-Changing `JWT_SECRET` invalidates outstanding codes (existing bindings survive).
+**To move or stop the alerts:** press **Disconnect** on the card, or send `/stop` to the bot
+from the phone itself. Either clears it, tells the chat, and is audited.
 
 ## Cloudflare
 - **Tunnel**: keep it — it provides HTTPS and hides the origin IP. Required for

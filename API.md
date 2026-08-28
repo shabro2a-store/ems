@@ -411,18 +411,14 @@ so it surfaces in payroll only if revoked.
   (sets `notified_at`); audited. Changes no punch or pay record. → `{ id, resolved_at }`.
 
 ### Telegram binding
-- **GET /api/admin/telegram/code** → `{ code, expires_in_s, bound, bot_configured,
-  webhook_secret_ok, bind_url }`. `bind_url` is `https://t.me/<bot>?start=<code>`, which
-  Telegram turns into `/start <code>` on the first tap - the owner sends it to whoever holds
-  the phone, because that person has no login here and the code is useless to them
-  otherwise. Null when the bot username cannot be resolved (no token, or `getMe` failed);
-  the 6-digit code still works by hand. `webhook_secret_ok` is false while `TELEGRAM_WEBHOOK_SECRET` is
-  unset or still the literal `docker-compose.yml` falls back to, which is committed to this
-  repo — the dashboard says so, because from the outside that state is indistinguishable
-  from a correctly configured one and would never fail on its own.
-  The 6-digit code the admin sends the bot as `/start <code>`. Derived by HMAC from
-  `JWT_SECRET` over a 10-minute window, so nothing is stored and nothing expires in the
-  DB. A bare `/start`, or a wrong/expired code, is refused — see the webhook below.
+- **GET /api/admin/telegram/code** → `{ bound, bot_configured, webhook_secret_ok, bind_url }`.
+  `bind_url` is `https://t.me/<bot>`; the owner sends it to whoever holds the work phone, who
+  presses START. There is no code and nothing expires - the manager carrying the handset has
+  no login here, so anything that had to be read off the dashboard could not be used. Null
+  when the bot username cannot be resolved (no token, or `getMe` failed). `webhook_secret_ok`
+  is false while `TELEGRAM_WEBHOOK_SECRET` is unset or still the literal `docker-compose.yml`
+  falls back to, which is committed to this repo - from outside, that state is
+  indistinguishable from a correct one and would never fail on its own.
 - **POST /api/admin/telegram/test** *(CSRF)* → `{ delivered }`, and on failure
   `{ delivered: false, reason, message }` where `reason` is `NOT_BOUND`, `NO_TOKEN` or
   `TELEGRAM_ERROR`. Sends a real message to the chat **the notifier resolves**, not to the
@@ -473,12 +469,14 @@ token configured there is nothing to guard and the endpoint still answers.
 That header proves the request came **from Telegram**, not *who* messaged the bot, so
 binding is additionally gated on a code from `GET /api/admin/telegram/code`:
 
-- `/start <valid code>` → binds that chat to the admin whose code it is. The code is
-  checked against **every** admin account, because the code shown in the app is derived
-  from the id of whoever is logged in; matching against one arbitrary admin meant a valid
-  code could never verify once a second admin existed. `200 { bound }`
-- `/start` with no code → `200 { needsCode: true }`, replies with instructions
-- `/start <wrong or expired code>` → `200 { rejected: true }`, no binding
+- `/start` from a chat when nothing is bound → binds it. `200 { bound }`
+- `/start` from the chat already bound → `200 { alreadyBound: true }`
+- `/start` from a different chat while one is bound → `200 { rejected: 'already_bound' }`,
+  and the reply points at Disconnect. **First come, and only that.** An open bind that let
+  any later `/start` take over would let another chat silently replace the work phone: the
+  owner would just stop receiving alerts with nothing anywhere to say why.
+- `/stop` from the bound chat → unbinds it. `200 { stopped: true }`. The same thing
+  Disconnect does, for the person holding the handset rather than the one holding the login.
 - `/help` → `200 { helped: true }`
 - anything else → `200 { skipped: true }` (ack so Telegram stops retrying)
 

@@ -213,7 +213,7 @@ Run once on the VPS after first deploy:
 - **All users get logged out.** Edit `/opt/ems/.env`, then `docker compose up -d`
   to recreate the containers with the new value.
 - No data loss; cookies become invalid and users re-login.
-- Also invalidates any outstanding Telegram bind codes (existing bindings survive).
+- Does not touch Telegram. Binding is a stored chat id, not a derived secret.
 
 ### Deploy a hotfix
 - Push to `master`, then run the section 2 redeploy on the VPS. There is no

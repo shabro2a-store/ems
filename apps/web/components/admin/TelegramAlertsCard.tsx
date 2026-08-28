@@ -5,8 +5,6 @@ import { apiGet, apiSend } from '@/lib/api';
 import { Card, CardBody, CardHeader, Badge, Button, Spinner, Alert } from '@/components/ui';
 
 interface BindState {
-  code: string;
-  expires_in_s: number;
   bound: boolean;
   bot_configured: boolean;
   webhook_secret_ok?: boolean;
@@ -37,12 +35,14 @@ export function TelegramAlertsCard() {
     void load();
   }, [load]);
 
-  // Codes roll every 10 minutes; refresh while the admin has it on screen.
+  // Poll while the connect panel is open, so the card flips to Connected on its
+  // own the moment the phone presses START - there is nothing to come back and
+  // click, which is the whole point of an open bind.
   useEffect(() => {
-    if (!showCode) return;
-    const t = setInterval(() => void load(), 30_000);
+    if (!showCode || state?.bound) return;
+    const t = setInterval(() => void load(), 3_000);
     return () => clearInterval(t);
-  }, [showCode, load]);
+  }, [showCode, state?.bound, load]);
 
   const sendTest = useCallback(async () => {
     setBusy('test');
@@ -151,48 +151,41 @@ export function TelegramAlertsCard() {
 
             {banner && <Alert tone={banner.tone}>{banner.text}</Alert>}
 
-            {showCode && (
+            {showCode && !state.bound && (
               <div className="space-y-2">
+                <p className="text-sm">
+                  Open this on the phone that should receive the alerts and press{' '}
+                  <b>START</b>. That is all — nothing expires and there is no code to type, so
+                  whoever holds the work phone can do it without a login here.
+                </p>
                 {state.bind_url ? (
-                  <>
-                    <p className="text-sm">
-                      Send this link to whoever holds the phone that should get the alerts. They tap
-                      it once — Telegram opens and binds itself. They need no login here.
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 truncate rounded-md border border-border bg-surface-2 px-3 py-2 text-sm">
-                        {state.bind_url}
-                      </code>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(state.bind_url!).then(() => {
-                            setCopied(true);
-                            setTimeout(() => setCopied(false), 2000);
-                          });
-                        }}
-                      >
-                        {copied ? 'Copied' : 'Copy'}
-                      </Button>
-                    </div>
-                    <p className="text-sm text-muted">
-                      Or, if they prefer to type it into the bot themselves:{' '}
-                      <span className="tabular font-semibold text-content">/start {state.code}</span>
-                    </p>
-                  </>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 truncate rounded-md border border-border bg-surface-2 px-3 py-2 text-sm">
+                      {state.bind_url}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(state.bind_url!).then(() => {
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        });
+                      }}
+                    >
+                      {copied ? 'Copied' : 'Copy'}
+                    </Button>
+                  </div>
                 ) : (
-                  <>
-                    <p className="text-sm">Message the bot on Telegram and send this, code included:</p>
-                    <div className="tabular rounded-md border border-border bg-surface-2 px-3 py-2 text-lg font-semibold tracking-widest">
-                      /start {state.code}
-                    </div>
-                  </>
+                  <p className="text-sm text-muted">
+                    Find the bot in Telegram by the username you gave it in BotFather, then press
+                    START.
+                  </p>
                 )}
                 <p className="text-xs text-muted">
-                  Expires in {Math.max(0, Math.floor(state.expires_in_s / 60))}m{' '}
-                  {state.expires_in_s % 60}s. Whoever uses it receives your alerts, so send it to the
-                  work phone and nowhere else — you can undo it any time with Disconnect.
+                  The first chat to press START gets the alerts and keeps them. To move them to a
+                  different phone later, press <b>Disconnect</b> here first — or send{' '}
+                  <code>/stop</code> to the bot from the phone itself.
                 </p>
               </div>
             )}

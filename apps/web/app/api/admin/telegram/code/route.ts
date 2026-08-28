@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
-import { currentBindCode } from '@/lib/services/telegramBind';
 import { telegramBotUsername } from '@/lib/services/telegramSend';
 
 function jsonError(code: string, message: string, status: number) {
@@ -22,7 +21,6 @@ export async function GET() {
   if (!admin) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
 
   const configured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
-  const { code, expiresInSec } = currentBindCode(admin.id);
 
   // The webhook secret is what proves an update really came from Telegram.
   // docker-compose falls back to a literal that is committed to this repo, so
@@ -31,23 +29,17 @@ export async function GET() {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
   const webhookSecretOk = secret.length > 0 && secret !== 'dev_webhook_secret_change_in_prod';
 
-  // A tap-to-bind link, because the person who can read this code and the
-  // person holding the phone are different people: the owner has the dashboard
-  // login, the manager carries the work handset. Telegram turns the `start`
-  // parameter into `/start <code>` and sends it on the first tap, so the owner
-  // can pass this over WhatsApp and nobody types six digits or borrows a login.
-  //
-  // The code still gates the bind. Handing the link to somebody is the owner
-  // choosing who receives the alerts, which is exactly the decision the code
-  // exists to keep in his hands.
+  // A link to the bot, nothing more. Binding is open by the owner's ruling:
+  // whoever opens this and presses START receives the alerts, and the first
+  // chat to do it holds them until somebody presses Disconnect. There is no
+  // code to carry because the manager who holds the work phone has no login
+  // here and never will.
   const username = await telegramBotUsername();
-  const bindUrl = username ? `https://t.me/${username}?start=${code}` : null;
+  const bindUrl = username ? `https://t.me/${username}` : null;
 
   return NextResponse.json({
     ok: true,
     data: {
-      code,
-      expires_in_s: expiresInSec,
       bound: Boolean(admin.telegram_chat_id),
       bot_configured: configured,
       webhook_secret_ok: webhookSecretOk,

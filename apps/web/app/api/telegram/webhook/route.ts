@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { headers } from 'next/headers';
-import { verifyBindCode } from '@/lib/services/telegramBind';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -59,65 +58,99 @@ export async function POST(req: Request) {
   if (text === '/help') {
     await reply(
       chatId,
-      `<b>Shabro2a EMS bot</b>\n` +
-        `This bot only sends alerts — every action happens in the app.\n\n` +
-        `<b>/start &lt;code&gt;</b> — bind this chat to the admin account. Get the code from the app: Dashboard → Telegram alerts.\n` +
+      `<b>Shabro2a EMS bot</b>
+` +
+        `This bot only sends alerts — every action happens in the app.
+
+` +
+        `<b>/start</b> — send alerts to this chat.
+` +
+        `<b>/stop</b> — stop sending them here.
+` +
         `<b>/help</b> — this message.`,
     );
     return NextResponse.json({ ok: true, data: { helped: true } });
   }
 
+  // Binding is open, and that is the owner's ruling: he sets the bot up, sends
+  // /start from the work phone once, and it works from then on - nothing to
+  // expire, no code to fetch from a dashboard the manager cannot reach. The bot
+  // only ever SENDS, so what a wrong chat would get is the alert feed, never
+  // control of anything.
+  //
+  // The one rule kept is first-come. A bind that let ANY /start take over would
+  // let a later chat silently replace the work phone: the owner would simply
+  // stop receiving alerts, with nothing anywhere to say why. So the first chat
+  // wins, and a second is pointed at Disconnect - a button the owner already
+  // has. Nothing anybody means to do is blocked; only the silent takeover is.
   if (text.startsWith('/start')) {
-    // Binding is gated on a short-lived code that only an authenticated admin
-    // screen displays. Without it any stranger who found the bot could point
-    // the whole alert feed at their own chat.
-    const supplied = text.slice('/start'.length).trim();
-    // Every admin, not findFirst. The code shown in the app is derived from the
-    // id of the admin who is logged in (see currentBindCode); an unordered
-    // findFirst here checked it against a possibly different admin, so with two
-    // admin accounts a perfectly valid code could never verify. Trying them all
-    // makes the two sides agree by construction rather than by luck of row
-    // order, and the HMAC is what decides - not the query.
-    const admins = await prisma.user.findMany({
+    const admin = await prisma.user.findFirst({
       where: { role: 'ADMIN' },
       orderBy: { created_at: 'asc' },
-      select: { id: true, username: true },
+      select: { id: true, username: true, telegram_chat_id: true },
     });
-    if (admins.length === 0) {
+    if (!admin) {
       return jsonError('NOT_FOUND', 'No admin user found', 404);
     }
 
-    if (!supplied) {
+    const mine = String(chatId);
+    if (admin.telegram_chat_id === mine) {
+      await reply(chatId, `✅ Already connected. Alerts come here.`);
+      return NextResponse.json({ ok: true, data: { alreadyBound: true } });
+    }
+    if (admin.telegram_chat_id) {
       await reply(
         chatId,
-        `🔒 This chat is not bound.\n\nOpen the app as admin → <b>Dashboard → Telegram alerts</b>, then send:\n<code>/start 123456</code>\n(using the 6-digit code shown there).`,
-      );
-      return NextResponse.json({ ok: true, data: { needsCode: true } });
-    }
+        `🔒 Alerts are already going to another chat.
 
-    const admin = admins.find((a) => verifyBindCode(a.id, supplied));
-    if (!admin) {
-      await reply(chatId, `❌ That code is wrong or expired. Codes last 10 minutes — grab a fresh one from the app and try again.`);
-      return NextResponse.json({ ok: true, data: { rejected: true } });
+To move them here, open the app as admin → <b>Dashboard → Telegram alerts → Disconnect</b>, then send /start again.`,
+      );
+      return NextResponse.json({ ok: true, data: { rejected: 'already_bound' } });
     }
 
     await prisma.user.update({
       where: { id: admin.id },
-      data: { telegram_chat_id: String(chatId) },
+      data: { telegram_chat_id: mine },
     });
     await reply(
       chatId,
-      `👋 Bound to admin <b>${admin.username}</b>.\n` +
-        `You will now receive alerts for:\n` +
-        `• Missed checkouts\n` +
-        `• Trip over-threshold\n` +
-        `• Driver out &gt;4h\n` +
-        `• End-of-day watch\n` +
-        `• Advance requests\n` +
-        `• Daily summary (23:00)\n\n` +
-        `Reply /help for the command list.`,
+      `👋 Connected.
+` +
+        `Alerts will come here for:
+` +
+        `• Missed checkouts
+` +
+        `• Trip over-threshold
+` +
+        `• Driver out &gt;4h
+` +
+        `• End-of-day watch
+` +
+        `• Advance requests
+` +
+        `• Daily summary (23:00)
+
+` +
+        `Send /stop to turn them off, or /help for the command list.`,
     );
     return NextResponse.json({ ok: true, data: { bound: admin.id } });
+  }
+
+  // Whoever holds the phone can turn the alerts off from the phone itself.
+  // The same thing Disconnect does, for the person with the handset rather than
+  // the one with the login.
+  if (text === '/stop') {
+    const cleared = await prisma.user.updateMany({
+      where: { role: 'ADMIN', telegram_chat_id: String(chatId) },
+      data: { telegram_chat_id: null },
+    });
+    await reply(
+      chatId,
+      cleared.count > 0
+        ? `🔌 Stopped. No more alerts here. Send /start to turn them back on.`
+        : `This chat was not receiving alerts.`,
+    );
+    return NextResponse.json({ ok: true, data: { stopped: cleared.count > 0 } });
   }
 
   // Other messages: silently ack so Telegram doesn't retry.

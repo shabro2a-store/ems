@@ -173,7 +173,8 @@ Full request/response detail is in [API.md](API.md). Summary:
   user/date; pending grants nothing, so `ACCEPTED` is what pays and `REVOKED` moves no money,
   `PENDING` deletes the row and is the undo).
 - Flags: `POST flags/[id]/resolve`.
-- Telegram: `GET telegram/code` (the 6-digit bind code + whether a bot/chat is configured).
+- Telegram: `GET telegram/code` (bot link + whether a bot/chat is configured), `POST
+  telegram/test` (prove delivery), `POST telegram/disconnect` (clear every binding).
 
 **Telegram**: `POST /api/telegram/webhook` (secret-guarded; `/start` binds admin chat_id).
 
