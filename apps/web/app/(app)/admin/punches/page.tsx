@@ -20,7 +20,7 @@ interface Punch {
   user: { id: string; username: string };
   branch: { name: string };
 }
-interface Branch { id: string; name: string }
+interface Branch { id: string; name: string; deleted_at?: string | null }
 interface Staff { id: string; username: string; name: string | null; role: string; branch_id: string | null; is_active: boolean }
 
 export default function AdminPunchesPage() {
@@ -121,7 +121,14 @@ export default function AdminPunchesPage() {
               className="w-auto"
             >
               <option value="all">All branches</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              {/* Closed branches stay here on purpose: their punches are still
+                  in this log, and filtering to them is exactly what a record is
+                  for. They are marked so nobody assigns anybody to one. */}
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}{b.deleted_at ? ' (closed)' : ''}
+                </option>
+              ))}
             </Select>
             <Select value={userId} onChange={(e) => setUserId(e.target.value)} className="w-auto">
               <option value="all">Everyone</option>

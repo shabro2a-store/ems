@@ -281,12 +281,26 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **POST /api/admin/branches** *(CSRF)* `{ name, lat?, lng?, gpsRadiusM?,
   gpsAccuracyMaxM?, shiftGraceMin?, tripThresholdMin? }` → `{ branch }`.
 - **PATCH /api/admin/branches/[id]** *(CSRF)* any of the above fields + `isActive`.
-- **DELETE /api/admin/branches/[id]** *(CSRF)* → `{ deleted, archived }`. Hard-deletes
-  an empty branch; archives (is_active=false) one that has staff/punch/trip history.
+- **DELETE /api/admin/branches/[id]** *(CSRF)* → `{ deleted, closed, staff_retired }`.
+  A branch nothing ever happened at is hard-deleted. One with staff, punches or trips is
+  **closed**: `deleted_at` and `is_active=false`, and **every EMPLOYEE/DRIVER/CALLER assigned
+  to it is retired with it** (see the user DELETE). That is not a convenience — an account
+  only works AT a branch, since punching resolves the geofence from `user.branch` and a
+  branchless one is refused `BRANCH_NOT_FOUND`; leaving them filed against a closed shop
+  would look fine on the staff list and fail every morning. Reassign anyone who is moving
+  BEFORE closing, which is why `GET /api/admin/branches` returns `staff_count` and the
+  confirmation names it. ADMIN is never retired.
+
+  The row stays because `Punch.branch_id` and `Trip.branch_id` are required FKs. Closed
+  branches vanish from the branches page and from every staff-assignment dropdown, and stay
+  in history filters marked `(closed)` — their punches are still in the log, and filtering to
+  them is what a record is for.
 
 ### Punches
-- **GET /api/admin/punches?branchId=&userId=&from=&to=&limit=** → `{ punches: [...] }`
-  (includes `corrected`, `correction_reason`, user, branch).
+- **GET /api/admin/punches?branchId=&userId=&from=&to=&limit=** →
+  `{ punches: [...], limit, has_more }` (includes `corrected`, `correction_reason`,
+  `system_generated`, user, branch). `limit` defaults to **200** and caps at 500; `has_more`
+  comes from fetching one extra row, so the newest page never reads as the whole story.
 - **POST /api/admin/punches/correct** *(CSRF, Idempotent)* `{ punchId, newAt?,
   newBranchId?, reason }` — **persists** the correction (sets `corrected`,
   `corrected_by`, `correction_reason`) and audits before/after. GPS evidence is kept.

@@ -18,7 +18,7 @@ interface User {
   is_active: boolean;
   can_roam_branches: boolean;
 }
-interface Branch { id: string; name: string }
+interface Branch { id: string; name: string; deleted_at?: string | null }
 interface Status { status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT'; since_min: number; over: boolean }
 
 const ROLE_TONE: Record<Role, 'primary' | 'warning' | 'neutral' | 'success'> = { EMPLOYEE: 'primary', DRIVER: 'warning', ADMIN: 'neutral', CALLER: 'success' };
@@ -59,7 +59,10 @@ export default function AdminEmployeesPage() {
       apiGet<{ people: { id: string; status: Status['status']; since_min: number; over: boolean }[] }>('/api/admin/overview'),
     ]);
     if (u.ok) setUsers(u.data.users);
-    if (b.ok) setBranches(b.data.branches);
+    // A closed branch is never offered for assignment: an account filed against
+    // one cannot punch anywhere. It stays in history filters, which is a
+    // different question.
+    if (b.ok) setBranches(b.data.branches.filter((x) => !x.deleted_at));
     if (o.ok) {
       const m: Record<string, Status> = {};
       for (const p of o.data.people) m[p.id] = { status: p.status, since_min: p.since_min, over: p.over };

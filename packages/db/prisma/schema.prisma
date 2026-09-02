@@ -133,6 +133,14 @@ model Branch {
   shift_grace_min    Int     @default(15)
   trip_threshold_min Int     @default(30)
   is_active          Boolean @default(true)
+  // Closed for good, as opposed to is_active=false which is "archived, might
+  // reopen". A closed branch disappears from the branches page and from every
+  // list you assign somebody to, and its staff are retired with it - they have
+  // nowhere to punch, and a branchless account is refused BRANCH_NOT_FOUND at
+  // the door, which is a broken account rather than a closed one.
+  //
+  // The row stays because punches and trips point at it. See User.deleted_at.
+  deleted_at         DateTime?
   users              User[]
   punches            Punch[]
   trips              Trip[]

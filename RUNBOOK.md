@@ -332,9 +332,20 @@ What they already did stays. Punches, advances and penalties are untouched, so:
 An account with no records at all — a mistake, a test account — is erased outright instead,
 row and all.
 
-Branches work the same way: one with punches or trips behind it is archived (hidden, kept),
-an empty one is deleted. Archived branches are hidden from the branches page behind **Show
-archived**.
+Branches work the same way, one scale up. Closing a branch **retires every employee, driver
+and caller assigned to it** — an account only works at a branch, so one left filed against a
+closed shop would look fine on the staff list and fail at the door every morning. The
+confirmation says how many accounts will go before you press it, so **reassign anybody who is
+moving to another branch first**. The owner's own admin account is never touched.
+
+The punches and trips made there stay, so payroll for the months it was open still adds up,
+and from the next month the branch appears nowhere. A branch nothing ever happened at is
+deleted outright.
+
+Closed branches are gone from the branches page and from every staff-assignment dropdown.
+They stay in the punches filter marked `(closed)`, because their punches are still in the log.
+`is_active=false` on its own remains what it was — archived, hidden behind **Show archived**,
+and reversible from the branch edit form.
 
 Erasing the RECORDS of somebody who worked is not a button and should not become one: payroll
 rebuilds each month from the punches every time it is opened, so removing them rewrites months

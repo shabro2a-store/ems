@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
+import { retireUser } from '@/lib/services/userDelete';
 
 const Patch = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -84,26 +85,74 @@ export async function DELETE(req: Request, ctx: { params: { id: string } }) {
   const branch = await prisma.branch.findUnique({ where: { id: ctx.params.id } });
   if (!branch) return jsonError('NOT_FOUND', 'Branch not found', 404);
 
-  // A branch referenced by staff, punches or trips cannot be hard-deleted
-  // without losing history — archive it (is_active=false) instead.
-  const [userCount, punchCount, tripCount] = await Promise.all([
-    prisma.user.count({ where: { branch_id: branch.id } }),
+  // Same rule as a person, one scale up: the branch goes today, what happened
+  // there stays. Punch.branch_id and Trip.branch_id are required foreign keys,
+  // so the row itself cannot go without taking a paid month's punches with it.
+  const [staff, punchCount, tripCount] = await Promise.all([
+    prisma.user.findMany({
+      // ADMIN is never touched: the owner may be filed against a branch and
+      // retiring him would lock everybody out of the system.
+      where: {
+        branch_id: branch.id,
+        deleted_at: null,
+        role: { in: ['EMPLOYEE', 'DRIVER', 'CALLER'] },
+      },
+      select: { id: true, username: true, name: true },
+    }),
     prisma.punch.count({ where: { branch_id: branch.id } }),
     prisma.trip.count({ where: { branch_id: branch.id } }),
   ]);
-  const hasHistory = userCount + punchCount + tripCount > 0;
+  const hasHistory = staff.length + punchCount + tripCount > 0;
 
   if (hasHistory) {
-    await prisma.branch.update({ where: { id: branch.id }, data: { is_active: false } });
+    const now = new Date();
+    await prisma.branch.update({
+      where: { id: branch.id },
+      data: { is_active: false, deleted_at: now },
+    });
+
+    // The staff go with it, and this is the part that makes closing a branch
+    // mean something. Their accounts are only usable AT a branch - punching
+    // resolves the geofence from user.branch, and a branchless account is
+    // refused BRANCH_NOT_FOUND at the door. Leaving them assigned to a closed
+    // shop would be an account that looks fine on the staff list and fails
+    // silently every morning. Anyone who is really moving to another branch
+    // should be reassigned BEFORE this, which is why the confirm names them.
+    for (const u of staff) {
+      await retireUser(prisma, u, now);
+      await writeAuditLog({
+        actorId: adminId,
+        action: 'user.retire',
+        entity: 'User',
+        entityId: u.id,
+        before: { username: u.username, name: u.name, branch_id: branch.id },
+        after: {
+          deleted_at: now.toISOString(),
+          username_freed: u.username,
+          reason: `branch ${branch.name} was closed`,
+        },
+      });
+    }
+
     await writeAuditLog({
       actorId: adminId,
-      action: 'branch.archive',
+      action: 'branch.close',
       entity: 'Branch',
       entityId: branch.id,
-      before: { is_active: branch.is_active },
-      after: { is_active: false, reason: 'has history', users: userCount, punches: punchCount, trips: tripCount },
+      before: { name: branch.name, is_active: branch.is_active },
+      after: {
+        is_active: false,
+        deleted_at: now.toISOString(),
+        reason: 'closed by the owner; records kept so paid months still reconstruct',
+        staff_retired: staff.length,
+        punches: punchCount,
+        trips: tripCount,
+      },
     });
-    return NextResponse.json({ ok: true, data: { deleted: false, archived: true } });
+    return NextResponse.json({
+      ok: true,
+      data: { deleted: true, closed: true, staff_retired: staff.length },
+    });
   }
 
   await prisma.branch.delete({ where: { id: branch.id } });
@@ -114,7 +163,7 @@ export async function DELETE(req: Request, ctx: { params: { id: string } }) {
     entityId: branch.id,
     before: { name: branch.name },
   });
-  return NextResponse.json({ ok: true, data: { deleted: true, archived: false } });
+  return NextResponse.json({ ok: true, data: { deleted: true, closed: false, staff_retired: 0 } });
 }
 
 export const dynamic = 'force-dynamic';

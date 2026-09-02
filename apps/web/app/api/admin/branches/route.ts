@@ -22,8 +22,24 @@ function jsonError(code: string, message: string, status: number) {
 export async function GET() {
   const h = headers();
   if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
-  const branches = await prisma.branch.findMany({ orderBy: { name: 'asc' } });
-  return NextResponse.json({ ok: true, data: { branches } });
+  // staff_count so the close confirmation can name how many people go with the
+  // branch before it happens, rather than reporting it afterwards.
+  const branches = await prisma.branch.findMany({
+    orderBy: { name: 'asc' },
+    include: {
+      _count: {
+        select: {
+          users: { where: { deleted_at: null, role: { in: ['EMPLOYEE', 'DRIVER', 'CALLER'] } } },
+        },
+      },
+    },
+  });
+  return NextResponse.json({
+    ok: true,
+    data: {
+      branches: branches.map(({ _count, ...b }) => ({ ...b, staff_count: _count.users })),
+    },
+  });
 }
 
 export async function POST(req: Request) {

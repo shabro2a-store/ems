@@ -14,6 +14,8 @@ interface Branch {
   shift_grace_min: number;
   trip_threshold_min: number;
   is_active: boolean;
+  deleted_at: string | null;
+  staff_count: number;
 }
 
 async function getCurrentPosition(timeoutMs = 10000): Promise<{ lat: number; lng: number; accuracy: number }> {
@@ -71,13 +73,18 @@ export default function AdminBranchesPage() {
 
   async function confirmRemove() {
     if (!removing) return;
-    const res = await apiSend<{ deleted: boolean; archived: boolean }>(`/api/admin/branches/${removing.id}`, { method: 'DELETE' });
+    const res = await apiSend<{ deleted: boolean; closed: boolean; staff_retired: number }>(`/api/admin/branches/${removing.id}`, { method: 'DELETE' });
     if (!res.ok) { setMsg({ tone: 'danger', text: errorMessage(res) }); setRemoving(null); return; }
     setMsg(
-      res.data.archived
+      res.data.closed
         ? {
             tone: 'warning',
-            text: `${removing.name} has punch or trip history, so it was archived instead of deleted — payroll still points at it for every month it was open. It is hidden now; press "Show archived" to see it.`,
+            text:
+              `${removing.name} is closed` +
+              (res.data.staff_retired > 0
+                ? `, and ${res.data.staff_retired} ${res.data.staff_retired === 1 ? 'account' : 'accounts'} went with it — those usernames are free again.`
+                : '.') +
+              ` The punches and trips made there stay, so payroll for the months it was open still adds up. From next month it will not appear anywhere.`,
           }
         : { tone: 'success', text: `${removing.name} removed.` },
     );
@@ -92,11 +99,11 @@ export default function AdminBranchesPage() {
         subtitle="Create branches, set the geofence, and record each location on-site"
         actions={
           <div className="flex flex-wrap gap-2">
-            {branches.some((b) => !b.is_active) && (
+            {branches.some((b) => !b.is_active && !b.deleted_at) && (
               <Button size="sm" variant="secondary" onClick={() => setShowArchived((v) => !v)}>
                 {showArchived
                   ? 'Hide archived'
-                  : `Show archived (${branches.filter((b) => !b.is_active).length})`}
+                  : `Show archived (${branches.filter((b) => !b.is_active && !b.deleted_at).length})`}
               </Button>
             )}
             <Button onClick={() => setAdding(true)}>＋ Add branch</Button>
@@ -112,7 +119,7 @@ export default function AdminBranchesPage() {
         <EmptyState title="No branches yet" hint="Add your first branch, then record its location on-site." />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {branches.filter((b) => showArchived || b.is_active).map((b) => (
+          {branches.filter((b) => !b.deleted_at && (showArchived || b.is_active)).map((b) => (
             <Card key={b.id}>
               <CardBody>
                 <div className="mb-3 flex items-center justify-between">
@@ -160,7 +167,21 @@ export default function AdminBranchesPage() {
         <Modal title={`Remove ${removing.name}?`} onClose={() => setRemoving(null)}
           footer={<><Button variant="secondary" onClick={() => setRemoving(null)}>Cancel</Button><Button variant="danger" onClick={confirmRemove}>Remove</Button></>}>
           <p className="text-sm text-muted">
-            If this branch has staff or punch history it will be <b className="text-content">archived</b> (hidden but kept for payroll). An empty branch is deleted permanently.
+            The branch closes now: nobody can punch there and it disappears from every screen and
+            from the list you assign staff to.
+          </p>
+          {removing.staff_count > 0 && (
+            <p className="mt-2 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm">
+              <b>{removing.staff_count} {removing.staff_count === 1 ? 'account goes' : 'accounts go'} with it.</b>{' '}
+              An account only works at a branch, so leaving them here would fail silently every
+              morning. If anyone is moving to another branch, reassign them first and then come
+              back.
+            </p>
+          )}
+          <p className="mt-2 text-sm text-muted">
+            The punches and trips made there <b className="text-content">stay</b>. Payroll for the
+            months it was open still adds up; from next month it will not appear anywhere. A branch
+            nothing ever happened at is deleted outright instead.
           </p>
         </Modal>
       )}
