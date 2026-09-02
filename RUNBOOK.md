@@ -316,6 +316,23 @@ mode — is a small Android app wrapping this one (a TWA plus a high-priority FC
 message and a full-screen intent). That is a separate build and a Play Store
 account, not a setting.
 
+### Removing an employee or a branch
+**Remove** deletes outright only when there is nothing behind the record. Anything with
+punches, trips, advances, penalties or driver calls behind it is **archived** instead:
+hidden from the list, kept in the database.
+
+That is permanent, not "until the month rolls". Payroll rebuilds a month from the punches
+every time it is opened, so deleting somebody who worked in January changes January's
+payslips — in March, and next year. There is no point at which the record stops being
+needed.
+
+Archived staff and branches are hidden from their lists by default; the **Show removed** /
+**Show archived** button on each page reveals them. That is the "gone" that is safe to give.
+
+If a record genuinely must be erased — a test account that somehow collected punches, a
+branch created by mistake and punched at — that is a database job, not a button, and it
+should be done against a fresh backup. Ask before doing it.
+
 ### Check what the containers actually received
 Env vars must be listed in `docker-compose.yml`, not just present in `.env`:
 ```bash

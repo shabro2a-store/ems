@@ -43,6 +43,12 @@ export default function AdminEmployeesPage() {
   const [schedUser, setSchedUser] = useState<User | null>(null);
   const [pwTarget, setPwTarget] = useState<User | null>(null);
   const [removing, setRemoving] = useState<User | null>(null);
+  // Somebody who has worked can never be deleted - payroll has to stay able to
+  // rebuild the months they were paid for, and that does not expire when the
+  // month rolls. So "Remove" deactivates them, and the list stops showing them
+  // by default. Gone from view is the thing actually wanted; gone from the
+  // database would take January's payslips with it.
+  const [showInactive, setShowInactive] = useState(false);
   const [tempPw, setTempPw] = useState<{ username: string; pw: string } | null>(null);
 
   async function load() {
@@ -64,10 +70,11 @@ export default function AdminEmployeesPage() {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = useMemo(
-    () => (branchId === 'all' ? users : users.filter((u) => u.branch_id === branchId)),
-    [users, branchId],
-  );
+  const inactiveCount = useMemo(() => users.filter((u) => !u.is_active).length, [users]);
+  const filtered = useMemo(() => {
+    const byBranch = branchId === 'all' ? users : users.filter((u) => u.branch_id === branchId);
+    return showInactive ? byBranch : byBranch.filter((u) => u.is_active);
+  }, [users, branchId, showInactive]);
   const grouped = useMemo(() => {
     const g = new Map<string, User[]>();
     for (const u of filtered) {
@@ -126,7 +133,7 @@ export default function AdminEmployeesPage() {
     setErr(
       res.data.deleted
         ? null
-        : `${name} has punches or payments on record, so they were deactivated instead of deleted — the history has to stay for payroll.`,
+        : `${name} has punches or payments on record, so they were removed from the list instead of deleted — payroll still has to be able to rebuild the months they were paid for. Press "Show removed" to see them.`,
     );
     await load();
   }
@@ -138,6 +145,11 @@ export default function AdminEmployeesPage() {
         subtitle="Staff, roles, pay and weekly schedules"
         actions={
           <>
+            {inactiveCount > 0 && (
+              <Button size="sm" variant="secondary" onClick={() => setShowInactive((v) => !v)}>
+                {showInactive ? 'Hide removed' : `Show removed (${inactiveCount})`}
+              </Button>
+            )}
             <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-auto">
               <option value="all">All branches</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}

@@ -17,15 +17,20 @@ interface Punch {
   corrected: boolean;
   correction_reason: string | null;
   system_generated: boolean;
-  user: { username: string };
+  user: { id: string; username: string };
   branch: { name: string };
 }
 interface Branch { id: string; name: string }
+interface Staff { id: string; username: string; name: string | null; role: string; branch_id: string | null; is_active: boolean }
 
 export default function AdminPunchesPage() {
   const [punches, setPunches] = useState<Punch[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchId, setBranchId] = useState('all');
+  const [userId, setUserId] = useState('all');
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [limit, setLimit] = useState(200);
   const [loading, setLoading] = useState(true);
   const [target, setTarget] = useState<Punch | null>(null);
   const [corrAt, setCorrAt] = useState('');
@@ -37,20 +42,37 @@ export default function AdminPunchesPage() {
 
   async function load() {
     setLoading(true);
-    const q = branchId === 'all' ? '' : `?branchId=${branchId}`;
-    const [p, b] = await Promise.all([
-      apiGet<{ punches: Punch[] }>(`/api/admin/punches${q}`),
+    const params = new URLSearchParams();
+    if (branchId !== 'all') params.set('branchId', branchId);
+    if (userId !== 'all') params.set('userId', userId);
+    const q = params.toString() ? `?${params}` : '';
+    const [p, b, u] = await Promise.all([
+      apiGet<{ punches: Punch[]; has_more: boolean; limit: number }>(`/api/admin/punches${q}`),
       apiGet<{ branches: Branch[] }>('/api/admin/branches'),
+      apiGet<{ users: Staff[] }>('/api/admin/users'),
     ]);
-    if (p.ok) setPunches(p.data.punches);
+    if (p.ok) {
+      setPunches(p.data.punches);
+      setHasMore(p.data.has_more);
+      setLimit(p.data.limit);
+    }
     if (b.ok) setBranches(b.data.branches);
+    if (u.ok) setStaff(u.data.users.filter((x) => x.role === 'EMPLOYEE' || x.role === 'DRIVER'));
     setLoading(false);
   }
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId]);
+  }, [branchId, userId]);
+
+  // The branch filter narrows the employee list, but never hides somebody who
+  // is currently selected - a roaming employee can be picked while looking at
+  // one branch and then have punches at another, and losing them from the
+  // dropdown mid-filter would look like the app forgetting who you chose.
+  const staffOptions = staff
+    .filter((x) => branchId === 'all' || x.branch_id === branchId || x.id === userId)
+    .sort((a, b) => (a.name || a.username).localeCompare(b.name || b.username));
 
   function openCorrect(p: Punch) {
     setTarget(p);
@@ -92,10 +114,24 @@ export default function AdminPunchesPage() {
         title="Punches"
         subtitle="Attendance log with GPS evidence"
         actions={
-          <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-auto">
-            <option value="all">All branches</option>
-            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </Select>
+          <div className="flex flex-wrap gap-2">
+            <Select
+              value={branchId}
+              onChange={(e) => { setBranchId(e.target.value); setUserId('all'); }}
+              className="w-auto"
+            >
+              <option value="all">All branches</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
+            <Select value={userId} onChange={(e) => setUserId(e.target.value)} className="w-auto">
+              <option value="all">Everyone</option>
+              {staffOptions.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name || x.username}{x.is_active ? '' : ' (inactive)'}
+                </option>
+              ))}
+            </Select>
+          </div>
         }
       />
 
@@ -107,7 +143,22 @@ export default function AdminPunchesPage() {
         <EmptyState title="No punches" hint="Check-ins and check-outs will appear here." />
       ) : (
         <Card>
-          <CardHeader title="Recent punches" subtitle={`${punches.length} shown`} />
+          <CardHeader
+            title="Recent punches"
+            subtitle={
+              hasMore
+                ? `Newest ${punches.length} shown — there are older ones not listed. Narrow by employee to see further back.`
+                : `${punches.length} shown`
+            }
+          />
+          {hasMore && (
+            <div className="border-b border-border px-4 py-2.5">
+              <Alert tone="warning">
+                Only the newest {limit} punches are listed. Pick one employee above to see the rest
+                of theirs.
+              </Alert>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

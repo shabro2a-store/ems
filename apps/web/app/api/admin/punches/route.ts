@@ -8,7 +8,10 @@ const Query = z.object({
   userId: z.string().optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
-  limit: z.coerce.number().int().positive().max(500).default(100),
+  // 200 by default. Staff punch several times a day now - a split shift, a
+  // break, a forgotten checkout corrected - so 100 stopped covering a busy
+  // month for a single person, let alone a branch.
+  limit: z.coerce.number().int().positive().max(500).default(200),
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -42,20 +45,30 @@ export async function GET(req: Request) {
     if (to) (where.at as Record<string, Date>).lte = new Date(to);
   }
 
+  // One more than asked for, purely to answer "is there anything past this?".
+  // A count() would be a second trip over the same index for a number nobody
+  // reads; the extra row is discarded below.
   const rows = await prisma.punch.findMany({
     where,
     orderBy: { at: 'desc' },
-    take: limit,
+    take: limit + 1,
     include: {
       user: { select: { id: true, username: true, role: true } },
       branch: { select: { id: true, name: true } },
     },
   });
 
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+
   return NextResponse.json({
     ok: true,
     data: {
-      punches: rows.map((p) => ({
+      limit,
+      // Older punches match the filter but are not in this response. The screen
+      // says so rather than letting the newest 200 read as the whole story.
+      has_more: hasMore,
+      punches: page.map((p) => ({
         id: p.id,
         user_id: p.user_id,
         branch_id: p.branch_id,

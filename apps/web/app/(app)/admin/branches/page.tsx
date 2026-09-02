@@ -38,6 +38,12 @@ export default function AdminBranchesPage() {
   const [adding, setAdding] = useState(false);
   const [locatingId, setLocatingId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: 'success' | 'warning' | 'danger'; text: string } | null>(null);
+  // A branch with punches or trips behind it can never be deleted - payroll and
+  // the attendance log both point at it, for every month it was ever open. So
+  // Remove archives it, and the grid stops showing it by default: out of the
+  // way is what is wanted, and out of the database would take the history with
+  // it.
+  const [showArchived, setShowArchived] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -67,7 +73,14 @@ export default function AdminBranchesPage() {
     if (!removing) return;
     const res = await apiSend<{ deleted: boolean; archived: boolean }>(`/api/admin/branches/${removing.id}`, { method: 'DELETE' });
     if (!res.ok) { setMsg({ tone: 'danger', text: errorMessage(res) }); setRemoving(null); return; }
-    setMsg({ tone: 'success', text: res.data.archived ? `${removing.name} archived (it has history).` : `${removing.name} removed.` });
+    setMsg(
+      res.data.archived
+        ? {
+            tone: 'warning',
+            text: `${removing.name} has punch or trip history, so it was archived instead of deleted — payroll still points at it for every month it was open. It is hidden now; press "Show archived" to see it.`,
+          }
+        : { tone: 'success', text: `${removing.name} removed.` },
+    );
     setRemoving(null);
     await load();
   }
@@ -77,7 +90,18 @@ export default function AdminBranchesPage() {
       <PageHeader
         title="Branches"
         subtitle="Create branches, set the geofence, and record each location on-site"
-        actions={<Button onClick={() => setAdding(true)}>＋ Add branch</Button>}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {branches.some((b) => !b.is_active) && (
+              <Button size="sm" variant="secondary" onClick={() => setShowArchived((v) => !v)}>
+                {showArchived
+                  ? 'Hide archived'
+                  : `Show archived (${branches.filter((b) => !b.is_active).length})`}
+              </Button>
+            )}
+            <Button onClick={() => setAdding(true)}>＋ Add branch</Button>
+          </div>
+        }
       />
 
       {msg && <div className="mb-3" data-testid="locate-message"><Alert tone={msg.tone}>{msg.text}</Alert></div>}
@@ -88,7 +112,7 @@ export default function AdminBranchesPage() {
         <EmptyState title="No branches yet" hint="Add your first branch, then record its location on-site." />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {branches.map((b) => (
+          {branches.filter((b) => showArchived || b.is_active).map((b) => (
             <Card key={b.id}>
               <CardBody>
                 <div className="mb-3 flex items-center justify-between">

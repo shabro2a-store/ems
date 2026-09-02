@@ -250,7 +250,11 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   `canRoamBranches` lets this person clock in and out at any active branch and be dispatched
   from whichever branch rang them; audited on both sides. Nothing about it is cached or
   copied onto a token, so revoking takes effect on the very next punch.
-- **DELETE /api/admin/users/[id]** *(CSRF)* → `{ deleted, deactivated, history? }`. Same rule
+- **DELETE /api/admin/users/[id]** *(CSRF)* → `{ deleted, deactivated, history? }`. The block
+  is **permanent, not until the month rolls**: payroll must stay able to rebuild *any* month
+  they were paid for, and January's payslips do not stop mattering in March. The screens hide
+  a deactivated person by default and offer "Show removed", which is what "gone" means here.
+  Same rule
   and shape as the branch delete: a person with **any** punch, trip, advance, adjustment,
   penalty ruling, blocked attempt or driver call is **deactivated** instead, because payroll
   has to stay able to rebuild the months they worked. An account with none of that is deleted
