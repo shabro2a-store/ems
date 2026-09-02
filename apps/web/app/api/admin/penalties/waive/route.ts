@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
+import { isMonthOpen, CLOSED_MONTH_MESSAGE } from '@/lib/services/periodLock';
 import { penaltyMinForDay } from '@/lib/services/penalty';
 
 // The regex only checks shape. Round-tripping through a UTC Date catches a
@@ -62,6 +63,13 @@ export async function POST(req: Request) {
     body = Body.parse(await req.json());
   } catch (err) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
+  }
+
+  // A ruling on a settled month would move money that has already been paid.
+  // The day itself can still be corrected on the punches screen - what is
+  // frozen is the owner's judgement on top of the record, not the record.
+  if (!isMonthOpen(body.date)) {
+    return jsonError('MONTH_CLOSED', CLOSED_MONTH_MESSAGE, 409);
   }
 
   const date = new Date(`${body.date}T00:00:00.000Z`);

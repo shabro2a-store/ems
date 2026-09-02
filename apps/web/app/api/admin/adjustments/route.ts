@@ -5,12 +5,18 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
+import { isMonthOpen, CLOSED_MONTH_MESSAGE } from '@/lib/services/periodLock';
 
 const Body = z.object({
   userId: z.string().min(1),
   kind: z.enum(['BONUS', 'DEDUCTION']),
   amountCent: z.number().int().positive(),
   reason: z.string().min(1).max(500),
+  // The month the owner is LOOKING at. Without it this route stamped the
+  // period from the server clock, so a bonus added while reviewing January was
+  // silently written into the current month: January never changed, and the
+  // live month grew an adjustment nobody could trace back to a decision.
+  month: z.string().regex(/^\d{4}-\d{2}$/),
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -35,11 +41,17 @@ export async function POST(req: Request) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
 
+  if (!isMonthOpen(body.month)) {
+    return jsonError('MONTH_CLOSED', CLOSED_MONTH_MESSAGE, 409);
+  }
+
   const cached = await readIdempotentResponse({ userId: adminId, key: idemKey });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
 
-  const now = new Date();
-  const period = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+  // The first of the month at UTC midnight, matching how monthRangeUtc selects
+  // adjustments back out.
+  const [y, m] = body.month.split('-').map(Number);
+  const period = new Date(Date.UTC(y!, m! - 1, 1, 0, 0, 0, 0));
 
   const adjustment = await prisma.adjustment.create({
     data: {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiSend, centsToUsd, errorMessage } from '@/lib/api';
 import {
   PageHeader, Card, CardHeader, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile,
@@ -43,6 +43,7 @@ export default function AdminEmployeesPage() {
   const [schedUser, setSchedUser] = useState<User | null>(null);
   const [pwTarget, setPwTarget] = useState<User | null>(null);
   const [removing, setRemoving] = useState<User | null>(null);
+  const [manage, setManage] = useState<User | null>(null);
   // Somebody who has worked can never be deleted - payroll has to stay able to
   // rebuild the months they were paid for, and that does not expire when the
   // month rolls. So "Remove" deactivates them, and the list stops showing them
@@ -215,36 +216,21 @@ export default function AdminEmployeesPage() {
                             {st ? <StatusChip st={st} /> : <span className="text-xs text-muted">—</span>}
                           </td>
                           <td className="px-4 py-2.5">
-                            <div className="flex justify-end gap-1.5">
+                            {/* Two buttons, then a menu. Six across a row wrapped
+                                on anything narrower than a desktop and pushed the
+                                table into a horizontal scroll, which is what made
+                                this page look broken. The two that get used daily
+                                stay out; the rest - including both destructive
+                                ones - live one click away, each with a line
+                                saying what it actually does. */}
+                            <div className="flex items-center justify-end gap-1.5">
                               <Button size="sm" variant="secondary" onClick={() => { setErr(null); setEditUser(u); }}>Edit</Button>
                               {PAID_ROLES.has(u.role) && (
                                 <Button size="sm" variant="secondary" onClick={() => setSchedUser(u)}>Schedule</Button>
                               )}
-                              {PAID_ROLES.has(u.role) && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  title={
-                                    u.can_roam_branches
-                                      ? 'Clocks in and out at any branch. Click to restrict to their own.'
-                                      : 'Clocks in and out only at their own branch. Click to allow covering at any branch.'
-                                  }
-                                  onClick={() => toggleRoam(u)}
-                                >
-                                  {u.can_roam_branches ? 'Own branch only' : 'Any branch'}
-                                </Button>
-                              )}
-                              <Button size="sm" variant="ghost" onClick={() => setPwTarget(u)}>Set password</Button>
-                              {u.role !== 'ADMIN' && (
-                                <Button size="sm" variant="ghost" onClick={() => toggleActive(u)}>
-                                  {u.is_active ? 'Deactivate' : 'Activate'}
-                                </Button>
-                              )}
-                              {u.role !== 'ADMIN' && (
-                                <Button size="sm" variant="ghost" className="text-danger" onClick={() => setRemoving(u)}>
-                                  Remove
-                                </Button>
-                              )}
+                              <Button size="sm" variant="ghost" aria-label="More actions" onClick={() => setManage(u)}>
+                                ⋯
+                              </Button>
                             </div>
                           </td>
                         </tr>
@@ -276,6 +262,17 @@ export default function AdminEmployeesPage() {
       {schedUser && (
         <ScheduleModal user={schedUser} onClose={() => setSchedUser(null)} onSaved={() => { setSchedUser(null); setNotice('Schedule saved.'); }} />
       )}
+      {manage && (
+        <ManageModal
+          user={manage}
+          onClose={() => setManage(null)}
+          onPassword={() => { setManage(null); setPwTarget(manage); }}
+          onRoam={() => { setManage(null); void toggleRoam(manage); }}
+          onActive={() => { setManage(null); void toggleActive(manage); }}
+          onRemove={() => { setManage(null); setRemoving(manage); }}
+        />
+      )}
+
       {removing && (
         <Modal
           title={`Remove ${removing.name || removing.username}?`}
@@ -576,6 +573,89 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
           {err && <Alert tone="danger">{err}</Alert>}
         </div>
       )}
+    </Modal>
+  );
+}
+
+/**
+ * Everything you can do to a staff member that is not Edit or Schedule.
+ *
+ * A modal rather than a dropdown, because the table sits inside an
+ * `overflow-x-auto` wrapper: once one axis is not visible the other computes to
+ * auto too, so an absolutely positioned menu inside it gets clipped by the
+ * scroll box. A modal has nowhere to be clipped and behaves on a phone.
+ *
+ * Every action carries a line of its own. The three lifecycle ones are not
+ * self-explanatory from their labels, and the difference between two of them is
+ * permanent - Deactivate pauses an account and keeps everything, Remove ends it
+ * and hands back the username. Nobody should have to learn that by pressing.
+ */
+function ManageModal({
+  user,
+  onClose,
+  onPassword,
+  onRoam,
+  onActive,
+  onRemove,
+}: {
+  user: User;
+  onClose: () => void;
+  onPassword: () => void;
+  onRoam: () => void;
+  onActive: () => void;
+  onRemove: () => void;
+}) {
+  const paid = PAID_ROLES.has(user.role);
+  const items: Array<{ label: string; hint: string; danger?: boolean; onClick: () => void }> = [
+    { label: 'Set password', hint: 'Give them a new temporary password to sign in with.', onClick: onPassword },
+    ...(paid
+      ? [
+          {
+            label: user.can_roam_branches ? 'Restrict to their own branch' : 'Allow any branch',
+            hint: user.can_roam_branches
+              ? 'They currently clock in and out at any branch. This puts them back to their own.'
+              : 'Let them cover at another branch and clock in and out there. They must still be AT a branch.',
+            onClick: onRoam,
+          },
+        ]
+      : []),
+    ...(user.role !== 'ADMIN'
+      ? [
+          {
+            label: user.is_active ? 'Deactivate' : 'Activate',
+            hint: user.is_active
+              ? 'Pause them — no login, no punching. The account, schedule, pay rate and username are all kept, and you can switch it back on whenever.'
+              : 'Switch the account back on, exactly as it was.',
+            onClick: onActive,
+          },
+          {
+            label: 'Remove',
+            hint: 'Gone for good: the login dies and the username is freed for reuse. What they already did stays, so the months they worked still pay out.',
+            danger: true,
+            onClick: onRemove,
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <Modal
+      title={user.name || user.username}
+      onClose={onClose}
+      footer={<Button variant="secondary" onClick={onClose}>Close</Button>}
+    >
+      <div className="divide-y divide-border">
+        {items.map((it) => (
+          <button
+            key={it.label}
+            onClick={it.onClick}
+            className="block w-full py-3 text-left hover:bg-surface-muted"
+          >
+            <span className={`text-sm font-semibold ${it.danger ? 'text-danger' : ''}`}>{it.label}</span>
+            <span className="mt-0.5 block text-xs text-muted">{it.hint}</span>
+          </button>
+        ))}
+      </div>
     </Modal>
   );
 }

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
+import { isMonthOpen, CLOSED_MONTH_MESSAGE } from '@/lib/services/periodLock';
 import { overtimeMinForDay } from '@/lib/services/overtime';
 
 // The regex only checks shape. Round-tripping through a UTC Date catches a
@@ -74,6 +75,13 @@ export async function POST(req: Request) {
   // ruling that moves money: without it there is nothing to confirm against.
   if (body.decision !== 'PENDING' && body.overtimeMin === undefined) {
     return jsonError('INVALID_INPUT', 'overtimeMin is required: a decision must name the amount it was made against', 400);
+  }
+
+  // A ruling on a settled month would move money that has already been paid.
+  // The day itself can still be corrected on the punches screen - what is
+  // frozen is the owner's judgement on top of the record, not the record.
+  if (!isMonthOpen(body.date)) {
+    return jsonError('MONTH_CLOSED', CLOSED_MONTH_MESSAGE, 409);
   }
 
   const cached = await readIdempotentResponse({ userId: adminId, key: idemKey });

@@ -44,6 +44,11 @@ function currentMonth(): string {
 
 export default function AdminPayrollPage() {
   const [month, setMonth] = useState(currentMonth());
+  // An earlier month has been paid, so nothing on top of the record may move:
+  // no bonuses, no deductions, no waiving a penalty or ruling on overtime. The
+  // punches themselves stay correctable on the Punches screen - fixing what
+  // actually happened is not the same as changing what was paid on top of it.
+  const closed = month < currentMonth();
   const [branchId, setBranchId] = useState('all');
   const [rows, setRows] = useState<Row[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
@@ -119,6 +124,16 @@ export default function AdminPayrollPage() {
           </>
         }
       />
+
+      {closed && (
+        <div className="mb-3">
+          <Alert tone="warning">
+            🔒 <b>{month} is closed.</b> It has already been paid, so bonuses, deductions and
+            rulings can only be made on the current month. The figures below are read-only. A punch
+            that was actually wrong can still be corrected on the Punches screen.
+          </Alert>
+        </div>
+      )}
 
       {msg && <div className="mb-3"><Alert tone="success">{msg}</Alert></div>}
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
@@ -240,7 +255,15 @@ export default function AdminPayrollPage() {
                           </button>
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          <Button size="sm" variant="ghost" onClick={() => setAdjust(r)}>＋ Adjust</Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={closed}
+                            title={closed ? `${month} is closed — adjust the current month instead.` : undefined}
+                            onClick={() => setAdjust(r)}
+                          >
+                            ＋ Adjust
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -271,19 +294,19 @@ export default function AdminPayrollPage() {
       )}
 
       {adjust && (
-        <AdjustModal row={adjust} onClose={() => setAdjust(null)} onSaved={() => { setAdjust(null); setMsg('Adjustment added.'); load(); }} />
+        <AdjustModal row={adjust} month={month} onClose={() => setAdjust(null)} onSaved={() => { setAdjust(null); setMsg(`Adjustment added to ${month}.`); load(); }} />
       )}
       {rateFor && (
         <RateModal row={rateFor} onClose={() => setRateFor(null)} onSaved={() => { setRateFor(null); setMsg('Rate updated (applies from now on).'); load(); }} />
       )}
       {penaltiesFor && (
-        <PenaltiesModal row={penaltiesFor} month={month} onClose={() => setPenaltiesFor(null)} onChanged={() => { setMsg('Penalty updated.'); load(); }} />
+        <PenaltiesModal row={penaltiesFor} closed={closed} month={month} onClose={() => setPenaltiesFor(null)} onChanged={() => { setMsg('Penalty updated.'); load(); }} />
       )}
       {blockedCreditFor && (
-        <BlockedCreditModal row={blockedCreditFor} month={month} onClose={() => setBlockedCreditFor(null)} onChanged={() => { setMsg('Blocked time updated.'); load(); }} />
+        <BlockedCreditModal row={blockedCreditFor} closed={closed} month={month} onClose={() => setBlockedCreditFor(null)} onChanged={() => { setMsg('Blocked time updated.'); load(); }} />
       )}
       {overtimeFor && (
-        <OvertimeModal row={overtimeFor} month={month} onClose={() => setOvertimeFor(null)} onChanged={() => { setMsg('Overtime updated.'); load(); }} />
+        <OvertimeModal row={overtimeFor} closed={closed} month={month} onClose={() => setOvertimeFor(null)} onChanged={() => { setMsg('Overtime updated.'); load(); }} />
       )}
       {salaryFor && (
         <SalaryModal row={salaryFor} onClose={() => setSalaryFor(null)} onSaved={() => { setSalaryFor(null); setMsg('Expected salary updated.'); load(); }} />
@@ -301,7 +324,7 @@ function GroupBody({ group, show, children }: { group: string; show: boolean; ch
   );
 }
 
-function AdjustModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void }) {
+function AdjustModal({ row, month, onClose, onSaved }: { row: Row; month: string; onClose: () => void; onSaved: () => void }) {
   const [kind, setKind] = useState<'BONUS' | 'DEDUCTION'>('BONUS');
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
@@ -312,7 +335,9 @@ function AdjustModal({ row, onClose, onSaved }: { row: Row; onClose: () => void;
     setBusy(true); setErr(null);
     const res = await apiSend('/api/admin/adjustments', {
       idempotent: true, idemPrefix: 'adj',
-      body: { userId: row.user_id, kind, amountCent: Math.round(parseFloat(amount || '0') * 100), reason },
+      // The month on screen, not the server's clock. Without it an adjustment
+      // made while reviewing an earlier month landed on the current one.
+      body: { userId: row.user_id, month, kind, amountCent: Math.round(parseFloat(amount || '0') * 100), reason },
     });
     setBusy(false);
     if (!res.ok) { setErr(errorMessage(res)); return; }
@@ -347,7 +372,7 @@ interface PenaltyItem {
   waiverStale: boolean;
 }
 
-function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: string; onClose: () => void; onChanged: () => void }) {
+function PenaltiesModal({ row, month, closed, onClose, onChanged }: { row: Row; month: string; closed: boolean; onClose: () => void; onChanged: () => void }) {
   const [items, setItems] = useState<PenaltyItem[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // Restore deletes the owner's removal and starts a deduction, so it arms
@@ -385,7 +410,14 @@ function PenaltiesModal({ row, month, onClose, onChanged }: { row: Row; month: s
   }
 
   return (
-    <Modal title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+    <Modal title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+      {closed && (
+        <div className="mb-3">
+          <Alert tone="warning">
+            {month} is closed — this is the record as it was paid. Nothing here can be changed.
+          </Alert>
+        </div>
+      )}Close</Button>}>
       <p className="mb-3 text-sm text-muted">
         Automatic penalties for covering fewer hours than the day required: double the shortfall is
         docked, never more than the day itself earned. Remove one when the employee gave notice —
@@ -473,7 +505,7 @@ function overtimeState(d: OvertimeItem['decision']): { label: string; tone: stri
 // The attention queue drops a day the moment it has a decision, so this modal is
 // the only place a decided day can be found again — and the only way back from a
 // mis-clicked Revoke short of editing the database.
-function OvertimeModal({ row, month, onClose, onChanged }: { row: Row; month: string; onClose: () => void; onChanged: () => void }) {
+function OvertimeModal({ row, month, closed, onClose, onChanged }: { row: Row; month: string; closed: boolean; onClose: () => void; onChanged: () => void }) {
   const [items, setItems] = useState<OvertimeItem[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -506,7 +538,14 @@ function OvertimeModal({ row, month, onClose, onChanged }: { row: Row; month: st
   }
 
   return (
-    <Modal title={`Overtime · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+    <Modal title={`Overtime · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+      {closed && (
+        <div className="mb-3">
+          <Alert tone="warning">
+            {month} is closed — this is the record as it was paid. Nothing here can be changed.
+          </Alert>
+        </div>
+      )}Close</Button>}>
       <p className="mb-3 text-sm text-muted">
         Every day worked past its scheduled hours. Overtime is paid automatically, so a pending day
         is already in their pay — revoking one deducts it. Undo puts a day back to pending.
@@ -533,15 +572,15 @@ function OvertimeModal({ row, month, onClose, onChanged }: { row: Row; month: st
                 <div className="flex shrink-0 gap-2">
                   {o.decision === null ? (
                     <>
-                      <Button size="sm" variant="secondary" loading={busy === `${o.date}|ACCEPTED`} onClick={() => decide(o, 'ACCEPTED')}>
+                      <Button size="sm" variant="secondary" loading={busy === `${o.date}|ACCEPTED`} disabled={closed} onClick={() => decide(o, 'ACCEPTED')}>
                         Accept
                       </Button>
-                      <Button size="sm" variant="ghost" loading={busy === `${o.date}|REVOKED`} onClick={() => decide(o, 'REVOKED')}>
+                      <Button size="sm" variant="ghost" loading={busy === `${o.date}|REVOKED`} disabled={closed} onClick={() => decide(o, 'REVOKED')}>
                         Revoke
                       </Button>
                     </>
                   ) : (
-                    <Button size="sm" variant="secondary" loading={busy === `${o.date}|PENDING`} onClick={() => decide(o, 'PENDING')}>
+                    <Button size="sm" variant="secondary" loading={busy === `${o.date}|PENDING`} disabled={closed} onClick={() => decide(o, 'PENDING')}>
                       Undo
                     </Button>
                   )}
@@ -577,7 +616,7 @@ function creditState(d: BlockedCreditItem['decision']): { label: string; tone: s
 // and an accepted credit that went stale after a punch correction dropping out
 // of a past month's gross with nothing to prompt anyone. This is the
 // month-scoped surface, mirroring the penalty and overtime modals.
-function BlockedCreditModal({ row, month, onClose, onChanged }: { row: Row; month: string; onClose: () => void; onChanged: () => void }) {
+function BlockedCreditModal({ row, month, closed, onClose, onChanged }: { row: Row; month: string; closed: boolean; onClose: () => void; onChanged: () => void }) {
   const [items, setItems] = useState<BlockedCreditItem[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -610,7 +649,14 @@ function BlockedCreditModal({ row, month, onClose, onChanged }: { row: Row; mont
   }
 
   return (
-    <Modal title={`Blocked time · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+    <Modal title={`Blocked time · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+      {closed && (
+        <div className="mb-3">
+          <Alert tone="warning">
+            {month} is closed — this is the record as it was paid. Nothing here can be changed.
+          </Alert>
+        </div>
+      )}Close</Button>}>
       <p className="mb-3 text-sm text-muted">
         Time the app refused their check-in for while they were at the branch. Nothing is paid until you
         accept it, and an accepted day that later changes goes back to waiting — so a day here may need
@@ -639,15 +685,15 @@ function BlockedCreditModal({ row, month, onClose, onChanged }: { row: Row; mont
                 <div className="flex shrink-0 gap-2">
                   {c.decision === null ? (
                     <>
-                      <Button size="sm" variant="secondary" loading={busy === `${c.date}|ACCEPTED`} onClick={() => decide(c, 'ACCEPTED')}>
+                      <Button size="sm" variant="secondary" loading={busy === `${c.date}|ACCEPTED`} disabled={closed} onClick={() => decide(c, 'ACCEPTED')}>
                         Accept
                       </Button>
-                      <Button size="sm" variant="ghost" loading={busy === `${c.date}|REVOKED`} onClick={() => decide(c, 'REVOKED')}>
+                      <Button size="sm" variant="ghost" loading={busy === `${c.date}|REVOKED`} disabled={closed} onClick={() => decide(c, 'REVOKED')}>
                         Revoke
                       </Button>
                     </>
                   ) : (
-                    <Button size="sm" variant="secondary" loading={busy === `${c.date}|PENDING`} onClick={() => decide(c, 'PENDING')}>
+                    <Button size="sm" variant="secondary" loading={busy === `${c.date}|PENDING`} disabled={closed} onClick={() => decide(c, 'PENDING')}>
                       Undo
                     </Button>
                   )}

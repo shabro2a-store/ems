@@ -317,8 +317,12 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   from `totals`, since it is never summed or built into `net_cent`.
 - **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
   scoped to the branch filter.
-- **POST /api/admin/adjustments** *(CSRF, Idempotent)* `{ userId, kind:
-  "BONUS"|"DEDUCTION", amountCent, reason }` → `{ adjustment }`.
+- **POST /api/admin/adjustments** *(CSRF, Idempotent)* `{ userId, month, kind:
+  "BONUS"|"DEDUCTION", amountCent, reason }` → `{ adjustment }`. `month` is the one being
+  VIEWED and is required. It used to stamp the period from the server clock, so a bonus added
+  while reviewing an earlier month was silently written into the current one - the month on
+  screen never changed and the live month grew an adjustment with nothing tying it to a
+  decision. Refuses `409 MONTH_CLOSED` for any month before the current Beirut one.
 - **GET /api/admin/advances** → pending `{ advances: [...] }`.
 - **POST /api/admin/advances/[id]/decision** *(CSRF, Idempotent)* `{ decision:
   "APPROVED"|"REJECTED" }`. Error: `ALREADY_DECIDED` 409.
