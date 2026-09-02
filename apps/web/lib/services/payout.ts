@@ -279,3 +279,83 @@ export async function accruedEarningsThisMonth(
     month,
   );
 }
+
+export interface RosterUser {
+  id: string;
+  username: string;
+  name: string | null;
+  role: string;
+  branch_id: string | null;
+  hourly_rate_cent: number;
+  expected_monthly_salary_cent: number | null;
+  deleted_at: Date | null;
+  branch: { name: string } | null;
+}
+
+/**
+ * Who belongs on a month's payroll.
+ *
+ * Not "everybody active", which is what this used to be and which quietly lost
+ * people: deactivate somebody in January and January's payroll stopped listing
+ * them, so the month you still owed them for went blank on the screen while
+ * their punches sat untouched in the database.
+ *
+ * Two groups, and the second is the point:
+ *
+ *  - everybody currently on the staff, so a person who did nothing this month
+ *    still shows as a zero row rather than silently vanishing
+ *  - anybody at all - deactivated, or retired and gone from every other screen -
+ *    who STARTED a shift in this Beirut month
+ *
+ * That is what makes a retired account behave the way the owner described. The
+ * month they worked still lists them, because they have arrivals in it. The
+ * month after does not, because they have none - no job sweeps them up and
+ * nothing expires; they are simply absent from a query about a month they were
+ * not there for.
+ *
+ * Membership is decided by the ARRIVAL's Beirut month, the same rule pairHours
+ * pays by, so the roster and the money can never disagree about which month
+ * somebody belongs to - including the night that starts on the 31st.
+ */
+export async function payrollRoster(
+  db: PrismaClient,
+  month: string,
+  branchId: string | null,
+): Promise<RosterUser[]> {
+  const { start, end } = monthRangeUtc(month);
+  const arrivals = await db.punch.findMany({
+    where: {
+      kind: 'IN',
+      at: {
+        gte: new Date(start.getTime() - PAIR_LOOKAROUND_MS),
+        lt: new Date(end.getTime() + PAIR_LOOKAROUND_MS),
+      },
+    },
+    select: { user_id: true, at: true },
+  });
+  const workedIds = [
+    ...new Set(
+      arrivals.filter((a) => inBeirut(a.at).date.slice(0, 7) === month).map((a) => a.user_id),
+    ),
+  ];
+
+  return db.user.findMany({
+    where: {
+      role: { in: ['EMPLOYEE', 'DRIVER'] },
+      ...(branchId ? { branch_id: branchId } : {}),
+      OR: [{ is_active: true, deleted_at: null }, { id: { in: workedIds } }],
+    },
+    select: {
+      id: true,
+      username: true,
+      name: true,
+      role: true,
+      branch_id: true,
+      hourly_rate_cent: true,
+      expected_monthly_salary_cent: true,
+      deleted_at: true,
+      branch: { select: { name: true } },
+    },
+    orderBy: [{ branch: { name: 'asc' } }, { username: 'asc' }],
+  });
+}

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
-import { payoutForUser } from '@/lib/services/payout';
+import { payoutForUser, payrollRoster } from '@/lib/services/payout';
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -21,20 +21,11 @@ export async function GET(req: Request) {
   const branchParam = url.searchParams.get('branchId');
   const branchId = branchParam && branchParam !== 'all' ? branchParam : null;
 
+  // Current staff PLUS anyone who started a shift in this month, however they
+  // have since left. Filtering on is_active alone made a month you still owed
+  // somebody for go blank the moment you deactivated them.
   const [users, branches] = await Promise.all([
-    prisma.user.findMany({
-      where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] }, ...(branchId ? { branch_id: branchId } : {}) },
-      select: {
-        id: true,
-        username: true,
-        role: true,
-        branch_id: true,
-        hourly_rate_cent: true,
-        expected_monthly_salary_cent: true,
-        branch: { select: { name: true } },
-      },
-      orderBy: [{ branch: { name: 'asc' } }, { username: 'asc' }],
-    }),
+    payrollRoster(prisma, month, branchId),
     prisma.branch.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
   ]);
 
@@ -43,7 +34,10 @@ export async function GET(req: Request) {
       const r = await payoutForUser(u.id, month, prisma);
       return {
         user_id: u.id,
-        username: u.username,
+        // A retired account has had its username parked to free the original,
+        // so `name` is what reads as a person in the months they worked.
+        username: u.name ?? u.username,
+        retired: u.deleted_at !== null,
         role: u.role,
         branch_id: u.branch_id,
         branch_name: u.branch?.name ?? null,

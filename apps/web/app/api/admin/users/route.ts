@@ -34,7 +34,13 @@ export async function GET() {
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
   // Never send password_hash (or other secrets) to the client — select explicitly.
+  // Retired accounts are gone from here for good. They are not "inactive staff
+  // you might reactivate" - the login is dead and the username has been handed
+  // back, so a row that cannot be logged into or hired again has no business on
+  // a staff list. Their records still surface where records belong: payroll for
+  // the months they worked, and the punches log.
   const users = await prisma.user.findMany({
+    where: { deleted_at: null },
     orderBy: { username: 'asc' },
     select: {
       id: true,

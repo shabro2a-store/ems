@@ -250,18 +250,23 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
   `canRoamBranches` lets this person clock in and out at any active branch and be dispatched
   from whichever branch rang them; audited on both sides. Nothing about it is cached or
   copied onto a token, so revoking takes effect on the very next punch.
-- **DELETE /api/admin/users/[id]** *(CSRF)* → `{ deleted, deactivated, history? }`. The block
-  is **permanent, not until the month rolls**: payroll must stay able to rebuild *any* month
-  they were paid for, and January's payslips do not stop mattering in March. The screens hide
-  a deactivated person by default and offer "Show removed", which is what "gone" means here.
-  Same rule
-  and shape as the branch delete: a person with **any** punch, trip, advance, adjustment,
-  penalty ruling, blocked attempt or driver call is **deactivated** instead, because payroll
-  has to stay able to rebuild the months they worked. An account with none of that is deleted
-  outright along with its schedule, pay rate, overrides, leave requests, push subscriptions
-  and flags — all of which describe an account rather than record anything it did. Deleting
-  the ADMIN account, or your own, is rejected 403. The audit row outlives the user:
-  `AuditLog.actor_id` carries no foreign key.
+- **DELETE /api/admin/users/[id]** *(CSRF)* → `{ deleted, retired, username_freed?, history? }`.
+  The person always goes; what varies is whether the ROW can. An account with nothing behind
+  it is erased outright, along with its schedule, rate, overrides, leave requests, push
+  subscriptions and flags. An account with records behind it is **retired**: `deleted_at` set,
+  `is_active` false, password replaced with something unmatchable, telegram cleared, schedule
+  and push subscriptions deleted, and the **username freed** (parked as `name#<id8>`) so the
+  same person can be hired back under it with a genuinely new account. `name` keeps the human
+  label. RateChange is kept — it is what prices their old punches.
+
+  The row cannot go, because `Punch.user_id` is a required FK: Postgres would refuse, or a
+  cascade would take a paid month's punches with it. Retiring gets the behaviour anyway —
+  they vanish from every present-tense screen today, payroll for the months they worked still
+  lists and pays them, and the month after they are simply absent because they have no
+  arrivals in it. Nothing expires them and no job sweeps them up.
+
+  Deleting the ADMIN account, or your own, is rejected 403. `GET /api/admin/users` excludes
+  retired accounts entirely. The audit row outlives the person either way.
 - **POST /api/admin/users/[id]/reset-password** *(CSRF)* optional `{ password }` —
   sets that password, or generates a random one. → `{ temp_password }`.
 - **POST /api/admin/users/[id]/deactivate** *(CSRF)* toggles active. Deactivating an

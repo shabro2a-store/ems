@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
-import { payoutForUser } from '@/lib/services/payout';
+import { payoutForUser, payrollRoster } from '@/lib/services/payout';
 import { PayrollDocument } from 'pdf/payroll';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
@@ -38,11 +38,9 @@ export async function GET(req: Request) {
   const branchId = branchParam && branchParam !== 'all' ? branchParam : null;
 
   // Aggregate user rows for this month
-  const users = await prisma.user.findMany({
-    where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] }, ...(branchId ? { branch_id: branchId } : {}) },
-    include: { branch: true },
-    orderBy: [{ role: 'asc' }, { username: 'asc' }],
-  });
+  // Same roster the payroll screen uses, so the PDF and the screen can never
+  // disagree about who was paid this month.
+  const users = await payrollRoster(prisma, month, branchId);
 
   const rows = await Promise.all(
     users.map(async (u) => {
@@ -54,7 +52,9 @@ export async function GET(req: Request) {
         select: { rate_cent: true },
       });
       return {
-        username: u.username,
+        // `name` first: a retired account's username has been parked to free
+        // the original, and a payslip is about a person.
+        username: u.name ?? u.username,
         role: u.role,
         branch_name: u.branch?.name ?? null,
         hours: payout.hours,

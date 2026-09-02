@@ -14,18 +14,22 @@ const NONE: UserHistory = {
   driverCalls: 0,
 };
 
+// hasHistory no longer decides WHETHER somebody can be deleted - the owner's
+// ruling is that they always can. It decides HOW: an account with nothing behind
+// it is removed row and all, and one with records behind it is retired instead,
+// which takes the login and the username and leaves the punches standing.
 describe('hasHistory', () => {
-  it('lets a mistake account go', () => {
-    // The case the button exists for: created with the wrong name, or a test
-    // account from the beta. Nothing of theirs is a record of anything.
+  it('sends a mistake account down the hard-delete path', () => {
+    // Created with the wrong name, or a test account from the beta. Nothing of
+    // theirs is a record of anything, so nothing is lost by erasing the row.
     expect(hasHistory(NONE)).toBe(false);
   });
 
-  it('protects anyone who ever clocked in', () => {
+  it('sends anyone who ever clocked in down the retire path', () => {
     expect(hasHistory({ ...NONE, punches: 1 })).toBe(true);
   });
 
-  it('protects every kind of money and attendance record on its own', () => {
+  it('treats every kind of money and attendance record as a record on its own', () => {
     // Each one alone is enough. A person can have been paid an advance, or had
     // a penalty waived, without ever having a punch left on file.
     for (const key of Object.keys(NONE) as Array<keyof UserHistory>) {

@@ -76,6 +76,73 @@ export async function userHistory(db: PrismaClient, userId: string): Promise<Use
 }
 
 /**
+ * Retire an account whose records have to stay.
+ *
+ * The owner's model, and it is the right one: the PERSON goes today, the
+ * RECORDS stay. He deletes somebody who quit in January; they lose the login
+ * immediately and vanish from every present-tense screen, January's payroll
+ * still shows the month he owed them, and February simply never mentions them
+ * because they have no records in February. Nothing has to expire, and nothing
+ * has to be swept up at month end - the absence is a consequence of having no
+ * punches, not of a job running.
+ *
+ * A row-level delete cannot do that. Punch.user_id is a required foreign key,
+ * so Postgres either refuses the delete or, with a cascade, takes the punches
+ * with it and rewrites a month that has already been paid.
+ *
+ * So the row stays and the account is emptied of everything that makes it an
+ * account:
+ *
+ *  - the login dies twice over - is_active false, and a password hash nothing
+ *    can match
+ *  - the username is FREED. It moves aside so the same person can be hired back
+ *    under their old name with a genuinely new account, which is what the owner
+ *    means by "he needs a new one if he comes back". `name` keeps the human
+ *    label so payroll history still reads as a person.
+ *  - the schedule goes, so the absence detector stops flagging somebody who is
+ *    not coming, and the telegram/push wiring goes with it
+ *
+ * RateChange is deliberately kept: it is what prices their old punches, and
+ * without it every month they worked would silently reprice to zero.
+ *
+ * The audit trail is untouched either way. AuditLog.actor_id has no foreign key
+ * (see writeAuditLog), so everything this person did, and everything done to
+ * them, outlives the account - including the row recording this.
+ */
+export async function retireUser(
+  db: PrismaClient,
+  user: { id: string; username: string; name: string | null },
+  now: Date,
+): Promise<void> {
+  await db.$transaction(async (tx) => {
+    await tx.pushSubscription.deleteMany({ where: { user_id: user.id } });
+    await tx.schedule.deleteMany({ where: { user_id: user.id } });
+    await tx.scheduleOverride.deleteMany({ where: { user_id: user.id, date: { gte: now } } });
+
+    await tx.user.update({
+      where: { id: user.id },
+      data: {
+        deleted_at: now,
+        is_active: false,
+        // Keeps the person readable in the months they worked. Without it,
+        // freeing the username below would leave payroll history labelled with
+        // the parked name.
+        name: user.name ?? user.username,
+        // Freed for reuse, and unique by construction. The id suffix is not
+        // decoration: usernames are unique, so parking one without it would
+        // collide the second time somebody with the same name is retired.
+        username: `${user.username}#${user.id.slice(-8)}`,
+        // Nothing can match this, so the account is dead even if is_active were
+        // ever flipped back by hand.
+        password_hash: 'retired',
+        telegram_chat_id: null,
+        can_roam_branches: false,
+      },
+    });
+  });
+}
+
+/**
  * Remove the rows that describe an account, then the account.
  *
  * Only ever called once userHistory has come back empty, so nothing here can
@@ -86,11 +153,6 @@ export async function userHistory(db: PrismaClient, userId: string): Promise<Use
  * Restrict, so each has to be cleared explicitly or Postgres refuses the
  * delete. That is a feature: adding a new table that references User will break
  * this loudly rather than silently orphaning rows.
- *
- * The audit trail is untouched on purpose. AuditLog.actor_id has no foreign key
- * (see writeAuditLog), so everything this person ever did to the system, and
- * everything done to them, outlives the account - including the row recording
- * this deletion.
  */
 export async function deleteUserAndSetup(db: PrismaClient, userId: string): Promise<void> {
   await db.$transaction(async (tx) => {

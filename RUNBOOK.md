@@ -317,21 +317,29 @@ message and a full-screen intent). That is a separate build and a Play Store
 account, not a setting.
 
 ### Removing an employee or a branch
-**Remove** deletes outright only when there is nothing behind the record. Anything with
-punches, trips, advances, penalties or driver calls behind it is **archived** instead:
-hidden from the list, kept in the database.
+**Remove** always takes the person away today: the login stops working, they cannot punch,
+they disappear from every list, and their username is freed so it can be used again. If they
+come back they get a new account.
 
-That is permanent, not "until the month rolls". Payroll rebuilds a month from the punches
-every time it is opened, so deleting somebody who worked in January changes January's
-payslips — in March, and next year. There is no point at which the record stops being
-needed.
+What they already did stays. Punches, advances and penalties are untouched, so:
 
-Archived staff and branches are hidden from their lists by default; the **Show removed** /
-**Show archived** button on each page reveals them. That is the "gone" that is safe to give.
+- payroll for a month they worked **still lists them and still pays out** — scroll back and
+  they are there
+- from the following month they simply do not appear, because they have no shifts in it.
+  Nothing expires them and no job sweeps them up; they are absent from a query about a month
+  they were not there for.
 
-If a record genuinely must be erased — a test account that somehow collected punches, a
-branch created by mistake and punched at — that is a database job, not a button, and it
-should be done against a fresh backup. Ask before doing it.
+An account with no records at all — a mistake, a test account — is erased outright instead,
+row and all.
+
+Branches work the same way: one with punches or trips behind it is archived (hidden, kept),
+an empty one is deleted. Archived branches are hidden from the branches page behind **Show
+archived**.
+
+Erasing the RECORDS of somebody who worked is not a button and should not become one: payroll
+rebuilds each month from the punches every time it is opened, so removing them rewrites months
+that have already been paid. If it genuinely has to happen, it is a database job against a
+fresh backup.
 
 ### Check what the containers actually received
 Env vars must be listed in `docker-compose.yml`, not just present in `.env`:

@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
-import { userHistory, hasHistory, deleteUserAndSetup } from '@/lib/services/userDelete';
+import { userHistory, hasHistory, deleteUserAndSetup, retireUser } from '@/lib/services/userDelete';
 
 const Patch = z.object({
   username: z.string().min(1).max(64).optional(),
@@ -166,21 +166,28 @@ export async function DELETE(req: Request, ctx: { params: { id: string } }) {
   const history = await userHistory(prisma, user.id);
 
   if (hasHistory(history)) {
-    const wasActive = user.is_active;
-    if (wasActive) {
-      await prisma.user.update({ where: { id: user.id }, data: { is_active: false } });
-    }
+    // Retired, not refused. The person goes now - login dead, username freed,
+    // gone from every present-tense screen - and the records they made stay
+    // where they are, so the months they worked still pay out exactly as
+    // before. See retireUser for why the row itself cannot go.
+    await retireUser(prisma, user, new Date());
     await writeAuditLog({
       actorId: adminId,
-      action: 'user.deactivate',
+      action: 'user.retire',
       entity: 'User',
       entityId: user.id,
-      before: { username: user.username, is_active: wasActive },
-      after: { is_active: false, reason: 'delete requested but the person has history', ...history },
+      before: { username: user.username, name: user.name, is_active: user.is_active },
+      after: {
+        deleted_at: new Date().toISOString(),
+        is_active: false,
+        username_freed: user.username,
+        reason: 'deleted by the owner; records kept so paid months still reconstruct',
+        ...history,
+      },
     });
     return NextResponse.json({
       ok: true,
-      data: { deleted: false, deactivated: true, history },
+      data: { deleted: true, retired: true, username_freed: user.username, history },
     });
   }
 
@@ -198,7 +205,7 @@ export async function DELETE(req: Request, ctx: { params: { id: string } }) {
       hourly_rate_cent: user.hourly_rate_cent,
     },
   });
-  return NextResponse.json({ ok: true, data: { deleted: true, deactivated: false } });
+  return NextResponse.json({ ok: true, data: { deleted: true, retired: false } });
 }
 
 export const dynamic = 'force-dynamic';

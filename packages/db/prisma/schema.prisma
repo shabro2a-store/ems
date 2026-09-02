@@ -84,6 +84,15 @@ model User {
   // single-branch until the owner grants this, and revoking it takes effect on
   // the very next punch because nothing is cached.
   can_roam_branches    Boolean            @default(false)
+  // Retired, not erased. Set when the owner deletes somebody who has worked:
+  // the login dies, the username is freed for reuse, and every present-tense
+  // screen stops showing them - but the row stays, because punches, advances
+  // and penalties point at it and a month already paid has to keep resolving.
+  //
+  // Payroll includes anyone with records in the month being viewed, so scrolling
+  // back to a month they worked still shows them, and the month after they are
+  // gone on their own without anything having to expire them.
+  deleted_at           DateTime?
   telegram_chat_id     String?
   notify_daily_summary Boolean            @default(true)
   notify_routine_pings Boolean            @default(true)
@@ -107,6 +116,7 @@ model User {
   blocked_punches      BlockedPunchAttempt[]
 
   @@index([branch_id])
+  @@index([deleted_at])
 }
 
 model Branch {

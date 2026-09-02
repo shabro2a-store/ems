@@ -123,7 +123,7 @@ export default function AdminEmployeesPage() {
   async function confirmRemove() {
     if (!removing) return;
     setErr(null);
-    const res = await apiSend<{ deleted: boolean; deactivated: boolean }>(
+    const res = await apiSend<{ deleted: boolean; retired: boolean; username_freed?: string }>(
       `/api/admin/users/${removing.id}`,
       { method: 'DELETE' },
     );
@@ -131,9 +131,9 @@ export default function AdminEmployeesPage() {
     setRemoving(null);
     if (!res.ok) { setErr(errorMessage(res)); return; }
     setErr(
-      res.data.deleted
-        ? null
-        : `${name} has punches or payments on record, so they were removed from the list instead of deleted — payroll still has to be able to rebuild the months they were paid for. Press "Show removed" to see them.`,
+      res.data.retired
+        ? `${name} is gone: the login is dead and "${res.data.username_freed}" is free to use again. Their punches stay where they are, so the months they worked still pay out — scroll payroll back and they are still there. From next month they simply will not appear.`
+        : null,
     );
     await load();
   }
@@ -285,10 +285,15 @@ export default function AdminEmployeesPage() {
           }
         >
           <p className="text-sm text-muted">
-            If this person has any punches, advances or penalties on record they will be{' '}
-            <b className="text-content">deactivated</b> instead — payroll has to be able to rebuild
-            the months they worked. An account with no history is deleted permanently, along with
-            its schedule and pay rate. Either way the audit log keeps the record.
+            The account goes now: they cannot log in or punch again, they disappear from every
+            screen, and their username is freed for reuse. If they come back they get a new
+            account.
+          </p>
+          <p className="mt-2 text-sm text-muted">
+            What they already did <b className="text-content">stays</b> — punches, advances,
+            penalties. Payroll for the months they worked still shows them and still pays out;
+            from next month onward they will not appear anywhere, because there is nothing of
+            theirs in it.
           </p>
         </Modal>
       )}
