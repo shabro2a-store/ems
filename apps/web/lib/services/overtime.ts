@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { rateAt, monthRangeUtc } from './payout';
+import { rateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   centsForLastMinutes,
   type DayCoverage,
@@ -90,9 +90,17 @@ export async function overtimeForUser(
   db: PrismaClient,
 ): Promise<OvertimeItem[]> {
   const { start, end } = monthRangeUtc(month);
+  // Punches are read two days either side of the month and each DAY is then
+  // filtered back to it. A shift that starts on the 30th and ends on the 1st has
+  // its checkout outside the month window, so the plain window handed coverage
+  // an arrival with no departure - an unclosed day, which is never judged. The
+  // last night of every month therefore raised no overtime and no penalty, for
+  // every overnight worker, in either month. Same seam payout.ts pairs across.
+  const punchFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
   const [punches, schedules, overrides, rateChanges, decisions, user, blocked] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: start, lt: end } },
+      where: { user_id: userId, at: { gte: punchFrom, lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     }),
@@ -117,7 +125,7 @@ export async function overtimeForUser(
       where: { id: userId },
       select: { branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
-    loadBlockedCreditInputs([userId], start, end, db),
+    loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
   ]);
 
   const shiftMinByWeekday = new Map<number, number>();
@@ -155,12 +163,16 @@ export async function overtimeForUser(
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
     dayStartHour: user?.branch?.day_start_hour ?? 0,
   });
+  // Back to the month asked for. The window above deliberately reaches into the
+  // neighbouring months to close the shifts that straddle a boundary; only the
+  // days that BELONG to this month may be returned, or September's query would
+  // report August's last night as well.
   return computeOvertime({
     coverage,
     rateChanges: rateChanges as RateChangeLite[],
     graceMin,
     decisionsByDate,
-  });
+  }).filter((o) => o.date.slice(0, 7) === month);
 }
 
 export async function overtimeDeductionForUser(
@@ -206,10 +218,18 @@ export async function pendingOvertimeNotices(
   if (users.length === 0) return [];
   const ids = users.map((u) => u.id);
   const { start, end } = monthRangeUtc(month);
+  // Punches are read two days either side of the month and each DAY is then
+  // filtered back to it. A shift that starts on the 30th and ends on the 1st has
+  // its checkout outside the month window, so the plain window handed coverage
+  // an arrival with no departure - an unclosed day, which is never judged. The
+  // last night of every month therefore raised no overtime and no penalty, for
+  // every overnight worker, in either month. Same seam payout.ts pairs across.
+  const punchFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
 
   const [punches, schedules, overrides, rateChanges, decisions, userBranches, blocked] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: { in: ids }, at: { gte: start, lt: end } },
+      where: { user_id: { in: ids }, at: { gte: punchFrom, lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { user_id: true, kind: true, at: true },
     }),
@@ -234,7 +254,7 @@ export async function pendingOvertimeNotices(
       where: { id: { in: ids } },
       select: { id: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
-    loadBlockedCreditInputs(ids, start, end, db),
+    loadBlockedCreditInputs(ids, punchFrom, punchTo, db),
   ]);
 
   const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
@@ -297,7 +317,7 @@ export async function pendingOvertimeNotices(
       rateChanges: userRates,
       graceMin: graceByUser.get(u.id) ?? 15,
       decisionsByDate: decisionsByUser.get(u.id) ?? new Map(),
-    });
+    }).filter((o) => o.date.slice(0, 7) === month);
 
     for (const o of items) {
       if (o.decision !== null) continue;

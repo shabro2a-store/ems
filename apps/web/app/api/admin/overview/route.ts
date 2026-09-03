@@ -7,6 +7,7 @@ import { pendingOvertimeNotices } from '@/lib/services/overtime';
 import { grantedCreditMinutesByDate, pendingBlockedCreditNotices } from '@/lib/services/blockedCredit';
 import { requiredMinFor, currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
 import { lookbackMonths, mergeNotices } from '@/lib/services/noticeWindow';
+import { isMonthOpen } from '@/lib/services/periodLock';
 
 // How far back the penalty review queue looks. Older ones are a payroll matter.
 const PENALTY_LOOKBACK_DAYS = 7;
@@ -261,7 +262,18 @@ export async function GET(req: Request) {
     Promise.all(months.map((m) => pendingBlockedCreditNotices(penaltyUsers, m, prisma, { since }))),
   ]);
 
-  const penalties = mergeNotices(penaltyBatches).map((p) => ({
+  // A day in a settled month is dropped from the queue entirely. Accept and
+  // Revoke both refuse a closed month - the money there has been paid - so a row
+  // from one is a demand for a decision that cannot be made: it sits at the top
+  // of Needs attention forever and no click will clear it. The seven-day
+  // lookback reaches back over the 1st, so this happens to every notice from the
+  // last week of a month as soon as the month turns.
+  //
+  // Nothing is lost. That month's payroll still shows the day, read-only, which
+  // is the right place for a decision that has already been made by the calendar.
+  const stillOpen = <T extends { date: string }>(rows: T[]) => rows.filter((r) => isMonthOpen(r.date));
+
+  const penalties = stillOpen(mergeNotices(penaltyBatches)).map((p) => ({
     user_id: p.user_id,
     username: p.username,
     date: p.date,
@@ -274,7 +286,7 @@ export async function GET(req: Request) {
     waived: p.waived,
   }));
 
-  const overtime = mergeNotices(overtimeBatches).map((o) => ({
+  const overtime = stillOpen(mergeNotices(overtimeBatches)).map((o) => ({
     user_id: o.user_id,
     username: o.username,
     date: o.date,
@@ -286,7 +298,7 @@ export async function GET(req: Request) {
   // approval, not a review. The times are what the row has to show, because
   // "would credit 1h 48m" without "turned away 06:12, clocked in 08:00, worked
   // 6h" gives the owner nothing to judge.
-  const blockedCredits = mergeNotices(blockedCreditBatches).map((c) => ({
+  const blockedCredits = stillOpen(mergeNotices(blockedCreditBatches)).map((c) => ({
     user_id: c.user_id,
     username: c.username,
     date: c.date,

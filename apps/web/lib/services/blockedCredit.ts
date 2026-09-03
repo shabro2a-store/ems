@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { inBeirut } from 'time';
-import { rateAt, monthRangeUtc } from './payout';
+import { rateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   computeCoverage,
   type CreditedTime,
@@ -307,9 +307,17 @@ export async function blockedCreditForUser(
   db: PrismaClient,
 ): Promise<BlockedCreditItem[]> {
   const { start, end } = monthRangeUtc(month);
+  // Punches are read two days either side of the month and each DAY is then
+  // filtered back to it. A shift that starts on the 30th and ends on the 1st has
+  // its checkout outside the month window, so the plain window handed coverage
+  // an arrival with no departure - an unclosed day, which is never judged. The
+  // last night of every month therefore raised no overtime and no penalty, for
+  // every overnight worker, in either month. Same seam payout.ts pairs across.
+  const punchFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
   const [punches, schedules, overrides, rateChanges, blocked, user] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: start, lt: end } },
+      where: { user_id: userId, at: { gte: punchFrom, lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     }),
@@ -323,7 +331,7 @@ export async function blockedCreditForUser(
       orderBy: { effective_from: 'asc' },
       select: { rate_cent: true, effective_from: true },
     }),
-    loadBlockedCreditInputs([userId], start, end, db),
+    loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
     db.user.findUnique({
       where: { id: userId },
       select: { branch: { select: { day_start_hour: true } } },
@@ -347,7 +355,9 @@ export async function blockedCreditForUser(
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
     dayStartHour: user?.branch?.day_start_hour ?? 0,
-  }).credits;
+    // The window reaches into the neighbouring months to close the shifts that
+    // straddle a boundary; only this month's days may come back.
+  }).credits.filter((c) => c.date.slice(0, 7) === month);
 }
 
 /**
@@ -435,10 +445,18 @@ async function allBlockedCredits(
   const out = new Map<string, BlockedCreditItem[]>();
   if (ids.length === 0) return out;
   const { start, end } = monthRangeUtc(month);
+  // Punches are read two days either side of the month and each DAY is then
+  // filtered back to it. A shift that starts on the 30th and ends on the 1st has
+  // its checkout outside the month window, so the plain window handed coverage
+  // an arrival with no departure - an unclosed day, which is never judged. The
+  // last night of every month therefore raised no overtime and no penalty, for
+  // every overnight worker, in either month. Same seam payout.ts pairs across.
+  const punchFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
 
   const [punches, schedules, overrides, rateChanges, blocked, userBranches] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: { in: ids }, at: { gte: start, lt: end } },
+      where: { user_id: { in: ids }, at: { gte: punchFrom, lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { user_id: true, kind: true, at: true },
     }),
@@ -455,7 +473,7 @@ async function allBlockedCredits(
       orderBy: { effective_from: 'asc' },
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),
-    loadBlockedCreditInputs(ids, start, end, db),
+    loadBlockedCreditInputs(ids, punchFrom, punchTo, db),
     db.user.findMany({
       where: { id: { in: ids } },
       select: { id: true, branch: { select: { day_start_hour: true } } },
@@ -500,7 +518,8 @@ async function allBlockedCredits(
       decisionsByDate: blocked.decisionsByUser.get(id) ?? new Map(),
       dayStartHour: dayStartByUser.get(id) ?? 0,
     });
-    if (credits.length > 0) out.set(id, credits);
+    const inMonth = credits.filter((c) => c.date.slice(0, 7) === month);
+    if (inMonth.length > 0) out.set(id, inMonth);
   }
 
   return out;

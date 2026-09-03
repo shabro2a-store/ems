@@ -61,7 +61,7 @@ interface AdvanceRow {
  * session can be before the system closes it, so no real pair reaches outside
  * this window.
  */
-const PAIR_LOOKAROUND_MS = 2 * 86_400_000;
+export const PAIR_LOOKAROUND_MS = 2 * 86_400_000;
 
 /**
  * The UTC calendar month.

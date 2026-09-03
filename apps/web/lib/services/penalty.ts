@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { rateAt, monthRangeUtc } from './payout';
+import { rateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   currentShiftDayMinutes,
   type DayCoverage,
@@ -172,9 +172,17 @@ export async function penaltiesForUser(
   opts: { now?: Date } = {},
 ): Promise<PenaltyItem[]> {
   const { start, end } = monthRangeUtc(month);
+  // Punches are read two days either side of the month and each DAY is then
+  // filtered back to it. A shift that starts on the 30th and ends on the 1st has
+  // its checkout outside the month window, so the plain window handed coverage
+  // an arrival with no departure - an unclosed day, which is never judged. The
+  // last night of every month therefore raised no overtime and no penalty, for
+  // every overnight worker, in either month. Same seam payout.ts pairs across.
+  const punchFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
   const [punches, schedules, overrides, rateChanges, waivers, user, blocked] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: start, lt: end } },
+      where: { user_id: userId, at: { gte: punchFrom, lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     }),
@@ -199,7 +207,7 @@ export async function penaltiesForUser(
       where: { id: userId },
       select: { branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
-    loadBlockedCreditInputs([userId], start, end, db),
+    loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
   ]);
 
   const shiftMinByWeekday = new Map<number, number>();
@@ -232,13 +240,17 @@ export async function penaltiesForUser(
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
     dayStartHour,
   });
+  // Back to the month asked for. The window above deliberately reaches into the
+  // neighbouring months to close the shifts that straddle a boundary; only the
+  // days that BELONG to this month may be returned, or September's query would
+  // report August's last night as well.
   return shortfallPenalties({
     coverage,
     rateChanges: rateChanges as RateChangeLite[],
     graceMin: user?.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN,
     currentShiftDate: currentShiftDate(punches as PunchLite[], opts.now ?? new Date(), dayStartHour),
     waivers: waiversByKey,
-  });
+  }).filter((p) => p.date.slice(0, 7) === month);
 }
 
 /**
@@ -285,10 +297,18 @@ export async function pendingPenaltyNotices(
   const ids = users.map((u) => u.id);
   const now = opts.now ?? new Date();
   const { start, end } = monthRangeUtc(month);
+  // Punches are read two days either side of the month and each DAY is then
+  // filtered back to it. A shift that starts on the 30th and ends on the 1st has
+  // its checkout outside the month window, so the plain window handed coverage
+  // an arrival with no departure - an unclosed day, which is never judged. The
+  // last night of every month therefore raised no overtime and no penalty, for
+  // every overnight worker, in either month. Same seam payout.ts pairs across.
+  const punchFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
 
   const [punches, schedules, overrides, rateChanges, waivers, acks, userBranches, blocked] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: { in: ids }, at: { gte: start, lt: end } },
+      where: { user_id: { in: ids }, at: { gte: punchFrom, lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { user_id: true, kind: true, at: true },
     }),
@@ -317,7 +337,7 @@ export async function pendingPenaltyNotices(
       where: { id: { in: ids } },
       select: { id: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
-    loadBlockedCreditInputs(ids, start, end, db),
+    loadBlockedCreditInputs(ids, punchFrom, punchTo, db),
   ]);
 
   const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
@@ -383,7 +403,7 @@ export async function pendingPenaltyNotices(
       graceMin: graceByUser.get(u.id) ?? DEFAULT_GRACE_MIN,
       currentShiftDate: currentShiftDate(userPunches, now, dayStartByUser.get(u.id) ?? 0),
       waivers: waiversByKey,
-    });
+    }).filter((p) => p.date.slice(0, 7) === month);
 
     for (const p of items) {
       if (p.date < opts.since) continue;
