@@ -1,5 +1,5 @@
 import type { PrismaClient, Punch } from '@prisma/client';
-import { inBeirut, beirutWeekday } from 'time';
+import { shiftDateOf, shiftWeekdayOf } from 'time';
 import { requiredMinFor, MAX_OPEN_SESSION_MIN } from './coverage';
 
 /**
@@ -95,8 +95,14 @@ export function staleSessionClose(args: {
   now: Date;
   requiredMin: number;
   graceMin: number;
+  /** The branch's working-day start hour; 0 is the calendar day. */
+  dayStartHour?: number;
 }): StaleSessionCheck | null {
-  if (inBeirut(args.arrivalAt).date >= inBeirut(args.now).date) return null;
+  // "An earlier day" means an earlier WORKING day. On a branch whose day starts
+  // at 06:00, somebody who clocked in at 23:00 and taps again at 01:00 is still
+  // inside the same shift-day and must be refused, not silently closed.
+  const dayStart = args.dayStartHour ?? 0;
+  if (shiftDateOf(args.arrivalAt, dayStart) >= shiftDateOf(args.now, dayStart)) return null;
   const elapsedMin = Math.floor((args.now.getTime() - args.arrivalAt.getTime()) / 60_000);
   if (elapsedMin <= args.requiredMin + args.graceMin) return null;
   const closeAt = systemCheckoutAt(args.arrivalAt, args.requiredMin);
@@ -109,11 +115,12 @@ export async function requiredMinForArrival(
   db: PrismaClient,
   userId: string,
   arrivalAt: Date,
+  dayStartHour = 0,
 ): Promise<number> {
-  const date = inBeirut(arrivalAt).date;
+  const date = shiftDateOf(arrivalAt, dayStartHour);
   const [schedule, override] = await Promise.all([
     db.schedule.findUnique({
-      where: { user_id_weekday: { user_id: userId, weekday: beirutWeekday(arrivalAt) } },
+      where: { user_id_weekday: { user_id: userId, weekday: shiftWeekdayOf(arrivalAt, dayStartHour) } },
       select: { shift_min: true },
     }),
     db.scheduleOverride.findUnique({

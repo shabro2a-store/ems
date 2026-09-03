@@ -28,14 +28,21 @@ function fakeDb(users: UserRow[], punches: PunchRow[]) {
         where,
       }: {
         where: {
-          role: { in: string[] };
+          id?: { in: string[] };
+          role?: { in: string[] };
           branch_id?: string;
-          OR: [{ is_active: boolean; deleted_at: null }, { id: { in: string[] } }];
+          OR?: [{ is_active: boolean; deleted_at: null }, { id: { in: string[] } }];
         };
       }) => {
+        // payrollRoster asks twice: first for each arriving user's branch
+        // boundary, then for the roster itself.
+        if (!where.OR) {
+          const ids = new Set(where.id?.in ?? []);
+          return users.filter((u) => ids.has(u.id)).map((u) => ({ id: u.id, branch: null }));
+        }
         const worked = new Set(where.OR[1].id.in);
         return users
-          .filter((u) => where.role.in.includes(u.role))
+          .filter((u) => (where.role ? where.role.in.includes(u.role) : true))
           .filter((u) => (where.branch_id ? u.branch_id === where.branch_id : true))
           .filter((u) => (u.is_active && u.deleted_at === null) || worked.has(u.id))
           .map((u) => ({ ...u, hourly_rate_cent: 300, expected_monthly_salary_cent: null, branch: null }));

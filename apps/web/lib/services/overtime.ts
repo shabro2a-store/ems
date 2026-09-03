@@ -115,7 +115,7 @@ export async function overtimeForUser(
     }),
     db.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { shift_grace_min: true } } },
+      select: { branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
     loadBlockedCreditInputs([userId], start, end, db),
   ]);
@@ -153,6 +153,7 @@ export async function overtimeForUser(
     rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
+    dayStartHour: user?.branch?.day_start_hour ?? 0,
   });
   return computeOvertime({
     coverage,
@@ -231,7 +232,7 @@ export async function pendingOvertimeNotices(
     }),
     db.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, branch: { select: { shift_grace_min: true } } },
+      select: { id: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
     loadBlockedCreditInputs(ids, start, end, db),
   ]);
@@ -260,7 +261,11 @@ export async function pendingOvertimeNotices(
   }
 
   const graceByUser = new Map<string, number>();
-  for (const u of userBranches) graceByUser.set(u.id, u.branch?.shift_grace_min ?? 15);
+  const dayStartByUser = new Map<string, number>();
+  for (const u of userBranches) {
+    graceByUser.set(u.id, u.branch?.shift_grace_min ?? 15);
+    dayStartByUser.set(u.id, u.branch?.day_start_hour ?? 0);
+  }
 
   const notices: OvertimeNotice[] = [];
   for (const u of users) {
@@ -285,6 +290,7 @@ export async function pendingOvertimeNotices(
       rateCentAt: (at) => rateAt(userRates, at),
       attempts: blocked.attemptsByUser.get(u.id) ?? [],
       decisionsByDate: blocked.decisionsByUser.get(u.id) ?? new Map(),
+      dayStartHour: dayStartByUser.get(u.id) ?? 0,
     });
     const items = computeOvertime({
       coverage,

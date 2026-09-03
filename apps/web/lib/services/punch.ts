@@ -209,7 +209,12 @@ export async function punchEmployee(
   let systemClosed: Punch | null = null;
   let resolvedStaleSession = false;
   if (hasOpenSession) {
-    const requiredMin = await requiredMinForArrival(db, user.id, openIn!.at);
+    const requiredMin = await requiredMinForArrival(
+      db,
+      user.id,
+      openIn!.at,
+      user.branch.day_start_hour,
+    );
     const stale =
       input.kind === 'IN'
         ? staleSessionClose({
@@ -217,6 +222,7 @@ export async function punchEmployee(
             now,
             requiredMin,
             graceMin: user.branch.shift_grace_min,
+            dayStartHour: user.branch.day_start_hour,
           })
         : abandonedSessionClose({ arrivalAt: openIn!.at, now, requiredMin });
     if (stale) {

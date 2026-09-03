@@ -230,12 +230,15 @@ export function coverageWithBlockedCredit(args: {
   rateCentAt: (at: Date) => number;
   attempts: BlockedAttemptLite[];
   decisionsByDate: Map<string, CreditDecisionLite>;
+  /** The branch's working-day start hour; 0 is the calendar day. */
+  dayStartHour?: number;
 }): { coverage: DayCoverage[]; credits: BlockedCreditItem[] } {
   const base = {
     punches: args.punches,
     shiftMinByWeekday: args.shiftMinByWeekday,
     overridesByDate: args.overridesByDate,
     rateCentAt: args.rateCentAt,
+    dayStartHour: args.dayStartHour,
   };
   const uncredited = computeCoverage(base);
   const credits = computeBlockedCredits({
@@ -304,7 +307,7 @@ export async function blockedCreditForUser(
   db: PrismaClient,
 ): Promise<BlockedCreditItem[]> {
   const { start, end } = monthRangeUtc(month);
-  const [punches, schedules, overrides, rateChanges, blocked] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, blocked, user] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -321,6 +324,10 @@ export async function blockedCreditForUser(
       select: { rate_cent: true, effective_from: true },
     }),
     loadBlockedCreditInputs([userId], start, end, db),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { branch: { select: { day_start_hour: true } } },
+    }),
   ]);
 
   const shiftMinByWeekday = new Map<number, number>();
@@ -339,6 +346,7 @@ export async function blockedCreditForUser(
     rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
+    dayStartHour: user?.branch?.day_start_hour ?? 0,
   }).credits;
 }
 
@@ -428,7 +436,7 @@ async function allBlockedCredits(
   if (ids.length === 0) return out;
   const { start, end } = monthRangeUtc(month);
 
-  const [punches, schedules, overrides, rateChanges, blocked] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, blocked, userBranches] = await Promise.all([
     db.punch.findMany({
       where: { user_id: { in: ids }, at: { gte: start, lt: end } },
       orderBy: { at: 'asc' },
@@ -448,6 +456,10 @@ async function allBlockedCredits(
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),
     loadBlockedCreditInputs(ids, start, end, db),
+    db.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, branch: { select: { day_start_hour: true } } },
+    }),
   ]);
 
   const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
@@ -463,6 +475,7 @@ async function allBlockedCredits(
   const schedulesBy = by(schedules);
   const overridesBy = by(overrides);
   const ratesBy = by(rateChanges);
+  const dayStartByUser = new Map(userBranches.map((u) => [u.id, u.branch?.day_start_hour ?? 0]));
 
   for (const id of ids) {
     const attempts = blocked.attemptsByUser.get(id);
@@ -485,6 +498,7 @@ async function allBlockedCredits(
       rateCentAt: (at) => rateAt(userRates, at),
       attempts,
       decisionsByDate: blocked.decisionsByUser.get(id) ?? new Map(),
+      dayStartHour: dayStartByUser.get(id) ?? 0,
     });
     if (credits.length > 0) out.set(id, credits);
   }

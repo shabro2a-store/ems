@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { todayInBeirut, beirutWeekday } from 'time';
+import { shiftDateOf, shiftWeekdayOf } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import { resolveRequiredMin } from './requiredMin';
 
@@ -82,7 +82,12 @@ export async function runAutoCloseAbandoned(
     const lastIn = await db.punch.findFirst({
       where: { user_id: u.id, kind: 'IN' },
       orderBy: { at: 'desc' },
-      select: { id: true, at: true, branch_id: true, branch: { select: { lat: true, lng: true } } },
+      select: {
+        id: true,
+        at: true,
+        branch_id: true,
+        branch: { select: { lat: true, lng: true, day_start_hour: true } },
+      },
     });
     if (!lastIn) continue;
     if (lastIn.at >= cutoff) continue;
@@ -92,12 +97,14 @@ export async function runAutoCloseAbandoned(
     });
     if (laterOut) continue;
 
-    // The shift belongs to the Beirut day it started, so the hours owed come
-    // from that day - not from today, which may be two days later.
-    const inDate = todayInBeirut(lastIn.at);
+    // The shift belongs to the WORKING day it started - which on a branch whose
+    // day starts at 06:00 is not the calendar day for anyone clocking in before
+    // dawn. Not today either, which may be two days later.
+    const dayStart = lastIn.branch?.day_start_hour ?? 0;
+    const inDate = shiftDateOf(lastIn.at, dayStart);
     const [schedule, override] = await Promise.all([
       db.schedule.findUnique({
-        where: { user_id_weekday: { user_id: u.id, weekday: beirutWeekday(lastIn.at) } },
+        where: { user_id_weekday: { user_id: u.id, weekday: shiftWeekdayOf(lastIn.at, dayStart) } },
         select: { shift_min: true },
       }),
       db.scheduleOverride.findUnique({

@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, shiftWeekdayOf } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
@@ -34,6 +34,15 @@ export async function runMissedCheckout(
   let flags_created = 0;
   let notified = 0;
 
+  const branchDayStart = new Map(
+    (
+      await db.user.findMany({
+        where: { id: { in: [...new Set(schedules.map((s) => s.user_id))] } },
+        select: { id: true, branch: { select: { day_start_hour: true } } },
+      })
+    ).map((u) => [u.id, u.branch?.day_start_hour ?? 0]),
+  );
+
   for (const s of schedules) {
     if (s.shift_min == null) continue;
     const shiftMin = s.shift_min;
@@ -48,9 +57,12 @@ export async function runMissedCheckout(
     });
     if (laterOut) continue;
 
-    // shift_min is keyed by weekday, so an open check-in is only judged
-    // against the schedule row for the weekday it actually started on.
-    if (beirutWeekday(lastIn.at) !== s.weekday) continue;
+    // shift_min is keyed by weekday, so an open check-in is only judged against
+    // the schedule row for the weekday it actually started on - the WORKING
+    // weekday, which on a branch whose day starts at 06:00 is the previous one
+    // for anybody clocking in before dawn.
+    const dayStart = branchDayStart.get(s.user_id) ?? 0;
+    if (shiftWeekdayOf(lastIn.at, dayStart) !== s.weekday) continue;
 
     // An override for that specific date beats the weekly pattern, exactly as
     // it does for payroll - judging four hours of approved time off against

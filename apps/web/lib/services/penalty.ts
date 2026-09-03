@@ -91,8 +91,8 @@ function ruledOn(stored: PenaltyDecisionLite | undefined, penaltyMin: number): b
  * an open arrival belonging to that month, which is the only one that can name
  * a day inside that month's coverage.
  */
-export function currentShiftDate(punches: PunchLite[], now: Date): string {
-  return currentShiftDayMinutes({ punches, now }).date;
+export function currentShiftDate(punches: PunchLite[], now: Date, dayStartHour = 0): string {
+  return currentShiftDayMinutes({ punches, now, dayStartHour }).date;
 }
 
 /**
@@ -197,7 +197,7 @@ export async function penaltiesForUser(
     }),
     db.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { shift_grace_min: true } } },
+      select: { branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
     loadBlockedCreditInputs([userId], start, end, db),
   ]);
@@ -222,6 +222,7 @@ export async function penaltiesForUser(
   // Blocked-time credit is folded in here, which is the whole point of it: an
   // employee held at the door by somebody else's forgotten checkout must not
   // then be docked for the hours they could not clock.
+  const dayStartHour = user?.branch?.day_start_hour ?? 0;
   const { coverage } = coverageWithBlockedCredit({
     punches: punches as PunchLite[],
     shiftMinByWeekday,
@@ -229,12 +230,13 @@ export async function penaltiesForUser(
     rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
+    dayStartHour,
   });
   return shortfallPenalties({
     coverage,
     rateChanges: rateChanges as RateChangeLite[],
     graceMin: user?.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN,
-    currentShiftDate: currentShiftDate(punches as PunchLite[], opts.now ?? new Date()),
+    currentShiftDate: currentShiftDate(punches as PunchLite[], opts.now ?? new Date(), dayStartHour),
     waivers: waiversByKey,
   });
 }
@@ -313,7 +315,7 @@ export async function pendingPenaltyNotices(
     }),
     db.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, branch: { select: { shift_grace_min: true } } },
+      select: { id: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
     loadBlockedCreditInputs(ids, start, end, db),
   ]);
@@ -339,7 +341,11 @@ export async function pendingPenaltyNotices(
   }
 
   const graceByUser = new Map<string, number>();
-  for (const u of userBranches) graceByUser.set(u.id, u.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN);
+  const dayStartByUser = new Map<string, number>();
+  for (const u of userBranches) {
+    graceByUser.set(u.id, u.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN);
+    dayStartByUser.set(u.id, u.branch?.day_start_hour ?? 0);
+  }
 
   const notices: PenaltyNotice[] = [];
   for (const u of users) {
@@ -369,12 +375,13 @@ export async function pendingPenaltyNotices(
       rateCentAt: (at) => rateAt(userRates, at),
       attempts: blocked.attemptsByUser.get(u.id) ?? [],
       decisionsByDate: blocked.decisionsByUser.get(u.id) ?? new Map(),
+      dayStartHour: dayStartByUser.get(u.id) ?? 0,
     });
     const items = shortfallPenalties({
       coverage,
       rateChanges: userRates,
       graceMin: graceByUser.get(u.id) ?? DEFAULT_GRACE_MIN,
-      currentShiftDate: currentShiftDate(userPunches, now),
+      currentShiftDate: currentShiftDate(userPunches, now, dayStartByUser.get(u.id) ?? 0),
       waivers: waiversByKey,
     });
 

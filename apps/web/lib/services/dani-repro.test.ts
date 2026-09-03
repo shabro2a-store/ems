@@ -136,3 +136,80 @@ describe('more than one punch on the same calendar day', () => {
     expect(items[0]).toMatchObject({ date: '2026-09-02', overtimeMin: 180 });
   });
 });
+
+// The real cause, and the fix.
+//
+// Dani's shift is 23:00-or-00:00 to 07:00. Those two start times are on
+// DIFFERENT calendar days, so on the night he clocked in at 23:58 the shift
+// joined the previous night on Wednesday: 968 minutes against 8 owed, reported
+// as 488 minutes of overtime worth $21.47, while Thursday was left with no
+// shift at all. Two minutes decided it.
+//
+// Moving the branch's working day to start at 06:00 - an hour when nobody here
+// is starting, an hour before khouder's 07:00 handover - puts both of dani's
+// start times on the same working day without changing the rule that a shift
+// belongs to the day it clocked IN.
+describe('dani clocking in either side of midnight', () => {
+  const cover = (punches: PunchLite[], dayStartHour: number) =>
+    computeCoverage({
+      punches,
+      shiftMinByWeekday: new Map([0, 1, 2, 3, 4, 5, 6].map((w) => [w, 480])),
+      overridesByDate: new Map(),
+      rateCentAt: () => 264,
+      dayStartHour,
+    });
+  const overtime = (punches: PunchLite[], dayStartHour: number) =>
+    computeOvertime({
+      coverage: cover(punches, dayStartHour),
+      rateChanges: RATE,
+      graceMin: 15,
+      decisionsByDate: new Map(),
+    });
+
+  // Beirut is UTC+3 in September. In 00:02 Wed, out 08:00 Wed; in 23:58 Wed,
+  // out 08:08 Thu - exactly what the database held before the correction.
+  const TWO_NIGHTS: PunchLite[] = [
+    { kind: 'IN', at: new Date('2026-09-01T21:02:00Z') },
+    { kind: 'OUT', at: new Date('2026-09-02T05:00:00Z') },
+    { kind: 'IN', at: new Date('2026-09-02T20:58:00Z') },
+    { kind: 'OUT', at: new Date('2026-09-03T05:08:00Z') },
+  ];
+
+  it('stacks both nights onto one day at the midnight boundary', () => {
+    const days = cover(TWO_NIGHTS, 0);
+    expect(days).toHaveLength(1);
+    expect(days[0]!.workedMin).toBe(968);
+    const [item] = overtime(TWO_NIGHTS, 0);
+    expect(item).toMatchObject({ overtimeMin: 488, amount_cent: 2147 }); // $21.47
+  });
+
+  it('separates them at a 6am boundary, and reports no overtime', () => {
+    const days = cover(TWO_NIGHTS, 6);
+    expect(days.map((d) => d.date)).toEqual(['2026-09-01', '2026-09-02']);
+    expect(days.map((d) => d.workedMin)).toEqual([478, 490]);
+    expect(days.map((d) => d.deltaMin)).toEqual([-2, 10]);
+    // 10 minutes over is inside the 15 minute grace, so nothing is raised.
+    expect(overtime(TWO_NIGHTS, 6)).toEqual([]);
+  });
+
+  it('gives the same answer whichever side of midnight he taps', () => {
+    // The whole point: a 23:58 start and a 00:02 start are the same shift-day,
+    // so two minutes can no longer move a night onto its neighbour.
+    const twoMinutesLater: PunchLite[] = [
+      ...TWO_NIGHTS.slice(0, 2),
+      { kind: 'IN', at: new Date('2026-09-02T21:00:00Z') }, // Thu 00:00
+      TWO_NIGHTS[3]!,
+    ];
+    expect(cover(twoMinutesLater, 6).map((d) => d.date)).toEqual(['2026-09-01', '2026-09-02']);
+    expect(overtime(twoMinutesLater, 6)).toEqual([]);
+  });
+
+  it('leaves khouder, who starts at 07:00, exactly where he was', () => {
+    const khouder: PunchLite[] = [
+      { kind: 'IN', at: new Date('2026-09-02T04:00:00Z') }, // Wed 07:00
+      { kind: 'OUT', at: new Date('2026-09-02T20:00:00Z') }, // Wed 23:00
+    ];
+    expect(cover(khouder, 6).map((d) => d.date)).toEqual(['2026-09-02']);
+    expect(cover(khouder, 6)).toEqual(cover(khouder, 0));
+  });
+});

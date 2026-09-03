@@ -77,3 +77,42 @@ function beirutDayStart(date: string): Date {
 export function todayInBeirutDateRange(date: string): { startUtc: Date; endUtc: Date } {
   return { startUtc: beirutDayStart(date), endUtc: beirutDayStart(shiftCalendarDate(date, 1)) };
 }
+/**
+ * The working day a moment belongs to, when the day does not begin at midnight.
+ *
+ * Some shifts sit ON the midnight line. Dani starts at 23:00 some nights and
+ * 00:00 others and finishes at 07:00 either way: one shift, but the calendar
+ * puts the two starts on different dates, so one night landed a second shift on
+ * a day that already had one - 968 minutes against 8 owed, reported as eight
+ * hours of overtime - and left the next day with nothing, looking like an
+ * absence. Two minutes decided which.
+ *
+ * Moving the boundary to an hour when nobody is starting a shift fixes it
+ * without touching the rule everything else is built on: a shift still belongs
+ * to the day it clocked IN, that day just runs 06:00 to 06:00 rather than
+ * 00:00 to 00:00. Both of dani's starts then name the same day, while the
+ * handover at 07:00 and every day shift are on the ordinary side of it.
+ *
+ * `dayStartHour` 0 is the calendar day, and this is then EXACTLY inBeirut().date
+ * - the same string, by construction, not merely usually. That is what lets the
+ * setting default to 0 and change nothing anywhere until a branch opts in.
+ */
+export function shiftDateOf(at: Date, dayStartHour = 0): string {
+  const { date, hhmm } = inBeirut(at);
+  if (dayStartHour <= 0) return date;
+  return Number(hhmm.slice(0, 2)) >= dayStartHour ? date : previousBeirutDate(date);
+}
+
+/**
+ * The weekday of the working day a moment belongs to - which is what decides
+ * the hours it owes, so it has to move with shiftDateOf or a night shift would
+ * be measured against the wrong day's schedule.
+ *
+ * Resolved from the shift DATE rather than the instant: noon on that date is
+ * inside it in Beirut on every day of the year, including both DST days, where
+ * midnight is either ambiguous or does not exist.
+ */
+export function shiftWeekdayOf(at: Date, dayStartHour = 0): number {
+  if (dayStartHour <= 0) return beirutWeekday(at);
+  return beirutWeekday(new Date(`${shiftDateOf(at, dayStartHour)}T12:00:00.000Z`));
+}

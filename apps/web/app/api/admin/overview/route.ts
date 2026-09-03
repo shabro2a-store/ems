@@ -86,7 +86,7 @@ export async function GET(req: Request) {
       prisma.branch.findMany({
         where: { is_active: true },
         orderBy: { name: 'asc' },
-        select: { id: true, name: true, trip_threshold_min: true },
+        select: { id: true, name: true, trip_threshold_min: true, day_start_hour: true },
       }),
       prisma.user.findMany({
         where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] } },
@@ -173,6 +173,7 @@ export async function GET(req: Request) {
   let hoursMinutes = 0;
   let laborCent = 0;
 
+  const dayStartByBranch = new Map(branches.map((b) => [b.id, b.day_start_hour]));
   const people = users
     .filter((u) => inScope(u.branch_id))
     .map((u) => {
@@ -181,6 +182,7 @@ export async function GET(req: Request) {
         punches: punchesByUser.get(u.id) ?? [],
         now: nowDate,
         creditedMinByDate: creditMinByUser.get(u.id),
+        dayStartHour: dayStartByBranch.get(u.branch_id ?? '') ?? 0,
       });
       hoursMinutes += minutes;
       laborCent += Math.floor((minutes * u.hourly_rate_cent) / 60);

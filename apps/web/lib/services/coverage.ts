@@ -1,4 +1,4 @@
-import { inBeirut, beirutWeekday } from 'time';
+import { shiftDateOf, shiftWeekdayOf } from 'time';
 
 export interface PunchLite {
   kind: 'IN' | 'OUT';
@@ -133,10 +133,16 @@ export function computeCoverage(args: {
   // its gross and its shortfall all see the same day. Optional because most
   // callers have none, and a caller that omits it gets exactly the old answer.
   credited?: CreditedTime[];
+  // The hour the branch's working day starts. 0 - the default, and what every
+  // branch has unless the owner changes it - is the calendar day, and
+  // shiftDateOf reproduces inBeirut().date exactly there, so omitting this is
+  // not merely close to the old behaviour, it is the old behaviour.
+  dayStartHour?: number;
 }): DayCoverage[] {
   const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
 
   const workedByDate = new Map<string, number>();
+  const dayStart = args.dayStartHour ?? 0;
   const intervalsByDate = new Map<string, WorkInterval[]>();
   const lastPunchByDate = new Map<string, Date>();
   // The weekday must come from the ARRIVAL, not the closing punch: an overnight
@@ -151,7 +157,7 @@ export function computeCoverage(args: {
       continue;
     }
     if (!openIn) continue; // checkout with no arrival - ignore, as payout does
-    const date = inBeirut(openIn.at).date;
+    const date = shiftDateOf(openIn.at, dayStart);
     const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
     workedByDate.set(date, (workedByDate.get(date) ?? 0) + minutes);
     // The rate is resolved at the SAME instant payout.ts resolves it (the
@@ -165,7 +171,7 @@ export function computeCoverage(args: {
     openIn = null;
   }
   if (openIn) {
-    const date = inBeirut(openIn.at).date;
+    const date = shiftDateOf(openIn.at, dayStart);
     openDates.add(date);
     if (!workedByDate.has(date)) workedByDate.set(date, 0);
     lastPunchByDate.set(date, openIn.at);
@@ -195,7 +201,7 @@ export function computeCoverage(args: {
     const intervals = intervalsByDate.get(date) ?? [];
     const requiredMin = requiredMinFor(
       args.overridesByDate.get(date),
-      args.shiftMinByWeekday.get(beirutWeekday(arrivalByDate.get(date)!)),
+      args.shiftMinByWeekday.get(shiftWeekdayOf(arrivalByDate.get(date)!, dayStart)),
     );
 
     days.push({
@@ -252,7 +258,10 @@ export function currentShiftDayMinutes(args: {
   // and the month's hours disagree on the same screen about the same day: one
   // counts the credited minutes and the other does not.
   creditedMinByDate?: Map<string, number>;
+  /** The branch's working-day start hour; 0 is the calendar day. */
+  dayStartHour?: number;
 }): ShiftDayMinutes {
+  const dayStart = args.dayStartHour ?? 0;
   const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
 
   const closedByDate = new Map<string, number>();
@@ -263,7 +272,7 @@ export function currentShiftDayMinutes(args: {
       continue;
     }
     if (!openIn) continue; // checkout with no arrival - ignore, as payout does
-    const date = inBeirut(openIn).date;
+    const date = shiftDateOf(openIn, dayStart);
     const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.getTime()) / 60_000));
     closedByDate.set(date, (closedByDate.get(date) ?? 0) + minutes);
     openIn = null;
@@ -278,7 +287,7 @@ export function currentShiftDayMinutes(args: {
   const stale = openIn !== null && openMinRaw > MAX_OPEN_SESSION_MIN;
   const live = stale ? null : openIn;
 
-  const date = inBeirut(live ?? args.now).date;
+  const date = shiftDateOf(live ?? args.now, dayStart);
   const openMin = live ? openMinRaw : 0;
   return {
     date,

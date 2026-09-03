@@ -352,6 +352,24 @@ rebuilds each month from the punches every time it is opened, so removing them r
 that have already been paid. If it genuinely has to happen, it is a database job against a
 fresh backup.
 
+### Shifts that cross midnight
+If somebody's shift STARTS near midnight, set the branch's **Working day starts at**
+(Branches -> edit) to an hour when nobody is starting. Leave it at 0 for every other branch.
+
+Why it matters: a shift belongs to the day it clocked IN. Dani starts at 23:00 some nights
+and 00:00 others for the same shift, so at a midnight boundary those are different days -
+one night stacked BOTH shifts onto one day (968 minutes against 8 owed, reported as 8h of
+overtime worth $21) and left the next day looking absent. Two minutes decided which.
+
+Pick an hour after the night shift ends and before the next one starts. For Hamra - coffee
+mart, where dani finishes at 07:00 and khouder takes over at 07:00, **6** works: both of
+dani's start times then name the same working day, and khouder and every day shift are
+unaffected.
+
+0 is the calendar day and is what every branch has by default, so this changes nothing until
+you set it. Setting it does re-attribute PAST nights at that branch, which moves hours
+between days - check the affected month's payroll after changing it.
+
 ### Check what the containers actually received
 Env vars must be listed in `docker-compose.yml`, not just present in `.env`:
 ```bash

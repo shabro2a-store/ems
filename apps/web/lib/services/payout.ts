@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { inBeirut } from 'time';
+import { shiftDateOf } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
@@ -107,6 +107,7 @@ function pairHours(
   punches: PunchRow[],
   rateChanges: RateChangeRow[],
   month?: string,
+  dayStartHour = 0,
 ): { minutes: number; grossCent: number } {
   const sorted = [...punches].sort((a, b) => a.at.getTime() - b.at.getTime());
   let totalMinutes = 0;
@@ -119,7 +120,8 @@ function pairHours(
       if (openIn) {
         // The arrival's Beirut month, so an overnight pair is counted once, in
         // the month it began. A checkout at 07:00 on the 1st does not move it.
-        const belongs = month === undefined || inBeirut(openIn.at).date.slice(0, 7) === month;
+        const belongs =
+          month === undefined || shiftDateOf(openIn.at, dayStartHour).slice(0, 7) === month;
         if (belongs) {
           const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
           totalMinutes += minutes;
@@ -148,8 +150,9 @@ function grossWithCredit(
   rateChanges: RateChangeRow[],
   creditedIntervals: WorkInterval[],
   month?: string,
+  dayStartHour = 0,
 ): { hours: number; grossCent: number } {
-  const paired = pairHours(punches, rateChanges, month);
+  const paired = pairHours(punches, rateChanges, month, dayStartHour);
   const minutes = paired.minutes + sumIntervalMinutes(creditedIntervals);
   return {
     hours: Math.round((minutes / 60) * 100) / 100,
@@ -176,6 +179,8 @@ export function computePayoutFromRows(args: {
   // stops the night across the boundary being counted twice, or (as it was)
   // zero times. Omit it and every pair counts.
   month?: string;
+  /** The branch's working-day start hour; 0 is the calendar day. */
+  dayStartHour?: number;
 }): PayoutForUserResult {
   const adjustmentsCent = args.adjustments.reduce((s, a) => {
     return s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent);
@@ -186,7 +191,13 @@ export function computePayoutFromRows(args: {
   const penaltiesCent = args.penaltiesCent ?? 0;
   const overtimeDeductionCent = args.overtimeDeductionCent ?? 0;
   const credited = args.creditedIntervals ?? [];
-  const { hours, grossCent } = grossWithCredit(args.punches, args.rateChanges, credited, args.month);
+  const { hours, grossCent } = grossWithCredit(
+    args.punches,
+    args.rateChanges,
+    credited,
+    args.month,
+    args.dayStartHour,
+  );
   const netCent = grossCent + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
   return {
     hours,
@@ -212,7 +223,7 @@ export async function payoutForUser(
   // window as-is.
   const pairFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
   const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
-  const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent, credits] = await Promise.all([
+  const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent, credits, user] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: pairFrom, lt: pairTo } },
       orderBy: { at: 'asc' },
@@ -234,6 +245,10 @@ export async function payoutForUser(
     penaltiesForUser(userId, month, db),
     overtimeDeductionForUser(userId, month, db),
     blockedCreditForUser(userId, month, db),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { branch: { select: { day_start_hour: true } } },
+    }),
   ]);
   return computePayoutFromRows({
     userId,
@@ -245,6 +260,7 @@ export async function payoutForUser(
     overtimeDeductionCent,
     creditedIntervals: grantedIntervals(credits),
     month,
+    dayStartHour: user?.branch?.day_start_hour ?? 0,
   });
 }
 
@@ -256,7 +272,7 @@ export async function accruedEarningsThisMonth(
   const { start, end } = monthRangeUtc(month);
   const pairFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
   const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
-  const [punches, rateChanges, credits] = await Promise.all([
+  const [punches, rateChanges, credits, user] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: pairFrom, lt: pairTo } },
       orderBy: { at: 'asc' },
@@ -271,12 +287,17 @@ export async function accruedEarningsThisMonth(
     // credit is earned - leaving it out would lend against a smaller month
     // than payroll is about to pay.
     blockedCreditForUser(userId, month, db),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { branch: { select: { day_start_hour: true } } },
+    }),
   ]);
   return grossWithCredit(
     punches as PunchRow[],
     rateChanges as RateChangeRow[],
     grantedIntervals(credits),
     month,
+    user?.branch?.day_start_hour ?? 0,
   );
 }
 
@@ -333,9 +354,21 @@ export async function payrollRoster(
     },
     select: { user_id: true, at: true },
   });
+  // Membership uses each user's own branch boundary, so a night shift that a
+  // 6am branch calls the 31st is in that month here too.
+  const hourByUser = new Map(
+    (
+      await db.user.findMany({
+        where: { id: { in: [...new Set(arrivals.map((a) => a.user_id))] } },
+        select: { id: true, branch: { select: { day_start_hour: true } } },
+      })
+    ).map((u) => [u.id, u.branch?.day_start_hour ?? 0]),
+  );
   const workedIds = [
     ...new Set(
-      arrivals.filter((a) => inBeirut(a.at).date.slice(0, 7) === month).map((a) => a.user_id),
+      arrivals
+        .filter((a) => shiftDateOf(a.at, hourByUser.get(a.user_id) ?? 0).slice(0, 7) === month)
+        .map((a) => a.user_id),
     ),
   ];
 

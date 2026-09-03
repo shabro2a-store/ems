@@ -68,13 +68,13 @@ export async function POST(req: Request) {
   let devSystemClosed = false;
   if (hasOpenSession && lastIn) {
     const now = new Date();
-    const requiredMin = await requiredMinForArrival(prisma, userId, lastIn.at);
+    const requiredMin = await requiredMinForArrival(prisma, userId, lastIn.at, user.branch.day_start_hour);
     // Same asymmetry as the real route: a check-in is evidence the old shift
     // ended, a clock-out is the employee asserting the truth about it and may
     // only be overruled past MAX_OPEN_SESSION_MIN.
     const stale =
       body.kind === 'IN'
-        ? staleSessionClose({ arrivalAt: lastIn.at, now, requiredMin, graceMin: user.branch.shift_grace_min })
+        ? staleSessionClose({ arrivalAt: lastIn.at, now, requiredMin, graceMin: user.branch.shift_grace_min, dayStartHour: user.branch.day_start_hour })
         : abandonedSessionClose({ arrivalAt: lastIn.at, now, requiredMin });
     if (stale) {
       devSystemClosed = true;

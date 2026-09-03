@@ -13,6 +13,11 @@ const Create = z.object({
   gpsAccuracyMaxM: z.number().int().min(1).max(10_000).optional(),
   shiftGraceMin: z.number().int().min(0).max(120).optional(),
   tripThresholdMin: z.number().int().min(1).max(240).optional(),
+  // The hour the working day begins. 0 is the calendar day and is what every
+  // branch has; 1-12 moves the boundary for a branch whose shifts sit on
+  // midnight. Capped at noon because a boundary past it would start splitting
+  // ordinary day shifts.
+  dayStartHour: z.number().int().min(0).max(12).optional(),
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -65,6 +70,7 @@ export async function POST(req: Request) {
       ...(body.gpsAccuracyMaxM !== undefined ? { gps_accuracy_max_m: body.gpsAccuracyMaxM } : {}),
       ...(body.shiftGraceMin !== undefined ? { shift_grace_min: body.shiftGraceMin } : {}),
       ...(body.tripThresholdMin !== undefined ? { trip_threshold_min: body.tripThresholdMin } : {}),
+      ...(body.dayStartHour !== undefined ? { day_start_hour: body.dayStartHour } : {}),
     },
   });
 

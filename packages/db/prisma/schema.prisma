@@ -132,6 +132,17 @@ model Branch {
   // it governs both.
   shift_grace_min    Int     @default(15)
   trip_threshold_min Int     @default(30)
+  // The hour the working day starts, for a branch whose shifts straddle
+  // midnight. Dani clocks in at 23:00 some nights and 00:00 others for the same
+  // 7-hour shift; with a midnight boundary those are different days, so one
+  // night stacked two shifts onto one day (reported as eight hours of overtime)
+  // and left the next looking absent. At 6 the day runs 06:00-06:00 and both
+  // starts name the same day, while the 07:00 handover and every day shift stay
+  // where they are.
+  //
+  // 0 is the calendar day and is what every branch has by default - see
+  // shiftDateOf, which reproduces inBeirut().date exactly at 0.
+  day_start_hour     Int     @default(0)
   is_active          Boolean @default(true)
   // Closed for good, as opposed to is_active=false which is "archived, might
   // reopen". A closed branch disappears from the branches page and from every

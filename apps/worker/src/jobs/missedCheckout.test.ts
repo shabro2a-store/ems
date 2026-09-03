@@ -16,7 +16,7 @@ type UserRow = {
   is_active: boolean;
   role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
   branch_id: string | null;
-  branch: { id: string; name: string; shift_grace_min: number } | null;
+  branch: { id: string; name: string; shift_grace_min: number; day_start_hour?: number } | null;
 };
 type PunchRow = { id: string; user_id: string; kind: 'IN' | 'OUT'; at: Date };
 
@@ -81,6 +81,18 @@ function makeDb() {
             o.date.getTime() === where.user_id_date.date.getTime(),
         ) ?? null;
       },
+    },
+    // The job asks which working-day boundary each branch uses before it can
+    // decide the weekday an open check-in belongs to.
+    user: {
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in
+          .map((id) => store.users.get(id))
+          .filter((u): u is UserRow => Boolean(u))
+          .map((u) => ({
+            id: u.id,
+            branch: u.branch ? { day_start_hour: u.branch.day_start_hour ?? 0 } : null,
+          })),
     },
     flag: {
       findFirst: async ({ where }: { where: { kind: string; user_id: string; created_at: { gte: Date } } }) => {

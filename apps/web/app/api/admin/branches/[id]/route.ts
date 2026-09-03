@@ -14,6 +14,11 @@ const Patch = z.object({
   gpsAccuracyMaxM: z.number().int().min(1).max(10_000).optional(),
   shiftGraceMin: z.number().int().min(0).max(120).optional(),
   tripThresholdMin: z.number().int().min(1).max(240).optional(),
+  // The hour the working day begins. 0 is the calendar day and is what every
+  // branch has; 1-12 moves the boundary for a branch whose shifts sit on
+  // midnight. Capped at noon because a boundary past it would start splitting
+  // ordinary day shifts.
+  dayStartHour: z.number().int().min(0).max(12).optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -58,6 +63,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       ...(body.gpsAccuracyMaxM !== undefined ? { gps_accuracy_max_m: body.gpsAccuracyMaxM } : {}),
       ...(body.shiftGraceMin !== undefined ? { shift_grace_min: body.shiftGraceMin } : {}),
       ...(body.tripThresholdMin !== undefined ? { trip_threshold_min: body.tripThresholdMin } : {}),
+      ...(body.dayStartHour !== undefined ? { day_start_hour: body.dayStartHour } : {}),
       ...(body.isActive !== undefined ? { is_active: body.isActive } : {}),
     },
   });
@@ -67,8 +73,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     action: 'branch.update',
     entity: 'Branch',
     entityId: branch.id,
-    before: { name: before.name, lat: before.lat, lng: before.lng, gps_radius_m: before.gps_radius_m, gps_accuracy_max_m: before.gps_accuracy_max_m, shift_grace_min: before.shift_grace_min, trip_threshold_min: before.trip_threshold_min, is_active: before.is_active },
-    after: { name: branch.name, lat: branch.lat, lng: branch.lng, gps_radius_m: branch.gps_radius_m, gps_accuracy_max_m: branch.gps_accuracy_max_m, shift_grace_min: branch.shift_grace_min, trip_threshold_min: branch.trip_threshold_min, is_active: branch.is_active },
+    before: { name: before.name, lat: before.lat, lng: before.lng, gps_radius_m: before.gps_radius_m, gps_accuracy_max_m: before.gps_accuracy_max_m, shift_grace_min: before.shift_grace_min, trip_threshold_min: before.trip_threshold_min, day_start_hour: before.day_start_hour, is_active: before.is_active },
+    after: { name: branch.name, lat: branch.lat, lng: branch.lng, gps_radius_m: branch.gps_radius_m, gps_accuracy_max_m: branch.gps_accuracy_max_m, shift_grace_min: branch.shift_grace_min, trip_threshold_min: branch.trip_threshold_min, day_start_hour: branch.day_start_hour, is_active: branch.is_active },
   });
 
   return NextResponse.json({ ok: true, data: { branch } });

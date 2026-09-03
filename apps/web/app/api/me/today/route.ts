@@ -29,7 +29,7 @@ export async function GET() {
   const { startUtc, endUtc } = todayInBeirutDateRange(todayStr);
   const punchesFromUtc = new Date(startUtc.getTime() - PUNCH_LOOKBACK_DAYS * 86_400_000);
 
-  const [open, payout, punches, creditByUser] = await Promise.all([
+  const [open, payout, punches, creditByUser, me] = await Promise.all([
     currentOpenIn(userId),
     payoutForUser(userId, month, prisma),
     prisma.punch.findMany({
@@ -41,12 +41,19 @@ export async function GET() {
     // blocked-time credit. Leaving it out of the day figure put two numbers
     // for the same day on the same screen that disagreed.
     grantedCreditMinutesByDate([userId], month, prisma),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { branch: { select: { day_start_hour: true } } },
+    }),
   ]);
+
+  const dayStartHour = me?.branch?.day_start_hour ?? 0;
 
   const shiftDay = currentShiftDayMinutes({
     punches: punches as PunchLite[],
     now,
     creditedMinByDate: creditByUser.get(userId),
+    dayStartHour,
   });
 
   // Whether the open session has stopped being a shift at all - past
@@ -63,7 +70,7 @@ export async function GET() {
     ? abandonedSessionClose({
         arrivalAt: open.in_at,
         now,
-        requiredMin: await requiredMinForArrival(prisma, userId, open.in_at),
+        requiredMin: await requiredMinForArrival(prisma, userId, open.in_at, dayStartHour),
       }) !== null
     : false;
 
