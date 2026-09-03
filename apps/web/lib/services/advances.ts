@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { writeAuditLog } from './audit';
-import { accruedEarningsThisMonth, monthRangeUtc } from './payout';
+import { accruedEarningsThisMonth, monthRangeUtc, monthRangeBeirut } from './payout';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { getNotifier, type Notifier } from 'notify';
 
@@ -37,9 +37,13 @@ export async function requestAdvance(
   // worked wages (gross) PLUS bonuses, MINUS deductions. Approved advances are
   // scoped to the same month so the limit refills at the start of each month.
   const { start, end } = monthRangeUtc(input.month);
+  // created_at is a real instant, so the month it belongs to is the Beirut one.
+  // The adjustment query below stays on the UTC window: `period` is a date
+  // marker at UTC midnight and matches it exactly.
+  const { start: beirutStart, end: beirutEnd } = monthRangeBeirut(input.month);
   const [approvedSum, adjustments, accrued, penalties] = await Promise.all([
     db.advance.aggregate({
-      where: { user_id: input.userId, status: 'APPROVED', created_at: { gte: start, lt: end } },
+      where: { user_id: input.userId, status: 'APPROVED', created_at: { gte: beirutStart, lt: beirutEnd } },
       _sum: { amount_cent: true },
     }),
     db.adjustment.findMany({

@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { shiftDateOf } from 'time';
+import { shiftDateOf, scheduledToUtc } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
@@ -80,6 +80,34 @@ export function monthRangeUtc(month: string): { start: Date; end: Date } {
   const start = new Date(Date.UTC(year, mon - 1, 1, 0, 0, 0, 0));
   const end = new Date(Date.UTC(year, mon, 1, 0, 0, 0, 0));
   return { start, end };
+}
+
+/**
+ * The month in BEIRUT instants, for rows stamped with a real moment.
+ *
+ * monthRangeUtc is right for the date-keyed columns - an override, a penalty
+ * date, an adjustment period are all a Beirut date pinned to UTC midnight, so a
+ * UTC month selects exactly the right ones. It is wrong for anything stamped
+ * with `now()`: Beirut is UTC+2/+3, so the UTC month does not begin until 02:00
+ * or 03:00 local on the 1st, and an advance approved at 01:00 that morning fell
+ * into the month that had just closed - and been paid.
+ *
+ * The 1st is never a DST day (Lebanon switches on the last Sunday of March and
+ * October), so Beirut midnight always exists for these two instants.
+ */
+export function monthRangeBeirut(month: string): { start: Date; end: Date } {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) throw new Error(`invalid month format: ${month}`);
+  const year = Number(match[1]);
+  const mon = Number(match[2]);
+  if (mon < 1 || mon > 12) throw new Error(`invalid month: ${month}`);
+  const nextYear = mon === 12 ? year + 1 : year;
+  const nextMon = mon === 12 ? 1 : mon + 1;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    start: scheduledToUtc(`${year}-${pad(mon)}-01`, '00:00'),
+    end: scheduledToUtc(`${nextYear}-${pad(nextMon)}-01`, '00:00'),
+  };
 }
 
 export function rateAt(rateChanges: { rate_cent: number; effective_from: Date }[], at: Date): number {
@@ -223,6 +251,7 @@ export async function payoutForUser(
   // window as-is.
   const pairFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
   const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
+  const { start: beirutStart, end: beirutEnd } = monthRangeBeirut(month);
   const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent, credits, user] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: pairFrom, lt: pairTo } },
@@ -239,7 +268,8 @@ export async function payoutForUser(
       select: { user_id: true, kind: true, amount_cent: true },
     }),
     db.advance.findMany({
-      where: { user_id: userId, status: 'APPROVED', created_at: { gte: start, lt: end } },
+      // Beirut bounds: created_at is a real instant, not a date marker.
+      where: { user_id: userId, status: 'APPROVED', created_at: { gte: beirutStart, lt: beirutEnd } },
       select: { user_id: true, amount_cent: true, status: true },
     }),
     penaltiesForUser(userId, month, db),

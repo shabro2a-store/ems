@@ -96,3 +96,37 @@ describe('the last night of a month', () => {
     expect(judge('2026-10', midMonth).overtime).toEqual([]);
   });
 });
+
+describe('monthRangeBeirut', () => {
+  it('starts and ends at Beirut midnight, not UTC midnight', async () => {
+    const { monthRangeBeirut, monthRangeUtc } = await import('./payout');
+    // September: Beirut is UTC+3, so the month begins at 21:00Z on 31 August.
+    const sep = monthRangeBeirut('2026-09');
+    expect(sep.start.toISOString()).toBe('2026-08-31T21:00:00.000Z');
+    expect(sep.end.toISOString()).toBe('2026-09-30T21:00:00.000Z');
+
+    // The UTC window it replaces begins three hours later - which is why an
+    // advance approved at 01:00 on the 1st was counted in the month before.
+    const utc = monthRangeUtc('2026-09');
+    const oneAmOnTheFirst = new Date('2026-08-31T22:00:00Z'); // 01:00 Beirut, 1 Sep
+    expect(oneAmOnTheFirst >= sep.start).toBe(true);
+    expect(oneAmOnTheFirst >= utc.start).toBe(false);
+  });
+
+  it('rolls the year over in December', async () => {
+    const { monthRangeBeirut } = await import('./payout');
+    const dec = monthRangeBeirut('2026-12');
+    // Beirut is UTC+2 in winter.
+    expect(dec.start.toISOString()).toBe('2026-11-30T22:00:00.000Z');
+    expect(dec.end.toISOString()).toBe('2026-12-31T22:00:00.000Z');
+  });
+
+  it('covers every month of a year without a gap or an overlap', async () => {
+    const { monthRangeBeirut } = await import('./payout');
+    for (let m = 1; m <= 11; m++) {
+      const a = monthRangeBeirut(`2026-${String(m).padStart(2, '0')}`);
+      const b = monthRangeBeirut(`2026-${String(m + 1).padStart(2, '0')}`);
+      expect(a.end.toISOString()).toBe(b.start.toISOString());
+    }
+  });
+});
