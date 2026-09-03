@@ -479,10 +479,11 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [fill, setFill] = useState("8");
 
   useEffect(() => {
     (async () => {
-      const r = await apiGet<{ weeklySchedule: { weekday: number; shift_min: number | null }[]; overrides: { id: string; date: string; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min: number | null; note: string | null }[] }>(`/api/admin/schedules/${user.id}`);
+      const r = await apiGet<{ weeklySchedule: { weekday: number; shift_min: number | null }[]; overrides: { id: string; date: string; kind: "DAY_OFF" | "HOURS_CHANGE"; shift_min: number | null; note: string | null }[] }>(`/api/admin/schedules/${user.id}`);
       const byWd = new Map((r.ok ? r.data.weeklySchedule : []).map((s) => [s.weekday, s]));
       setDays(DAYS.map((d) => {
         const s = byWd.get(d.wd);
@@ -502,7 +503,7 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
     if (!days) return;
     setBusy(true); setErr(null);
     const weeklySchedule = days.filter((d) => d.working).map((d) => ({ weekday: d.wd, shift_hours: d.hours }));
-    const res = await apiSend(`/api/admin/schedules/${user.id}`, { method: 'PUT', body: { weeklySchedule } });
+    const res = await apiSend(`/api/admin/schedules/${user.id}`, { method: "PUT", body: { weeklySchedule } });
     setBusy(false);
     if (!res.ok) { setErr(errorMessage(res)); return; }
     onSaved();
@@ -512,62 +513,120 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
     setDays((ds) => ds!.map((d) => (d.wd === wd ? { ...d, ...patch } : d)));
   }
 
+  // Every working day at once. The owner sets one number across the week far
+  // more often than seven different ones - it is exactly what converting a
+  // person off the old start/end schedule takes - and by hand that is seven
+  // toggles and seven typed numbers for every employee.
+  function applyToAll() {
+    const h = clampHours(fill);
+    if (h === null) return;
+    setDays((ds) => ds!.map((d) => (d.working ? { ...d, hours: h } : d)));
+  }
+
+  const workingDays = days?.filter((d) => d.working) ?? [];
+  const weeklyTotal = workingDays.reduce((s, d) => s + d.hours, 0);
+
   return (
-    <Modal title={`Weekly schedule · ${user.username}`} onClose={onClose}
+    <Modal title={`Weekly schedule · ${user.name || user.username}`} onClose={onClose}
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={save} loading={busy} disabled={!days}>Save schedule</Button></>}>
       {!days ? (
         <div className="grid place-items-center py-8"><Spinner /></div>
       ) : (
-        <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Shift hours</div>
-          {days.map((d) => (
-            <div key={d.wd} className="rounded-lg border border-border p-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">{d.name}</span>
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            How many hours each day owes — not a start and end time. They can work them whenever,
+            and a night shift belongs to the day it <b className="text-content">starts</b>.
+          </p>
+
+          {/* One fixed-height row per day. The hours box is disabled rather than
+              hidden on an off day: hiding it changed the row height on every
+              toggle, so the rest of the week jumped under the cursor. */}
+          <div className="overflow-hidden rounded-xl border border-border">
+            {days.map((d, i) => (
+              <div
+                key={d.wd}
+                className={`flex items-center gap-3 px-3 py-2 ${i > 0 ? "border-t border-border" : ""} ${d.working ? "" : "bg-surface-muted"}`}
+              >
+                <span className={`w-24 flex-none text-sm ${d.working ? "font-medium" : "text-muted"}`}>
+                  {d.name}
+                </span>
+
                 <button
                   type="button"
                   onClick={() => set(d.wd, { working: !d.working })}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${d.working ? 'border-success/30 bg-success-subtle text-success' : 'border-border bg-surface-muted text-muted'}`}
+                  aria-pressed={d.working}
+                  className={`w-20 flex-none rounded-full border px-3 py-1 text-xs font-semibold ${d.working ? "border-success/30 bg-success-subtle text-success" : "border-border bg-surface text-muted"}`}
                 >
-                  {d.working ? 'Working' : 'Off'}
+                  {d.working ? "Working" : "Off"}
                 </button>
-              </div>
-              {d.working && (
-                <div className="mt-2 flex items-center gap-2">
+
+                <div className="ml-auto flex items-center gap-2">
                   <Input
                     type="number"
                     min={0}
                     max={24}
                     step={0.5}
-                    value={d.hours}
-                    onChange={(e) => set(d.wd, { hours: Number(e.target.value) })}
+                    value={d.working ? d.hours : ""}
+                    disabled={!d.working}
+                    placeholder="—"
+                    onChange={(e) => {
+                      const h = clampHours(e.target.value);
+                      if (h !== null) set(d.wd, { hours: h });
+                    }}
                     className="w-20 text-right"
                     aria-label={`Shift hours on ${d.name}`}
                   />
-                  <span className="text-sm text-muted">hours</span>
+                  <span className={`w-10 text-sm ${d.working ? "text-muted" : "text-muted/50"}`}>hours</span>
                 </div>
-              )}
-            </div>
-          ))}
+              </div>
+            ))}
+          </div>
 
-          <p className="pt-1 text-sm text-muted">
-            Weekly total: {days.filter((d) => d.working).reduce((s, d) => s + d.hours, 0)}h
-          </p>
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface-muted px-3 py-2">
+            <span className="text-sm text-muted">Set every working day to</span>
+            <Input
+              type="number"
+              min={0}
+              max={24}
+              step={0.5}
+              value={fill}
+              onChange={(e) => setFill(e.target.value)}
+              className="w-20 text-right"
+              aria-label="Hours to apply to every working day"
+            />
+            <Button size="sm" variant="secondary" onClick={applyToAll} disabled={workingDays.length === 0}>
+              Apply
+            </Button>
+          </div>
+
+          <div className="flex items-baseline justify-between rounded-xl border border-border px-3 py-2.5">
+            <span className="text-sm text-muted">
+              {workingDays.length} working {workingDays.length === 1 ? "day" : "days"} a week
+            </span>
+            <span className="tabular text-lg font-semibold">{round1(weeklyTotal)}h total</span>
+          </div>
+
+          {workingDays.length === 0 && (
+            <Alert tone="warning">
+              No working days. This person owes no hours, so they can never fall short and will
+              never be marked absent — but they can still clock in and be paid for it.
+            </Alert>
+          )}
 
           {overrides.length > 0 && (
-            <div className="mt-2 rounded-lg border border-border bg-surface-muted p-2.5">
+            <div className="rounded-xl border border-border bg-surface-muted p-3">
               <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Approved days off / changes</div>
               <ul className="space-y-1">
                 {overrides.map((o) => (
                   <li key={o.id} className="flex items-center justify-between gap-2 text-sm">
                     <span className="tabular">{o.date}</span>
-                    <span className={o.kind === 'DAY_OFF' ? 'font-medium text-warning' : 'text-content'}>
-                      {o.kind === 'DAY_OFF' ? 'Day off' : `Shift change → ${o.shift_min != null ? `${o.shift_min / 60}h` : '—'}`}
+                    <span className={o.kind === "DAY_OFF" ? "font-medium text-warning" : "text-content"}>
+                      {o.kind === "DAY_OFF" ? "Day off" : `Shift change → ${o.shift_min != null ? `${round1(o.shift_min / 60)}h` : "—"}`}
                     </span>
                   </li>
                 ))}
               </ul>
-              <p className="mt-1.5 text-xs text-muted">These come from approved requests. A day off doesn&apos;t block punching — it only stops the &quot;absent&quot; alert.</p>
+              <p className="mt-1.5 text-xs text-muted">These come from approved requests and override the week above on those dates. A day off doesn&apos;t block punching — it only stops the &quot;absent&quot; alert.</p>
             </div>
           )}
           {err && <Alert tone="danger">{err}</Alert>}
@@ -578,18 +637,24 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
 }
 
 /**
- * Everything you can do to a staff member that is not Edit or Schedule.
+ * A typed hours value, or null while it is not one yet.
  *
- * A modal rather than a dropdown, because the table sits inside an
- * `overflow-x-auto` wrapper: once one axis is not visible the other computes to
- * auto too, so an absolutely positioned menu inside it gets clipped by the
- * scroll box. A modal has nowhere to be clipped and behaves on a phone.
- *
- * Every action carries a line of its own. The three lifecycle ones are not
- * self-explanatory from their labels, and the difference between two of them is
- * permanent - Deactivate pauses an account and keeps everything, Remove ends it
- * and hands back the username. Nobody should have to learn that by pressing.
+ * `Number("")` is 0 and `Number("abc")` is NaN, and the old handler fed both
+ * straight into state - so clearing the box to retype silently set that day to
+ * zero hours, and a stray keystroke put NaN in the payload for the API to
+ * reject with nothing on screen saying why.
  */
+function clampHours(raw: string): number | null {
+  if (raw.trim() === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(24, Math.max(0, n));
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
 function ManageModal({
   user,
   onClose,
