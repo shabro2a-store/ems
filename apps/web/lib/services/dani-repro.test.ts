@@ -213,3 +213,49 @@ describe('dani clocking in either side of midnight', () => {
     expect(cover(khouder, 6)).toEqual(cover(khouder, 0));
   });
 });
+
+// Production shows pairs of IN punches written at the same minute - Mohammad
+// hmadi 08:10 twice, Mohammad hasan 07:17 twice, Adam 23:53 twice. The punch
+// guard refuses a second check-in while one is open, so these are two requests
+// that raced: both read "nothing open" before either had written.
+//
+// They must not pay twice, and they must not swallow the shift either.
+describe('a check-in written twice at the same instant', () => {
+  const cover = (punches: PunchLite[]) =>
+    computeCoverage({
+      punches,
+      shiftMinByWeekday: new Map([0, 1, 2, 3, 4, 5, 6].map((w) => [w, 480])),
+      overridesByDate: new Map(),
+      rateCentAt: () => 264,
+    });
+
+  it('is ignored by the pairing, and the day is measured once', () => {
+    // In 08:10 twice, out 16:10: eight hours, not sixteen and not zero.
+    const doubled: PunchLite[] = [
+      { kind: 'IN', at: new Date('2026-09-07T05:10:00Z') },
+      { kind: 'IN', at: new Date('2026-09-07T05:10:00Z') },
+      { kind: 'OUT', at: new Date('2026-09-07T13:10:00Z') },
+    ];
+    const [day] = cover(doubled);
+    expect(day!.workedMin).toBe(480);
+    expect(day!.deltaMin).toBe(0);
+    expect(
+      computeOvertime({ coverage: cover(doubled), rateChanges: RATE, graceMin: 15, decisionsByDate: new Map() }),
+    ).toEqual([]);
+  });
+
+  it('is ignored even when the duplicate lands minutes later', () => {
+    // Adam's training night: 23:53, 23:53, 23:56, 00:01, then one checkout.
+    const training: PunchLite[] = [
+      { kind: 'IN', at: new Date('2026-09-07T20:53:00Z') },
+      { kind: 'IN', at: new Date('2026-09-07T20:53:00Z') },
+      { kind: 'IN', at: new Date('2026-09-07T20:56:00Z') },
+      { kind: 'IN', at: new Date('2026-09-07T21:01:00Z') },
+      { kind: 'OUT', at: new Date('2026-09-08T04:53:00Z') },
+    ];
+    const [day] = cover(training);
+    // Paired from the FIRST arrival: eight hours, once.
+    expect(day!.workedMin).toBe(480);
+    expect(cover(training)).toHaveLength(1);
+  });
+});
