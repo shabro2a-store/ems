@@ -38,27 +38,39 @@ export function Modal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
+      {/* Capped to the viewport, with the BODY scrolling rather than the page.
+          Without the cap a dialog simply grew: the branch editor and the weekly
+          schedule both run past the bottom of a laptop screen, and the title and
+          the Save button went with them - so the one control you opened it for
+          was off-screen in both directions.
+
+          dvh where it exists, because mobile browser chrome makes 100vh taller
+          than what you can actually see; the vh class stays as the fallback and
+          an unsupported dvh declaration is simply dropped. */}
       <div
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-md rounded-xl border border-border bg-surface shadow-pop"
+        style={{ maxHeight: 'calc(100dvh - 2rem)' }}
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col rounded-xl border border-border bg-surface shadow-pop"
       >
-        <div className="flex items-center justify-between border-b border-border px-5 py-3">
-          <h2 className="text-lg font-semibold">{title}</h2>
+        <div className="flex flex-none items-center justify-between gap-3 border-b border-border px-5 py-3">
+          <h2 className="min-w-0 truncate text-lg font-semibold">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-muted"
+            className="grid h-8 w-8 flex-none place-items-center rounded-lg text-muted hover:bg-surface-muted"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
             </svg>
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-border px-5 py-3">{footer}</div>
+          <div className="flex flex-none justify-end gap-2 border-t border-border px-5 py-3">
+            {footer}
+          </div>
         )}
       </div>
     </div>,

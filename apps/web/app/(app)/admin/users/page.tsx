@@ -534,8 +534,8 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
       ) : (
         <div className="space-y-3">
           <p className="text-sm text-muted">
-            How many hours each day owes — not a start and end time. They can work them whenever,
-            and a night shift belongs to the day it <b className="text-content">starts</b>.
+            Hours owed per day, not start and end times. A night shift counts on the day it{' '}
+            <b className="text-content">starts</b>.
           </p>
 
           {/* One fixed-height row per day. The hours box is disabled rather than
@@ -608,8 +608,8 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
 
           {workingDays.length === 0 && (
             <Alert tone="warning">
-              No working days. This person owes no hours, so they can never fall short and will
-              never be marked absent — but they can still clock in and be paid for it.
+              No working days — they owe no hours, so no shortfalls and no absences. They can still
+              clock in and be paid.
             </Alert>
           )}
 
@@ -626,7 +626,7 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
                   </li>
                 ))}
               </ul>
-              <p className="mt-1.5 text-xs text-muted">These come from approved requests and override the week above on those dates. A day off doesn&apos;t block punching — it only stops the &quot;absent&quot; alert.</p>
+              <p className="mt-1.5 text-xs text-muted">From approved requests; these override the week above on those dates. A day off doesn&apos;t block punching, it only stops the &quot;absent&quot; alert.</p>
             </div>
           )}
           {err && <Alert tone="danger">{err}</Alert>}

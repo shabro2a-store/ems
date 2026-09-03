@@ -266,9 +266,9 @@ function EditBranchModal({ branch, onClose, onSaved }: { branch: Branch; onClose
           <Field label="Shift grace (min)" htmlFor="eg" hint="A day over or under its hours by less than this raises nothing - no overtime notice, no shortfall penalty."><Input id="eg" type="number" min="0" value={f.shiftGraceMin} onChange={(e) => setF({ ...f, shiftGraceMin: e.target.value })} /></Field>
           <Field label="Trip threshold (min)" htmlFor="et"><Input id="et" type="number" min="1" value={f.tripThresholdMin} onChange={(e) => setF({ ...f, tripThresholdMin: e.target.value })} /></Field>
           <Field
-            label="Working day starts at (hour)"
+            label="Day starts at (hour)"
             htmlFor="ed"
-            hint="Leave at 0 unless shifts here cross midnight. Somebody who clocks in at 23:00 one night and 00:00 the next is on two different days at 0, which stacks both nights onto one and leaves the other looking absent. Set it to an hour when nobody starts — 6 suits a 07:00 handover — and both nights count as one day each. Day shifts are unaffected."
+            hint="0 = midnight. Raise it only if a shift here STARTS near midnight, so both sides of it count as one night."
           >
             <Input id="ed" type="number" min="0" max="12" value={f.dayStartHour} onChange={(e) => setF({ ...f, dayStartHour: e.target.value })} />
           </Field>
