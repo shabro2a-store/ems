@@ -65,6 +65,75 @@ export interface PunchOk {
 
 export type PunchResult = PunchOk | PunchError;
 
+/**
+ * Serialise everything one person's punches decide, for the length of one write.
+ *
+ * The guard that stops a second check-in was a read followed by a write with
+ * nothing between them: two taps arriving together both read "nothing open" and
+ * both wrote an IN. Production carries several - Mohammad hmadi at 08:10 twice,
+ * Mohammad hasan at 07:17 twice, Adam four times in eight minutes. A fresh
+ * idempotency key per tap means that table never catches it either.
+ *
+ * An advisory lock rather than a unique index, because the rows are legitimately
+ * distinct - a split shift has two real check-ins on one day - so there is no
+ * column set to make unique. And rather than SERIALIZABLE, because that answers
+ * a lost race with an error the caller must retry, while this one simply waits:
+ * the second tap gets the same ALREADY_PUNCHED_IN it would have got had it
+ * arrived a second later, which is the honest answer.
+ *
+ * Held per USER, so two people punching at once never wait on each other, and
+ * released when the transaction ends however it ends.
+ */
+const PUNCH_LOCK_NAMESPACE = 8_723_411;
+
+/**
+ * The advisory-lock key for one user, computed here rather than in SQL.
+ *
+ * Postgres has hashtext/hashtextextended, but which overload of
+ * pg_advisory_xact_lock a driver's parameter types resolve to is not something
+ * to find out in production - this runs on every punch, and a function that
+ * fails to resolve would stop every employee clocking in. A key computed in
+ * JavaScript is one bigint parameter with one obvious cast, and it can be
+ * tested without a database.
+ *
+ * FNV-1a over `namespace:userId`, folded into the signed 64-bit range the
+ * function takes. Collisions between two users would only ever cost one of them
+ * a short wait, never a wrong answer - the lock orders writes, it does not
+ * decide them.
+ */
+export function punchLockKey(userId: string): bigint {
+  // Constructor calls rather than 0n literals: this package targets ES2017 and
+  // raising that for one hash is not a trade worth making. Node runs it either
+  // way.
+  const MASK = BigInt('0xffffffffffffffff');
+  const PRIME = BigInt('0x100000001b3');
+  let hash = BigInt('0xcbf29ce484222325');
+  for (const ch of `${PUNCH_LOCK_NAMESPACE}:${userId}`) {
+    hash = ((hash ^ BigInt(ch.charCodeAt(0))) * PRIME) & MASK;
+  }
+  return BigInt.asIntN(64, hash);
+}
+
+/**
+ * What the locked section decided. Spelled out rather than inferred so the
+ * refusal that carries an arrival is a different shape from the one that
+ * cannot: ALREADY_PUNCHED_IN always names the shift in the way, and the
+ * response quotes that time back to the employee.
+ */
+type PunchOutcome =
+  | { refused: 'ALREADY_PUNCHED_IN'; openInAt: Date }
+  | { refused: 'NOT_PUNCHED_IN' }
+  | { punch: Punch; openInAt: Date | null };
+
+async function lockUserPunches(tx: PunchTx, userId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${punchLockKey(userId)}::bigint)`;
+}
+
+/** The slice of a transaction client this file writes through. */
+type PunchTx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0] & {
+  $executeRaw: PrismaClient['$executeRaw'];
+};
+
 export async function punchEmployee(
   input: PunchInput,
   db: PrismaClient = defaultPrisma,
@@ -253,27 +322,6 @@ export async function punchEmployee(
     }
   }
 
-  if (input.kind === 'IN' && hasOpenSession && !resolvedStaleSession) {
-    // Record the refusal. Note where we are: verifyWithinGeofence has already
-    // passed, above, so reaching this line proves the employee is standing at
-    // their branch with acceptable GPS. An attempt from home fails earlier as
-    // OUT_OF_GEOFENCE and is never recorded.
-    //
-    // That ordering is not incidental - it is what makes the paid credit these
-    // rows drive impossible to game from a sofa. Anything that moves the
-    // geofence check below this point, or records a blocked attempt from a
-    // path that skips it, turns "I was at work and the system would not let me
-    // clock in" into an unverified claim that pays.
-    //
-    // A self-resolved stale session records nothing: nothing was refused, and
-    // the check-in punch that follows is stronger evidence than a row saying it
-    // was turned away would be.
-    await recordBlockedAttempt(db, user, atBranch.id, openIn!.at, input, now);
-    return { code: 'ALREADY_PUNCHED_IN', openInAt: openIn!.at };
-  }
-  if (input.kind === 'OUT' && !hasOpenSession) {
-    return { code: 'NOT_PUNCHED_IN' };
-  }
   if (input.kind === 'OUT' && resolvedStaleSession) {
     // They asked to clock out of a shift that ended on an earlier day. Writing
     // their checkout at `now` is exactly the runaway payment this whole change
@@ -296,43 +344,99 @@ export async function punchEmployee(
     return { code: 'NOT_PUNCHED_IN' };
   }
 
-  const punch = await db.punch.create({
-    data: {
-      user_id: user.id,
-      branch_id: atBranch.id,
-      kind: input.kind,
-      at: now,
-      lat: input.lat,
-      lng: input.lng,
-      accuracy_m: Math.round(input.accuracy),
-      device_fp: input.deviceFp,
-      ip: input.ip,
-    },
+  // Everything that decides whether this punch may exist, and the punch itself,
+  // under one lock. The session state is read AGAIN in here rather than reused
+  // from above: the earlier read is what two simultaneous taps both saw, and it
+  // is stale by definition the moment either of them writes. A stale session
+  // closed above shows up here as a checkout after the arrival, so the check-in
+  // that follows it is allowed by the same rule that refuses a duplicate - no
+  // separate flag needed.
+  const outcome: PunchOutcome = await db.$transaction(async (tx) => {
+    await lockUserPunches(tx, user.id);
+
+    const liveIn = await tx.punch.findFirst({
+      where: { user_id: user.id, kind: 'IN' },
+      orderBy: { at: 'desc' },
+      select: { id: true, at: true },
+    });
+    const liveOut = liveIn
+      ? await tx.punch.findFirst({
+          where: { user_id: user.id, kind: 'OUT', at: { gt: liveIn.at } },
+          select: { id: true },
+        })
+      : null;
+    const openNow = Boolean(liveIn) && !liveOut;
+
+    if (input.kind === 'IN' && openNow) {
+      return { refused: 'ALREADY_PUNCHED_IN', openInAt: liveIn!.at };
+    }
+    if (input.kind === 'OUT' && !openNow) {
+      return { refused: 'NOT_PUNCHED_IN' };
+    }
+
+    const created = await tx.punch.create({
+      data: {
+        user_id: user.id,
+        branch_id: atBranch.id,
+        kind: input.kind,
+        at: now,
+        lat: input.lat,
+        lng: input.lng,
+        accuracy_m: Math.round(input.accuracy),
+        device_fp: input.deviceFp,
+        ip: input.ip,
+      },
+    });
+
+    // In the same transaction as the punch: an audit row for a punch that was
+    // rolled back would describe something that never happened.
+    await writeAuditLog({
+      actorId: user.id,
+      action: 'punch.create',
+      entity: 'Punch',
+      entityId: created.id,
+      after: {
+        kind: created.kind,
+        at: created.at.toISOString(),
+        lat: created.lat,
+        lng: created.lng,
+        accuracy_m: created.accuracy_m,
+        branch_id: created.branch_id,
+      },
+      db: tx as unknown as PrismaClient,
+    });
+
+    return { punch: created, openInAt: liveIn?.at ?? null };
   });
+
+  if ('refused' in outcome) {
+    if (outcome.refused === 'NOT_PUNCHED_IN') return { code: 'NOT_PUNCHED_IN' };
+    // Record the refusal. Note where we are: verifyWithinGeofence has already
+    // passed, above, so reaching this line proves the employee is standing at
+    // their branch with acceptable GPS. An attempt from home fails earlier as
+    // OUT_OF_GEOFENCE and is never recorded.
+    //
+    // That ordering is not incidental - it is what makes the paid credit these
+    // rows drive impossible to game from a sofa. Anything that moves the
+    // geofence check below this point, or records a blocked attempt from a
+    // path that skips it, turns "I was at work and the system would not let me
+    // clock in" into an unverified claim that pays.
+    //
+    // Written outside the lock on purpose: it is a log row nobody is waiting
+    // on, and holding the lock across it would make every duplicate tap slower.
+    await recordBlockedAttempt(db, user, atBranch.id, outcome.openInAt, input, now);
+    return { code: 'ALREADY_PUNCHED_IN', openInAt: outcome.openInAt };
+  }
+
+  const punch = outcome.punch;
 
   await resolveWatchedFlag(db, user, punch, notify);
-
-  await writeAuditLog({
-    actorId: user.id,
-    action: 'punch.create',
-    entity: 'Punch',
-    entityId: punch.id,
-    after: {
-      kind: punch.kind,
-      at: punch.at.toISOString(),
-      lat: punch.lat,
-      lng: punch.lng,
-      accuracy_m: punch.accuracy_m,
-      branch_id: punch.branch_id,
-    },
-    db,
-  });
 
   let minutes_since_in: number | null = null;
   if (input.kind === 'IN') {
     minutes_since_in = 0;
   } else {
-    const sinceMs = now.getTime() - (openIn!.at.getTime());
+    const sinceMs = now.getTime() - outcome.openInAt!.getTime();
     minutes_since_in = Math.max(0, Math.floor(sinceMs / 60_000));
   }
 

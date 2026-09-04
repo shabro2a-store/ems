@@ -111,13 +111,16 @@ const mocks = vi.hoisted(() => ({
   flag: { findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
   schedule: { findUnique: vi.fn() },
   $transaction: vi.fn(),
+  // The punch write holds a per-user advisory lock; the fake has nothing to
+  // lock, so it only has to exist and resolve.
+  $executeRaw: vi.fn(async (..._args: unknown[]) => 1),
 }));
 
 vi.mock('@/lib/db/prisma', () => ({
   prisma: mocks as unknown as Record<string, unknown>,
 }));
 
-import { punchEmployee } from './punch';
+import { punchEmployee, punchLockKey } from './punch';
 
 function resetStore() {
   store.users.clear();
@@ -1220,5 +1223,83 @@ describe('an employee the owner lets cover at any branch', () => {
       deviceFp: 'fp', ip: '1.2.3.4', now: new Date(NOW.getTime() + 5 * 60 * 60_000),
     });
     expect('code' in nextIn && nextIn.code).toBe('OUT_OF_GEOFENCE');
+  });
+});
+
+// The race that put duplicate check-ins in production: the guard was a read
+// then a write with nothing between them, so two taps arriving together both
+// read "nothing open" and both wrote an IN.
+//
+// The fix re-reads under a per-user advisory lock. These tests prove the lock
+// is taken and, more importantly, that the DECISION uses the fresh read - by
+// letting a competing punch land at the exact moment the lock is acquired,
+// which is what a request that lost the race would see.
+describe('two check-ins arriving together', () => {
+  const NOW_AT = new Date('2026-07-10T08:00:00Z');
+
+  function seedDriverlessUser() {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    return { branch, user };
+  }
+
+  it('takes a lock keyed to that one person', async () => {
+    seedDriverlessUser();
+    await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: NOW_AT,
+    });
+    expect(mocks.$executeRaw).toHaveBeenCalledTimes(1);
+    // The user id is interpolated into the lock key, so two people never wait
+    // on each other.
+    // One bigint parameter, and a different one per person.
+    const key = mocks.$executeRaw.mock.calls[0]![1] as unknown as bigint;
+    expect(typeof key).toBe('bigint');
+    expect(key).toBe(punchLockKey('u1'));
+    expect(punchLockKey('u1')).not.toBe(punchLockKey('u2'));
+  });
+
+  it('refuses the loser instead of writing a second check-in', async () => {
+    const { branch, user } = seedDriverlessUser();
+    // The winner's punch lands while the loser is acquiring the lock - exactly
+    // the window that produced Mohammad hmadi's two 08:10 check-ins.
+    mocks.$executeRaw.mockImplementationOnce(async () => {
+      seedOpenIn(user.id, branch.id, NOW_AT);
+      return 1;
+    });
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: NOW_AT,
+    });
+
+    expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
+    // One check-in in the table, not two.
+    expect(store.punches.filter((p) => p.kind === 'IN')).toHaveLength(1);
+  });
+
+  it('still refuses a clock-out whose session vanished under it', async () => {
+    const { branch, user } = seedDriverlessUser();
+    seedOpenIn(user.id, branch.id, new Date('2026-07-10T02:00:00Z'));
+    // Somebody else closed the session first.
+    mocks.$executeRaw.mockImplementationOnce(async () => {
+      store.punches.push({
+        id: 'race-out', user_id: user.id, branch_id: branch.id, kind: 'OUT',
+        at: new Date('2026-07-10T07:00:00Z'), lat: 33.8962, lng: 35.4827,
+        accuracy_m: 10, device_fp: 'fp', ip: '1.2.3.4', corrected: false,
+        corrected_by: null, correction_reason: null, system_generated: false,
+        created_at: new Date('2026-07-10T07:00:00Z'),
+      });
+      return 1;
+    });
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'OUT', lat: 33.8962, lng: 35.4827, accuracy: 10,
+      deviceFp: 'fp', ip: '1.2.3.4', now: NOW_AT,
+    });
+
+    expect('code' in r && r.code).toBe('NOT_PUNCHED_IN');
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
   });
 });
