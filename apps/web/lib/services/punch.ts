@@ -11,7 +11,7 @@ import {
 } from './autoClose';
 import { abandonedTripClose, writeSystemTripClose, MAX_OPEN_TRIP_MIN } from './tripClose';
 import { punchableBranches } from './branchScope';
-import { inBeirut } from 'time';
+import { inBeirut, shiftDateOf, shiftDayRange } from 'time';
 import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
@@ -461,6 +461,9 @@ export async function punchEmployee(
   const punch = outcome.punch;
 
   await resolveWatchedFlag(db, user, punch, notify);
+  if (input.kind === 'IN') {
+    await warnIfShiftPulledBack(db, user, atBranch, now, notify);
+  }
 
   let minutes_since_in: number | null = null;
   if (input.kind === 'IN') {
@@ -605,6 +608,91 @@ async function alertBlockedAtTheDoor(
         `they can start. Their waiting time is paid once you approve it.`,
     },
   });
+}
+
+/**
+ * Warn when the working-day boundary has just moved a shift onto a day that
+ * was already worked - and, usually, into the month before.
+ *
+ * Bilal clocked in at 00:24 on 1 September. His branch's day starts at 04:00,
+ * so that shift belongs to 31 August: a day he had already worked 07:05-16:09.
+ * The two stacked - 25h14m against 17h owed - which raised eight hours of
+ * overtime nobody worked, and put sixteen hours of September's work into
+ * August's payroll. September then read seventeen hours light, with no row
+ * anywhere saying where the day had gone. That is the whole failure: not that
+ * the boundary moved it, which is what it is for, but that it moved it in
+ * silence.
+ *
+ * Two conditions, and the second is what stops this firing at the people the
+ * boundary EXISTS for. A night worker starting at 00:02 is pulled back too,
+ * every single night - but onto a working day with no shift on it yet, which
+ * is precisely the case the boundary was added to get right. Only a pull-back
+ * onto a day that already has an arrival is the pathological one.
+ *
+ * Cannot fire on a branch that starts its day at midnight: there shiftDateOf
+ * is the calendar date by construction, so the dates never differ and an
+ * ordinary split shift raises nothing.
+ */
+async function warnIfShiftPulledBack(
+  db: PrismaClient,
+  user: { id: string; username: string },
+  branch: { id: string; name?: string },
+  at: Date,
+  notify: Notifier,
+): Promise<void> {
+  try {
+    const dayStartHour = await branchDayStartHour(db, branch.id);
+    if (dayStartHour <= 0) return;
+
+    const shiftDate = shiftDateOf(at, dayStartHour);
+    const { date: calendarDate, hhmm } = inBeirut(at);
+    if (shiftDate === calendarDate) return; // not pulled back at all
+
+    // Another arrival already inside this working day. It cannot still be open
+    // - an open one would have been refused above as ALREADY_PUNCHED_IN - so
+    // finding one means the day already holds a finished shift.
+    const { startUtc } = shiftDayRange(shiftDate, dayStartHour);
+    const earlier = await db.punch.count({
+      where: { user_id: user.id, kind: 'IN', at: { gte: startUtc, lt: at } },
+    });
+    if (earlier === 0) return;
+
+    const movesMonth = shiftDate.slice(0, 7) !== calendarDate.slice(0, 7);
+    await notify.send({
+      channel: 'telegram',
+      recipient: 'admin',
+      template: 'punch.pulled_back',
+      context: {
+        user: { id: user.id, username: user.username },
+        branch: { id: branch.id, name: branch.name ?? null },
+        at: at.toISOString(),
+        calendar_date: calendarDate,
+        shift_date: shiftDate,
+        day_start_hour: dayStartHour,
+        moves_month: movesMonth,
+        message:
+          `${user.username} clocked in at ${hhmm} on ${calendarDate}. The ${dayStartHour}:00 ` +
+          `working-day boundary counts this as ${shiftDate}, which they have ALREADY worked - ` +
+          `so both shifts land on that one day and the hours will read as overtime.` +
+          (movesMonth
+            ? ` It is also paid in ${shiftDate.slice(0, 7)}, not ${calendarDate.slice(0, 7)}.`
+            : '') +
+          ` If they meant to start a new day, correct the check-in to ${dayStartHour}:00 or later.`,
+      },
+    });
+  } catch (e) {
+    // A warning is not worth failing a punch that has already been written.
+    console.error('[punch] could not warn about a pulled-back shift', e);
+  }
+}
+
+/** The branch's working-day start hour, 0 when it has none. */
+async function branchDayStartHour(db: PrismaClient, branchId: string): Promise<number> {
+  const row = await db.branch.findUnique({
+    where: { id: branchId },
+    select: { day_start_hour: true },
+  });
+  return row?.day_start_hour ?? 0;
 }
 
 interface UserWithBranch {

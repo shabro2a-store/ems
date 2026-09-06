@@ -106,7 +106,7 @@ const mocks = vi.hoisted(() => ({
   scheduleOverride: { findUnique: vi.fn() },
   trip: { findFirst: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
   branch: { findMany: vi.fn(), findUnique: vi.fn() },
-  punch: { findFirst: vi.fn(), create: vi.fn() },
+  punch: { findFirst: vi.fn(), create: vi.fn(), count: vi.fn() },
   blockedPunchAttempt: { create: vi.fn(), count: vi.fn() },
   auditLog: { create: vi.fn() },
   flag: { findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
@@ -147,6 +147,8 @@ function makeBranch(partial: Record<string, unknown> = {}) {
     gps_radius_m: 50,
     gps_accuracy_max_m: 100,
     shift_grace_min: 15,
+    // The calendar day, which is what every branch has until the owner moves it.
+    day_start_hour: 0,
     trip_threshold_min: 30,
     is_active: true,
     ...partial,
@@ -170,6 +172,28 @@ function seedOpenIn(userId: string, branchId: string, at: Date) {
     correction_reason: null,
     system_generated: false,
     created_at: at,
+  });
+}
+
+/** A shift that happened and was closed: an arrival and its checkout. */
+function seedClosedShift(userId: string, branchId: string, inAt: Date, outAt: Date) {
+  seedOpenIn(userId, branchId, inAt);
+  store.punches.push({
+    id: `seed-${store.punches.length + 1}`,
+    user_id: userId,
+    branch_id: branchId,
+    kind: 'OUT',
+    at: outAt,
+    lat: 33.8962,
+    lng: 35.4827,
+    accuracy_m: 10,
+    device_fp: 'fp',
+    ip: '1.2.3.4',
+    corrected: false,
+    corrected_by: null,
+    correction_reason: null,
+    system_generated: false,
+    created_at: outAt,
   });
 }
 
@@ -306,6 +330,17 @@ beforeEach(() => {
     store.blocked.push(row);
     return row;
   });
+
+  mocks.punch.count.mockImplementation(
+    async ({ where }: { where: { user_id: string; kind: 'IN' | 'OUT'; at: { gte: Date; lt: Date } } }) =>
+      store.punches.filter(
+        (p) =>
+          p.user_id === where.user_id &&
+          p.kind === where.kind &&
+          p.at >= where.at.gte &&
+          p.at < where.at.lt,
+      ).length,
+  );
 
   mocks.blockedPunchAttempt.count.mockImplementation(
     async ({ where }: { where: { user_id: string; open_in_at: Date; at: { lt: Date } } }) =>
@@ -1451,5 +1486,109 @@ describe('an employee refused at the door', () => {
     });
 
     expect(sent.filter((p) => p.template === 'punch.blocked')).toHaveLength(0);
+  });
+});
+
+/*
+ * The day that vanished.
+ *
+ * Bilal clocked in at 00:24 on 1 September. His branch's working day starts at
+ * 04:00, so the shift belongs to 31 August - a day he had already worked
+ * 07:05-16:09. Both landed on that one day: 25h14m against 17h owed, eight
+ * hours of overtime nobody worked, and sixteen hours of September's work paid
+ * in August. September read seventeen hours light and nothing anywhere said
+ * where the day had gone.
+ *
+ * The boundary did what it is for. What was missing was anybody being told.
+ */
+describe('a check-in the working-day boundary pulls onto a day already worked', () => {
+  const MAR_LIAS = () => makeBranch({ name: 'Mar lias', day_start_hour: 4 });
+
+  function seedAt(branchDayStart: number) {
+    const branch = makeBranch({ name: 'Mar lias', day_start_hour: branchDayStart });
+    const user = makeUser('bilal', branch);
+    store.users.set(user.id, user);
+    store.branches.set(branch.id, branch);
+    store.schedules.push({ user_id: 'bilal', weekday: 1, shift_min: 1020 });
+    store.schedules.push({ user_id: 'bilal', weekday: 2, shift_min: 1020 });
+    return { branch, user };
+  }
+
+  function clockIn(now: Date, sent: unknown[]) {
+    return punchEmployee({
+      userId: 'bilal', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now,
+      notifier: { send: async (p) => { sent.push(p); } },
+    });
+  }
+
+  it('warns, and says the month it will be paid in', async () => {
+    const { branch, user } = seedAt(4);
+    // Monday 31 Aug, worked and closed. Beirut is UTC+3 in summer.
+    seedClosedShift(user.id, branch.id, new Date('2026-08-31T04:05:00Z'), new Date('2026-08-31T13:09:00Z'));
+    const sent: Array<{ template: string; context: Record<string, unknown> }> = [];
+
+    // 00:24 on Tuesday 1 September.
+    const r = await clockIn(new Date('2026-08-31T21:24:00Z'), sent);
+    expect('punch' in r).toBe(true);
+
+    const warn = sent.find((p) => p.template === 'punch.pulled_back');
+    expect(warn).toBeDefined();
+    expect(warn!.context.calendar_date).toBe('2026-09-01');
+    expect(warn!.context.shift_date).toBe('2026-08-31');
+    expect(warn!.context.moves_month).toBe(true);
+    const msg = String(warn!.context.message);
+    expect(msg).toContain('00:24');
+    expect(msg).toContain('ALREADY worked');
+    expect(msg).toContain('paid in 2026-08, not 2026-09');
+  });
+
+  it('stays quiet for the night worker the boundary exists for', async () => {
+    // dani starts at 00:02 and is pulled back every single night - but onto a
+    // working day with no arrival on it yet, which is the case the boundary was
+    // added to get right. Warning here would make the alert worthless.
+    const { branch, user } = seedAt(4);
+    // His PREVIOUS night: in 00:02 Monday, out 08:00 Monday. That checkout sits
+    // inside Monday's working-day window, so a naive "any punch that day" test
+    // would fire on him. The arrival is what counts, and his belongs to Sunday.
+    seedClosedShift(user.id, branch.id, new Date('2026-08-30T21:02:00Z'), new Date('2026-08-31T05:00:00Z'));
+    const sent: Array<{ template: string }> = [];
+
+    await clockIn(new Date('2026-08-31T21:02:00Z'), sent); // 00:02 Tuesday
+    expect(sent.filter((p) => p.template === 'punch.pulled_back')).toHaveLength(0);
+  });
+
+  it('stays quiet on a branch whose day starts at midnight', async () => {
+    // shiftDateOf is the calendar date by construction there, so an ordinary
+    // split shift - two real arrivals on one day - must raise nothing.
+    const { branch, user } = seedAt(0);
+    seedClosedShift(user.id, branch.id, new Date('2026-09-01T04:00:00Z'), new Date('2026-09-01T09:00:00Z'));
+    const sent: Array<{ template: string }> = [];
+
+    await clockIn(new Date('2026-09-01T14:00:00Z'), sent);
+    expect(sent.filter((p) => p.template === 'punch.pulled_back')).toHaveLength(0);
+  });
+
+  it('stays quiet when the pulled-back day is empty', async () => {
+    const { branch } = seedAt(4);
+    void branch;
+    const sent: Array<{ template: string }> = [];
+    await clockIn(new Date('2026-08-31T21:24:00Z'), sent);
+    expect(sent.filter((p) => p.template === 'punch.pulled_back')).toHaveLength(0);
+  });
+
+  it('writes the punch even if the warning throws', async () => {
+    const { branch, user } = seedAt(4);
+    seedClosedShift(user.id, branch.id, new Date('2026-08-31T04:05:00Z'), new Date('2026-08-31T13:09:00Z'));
+    void MAR_LIAS;
+
+    const r = await punchEmployee({
+      userId: 'bilal', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date('2026-08-31T21:24:00Z'),
+      notifier: { send: async () => { throw new Error('telegram down'); } },
+    });
+
+    expect('punch' in r).toBe(true);
+    expect(store.punches.filter((p) => p.kind === 'IN')).toHaveLength(2);
   });
 });
