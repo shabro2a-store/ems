@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
 import { userHistory, hasHistory, deleteUserAndSetup, retireUser } from '@/lib/services/userDelete';
+import { MONTH_CLOSE_HOUR } from '@/lib/services/periodLock';
 
 const Patch = z.object({
   username: z.string().min(1).max(64).optional(),
@@ -22,10 +23,11 @@ const Patch = z.object({
   // This employee's own working-day boundary. null clears it back to "use the
   // branch's", which is what every account has until the owner sets one.
   //
-  // 0-23 rather than a free number: it is an hour of the day, and a value the
-  // hour arithmetic cannot name would file shifts on a day nothing else agrees
-  // exists.
-  dayStartHour: z.number().int().min(0).max(23).nullable().optional(),
+  // Capped at MONTH_CLOSE_HOUR, and that ceiling is load-bearing rather than
+  // cosmetic: the pay month closes on that same hour, so a boundary above it
+  // would put an employee still working the month's last shift into a month the
+  // lock had already settled - which is exactly the bug the shared hour fixes.
+  dayStartHour: z.number().int().min(0).max(MONTH_CLOSE_HOUR).nullable().optional(),
 });
 
 function jsonError(code: string, message: string, status: number) {

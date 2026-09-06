@@ -5,6 +5,7 @@ import { isMonthOpen, currentPayMonth } from './periodLock';
 // instant, and the month is always the Beirut one.
 const AUG_31_LATE = new Date('2026-08-31T20:00:00Z'); // 31 Aug 23:00 Beirut
 const SEP_01_EARLY = new Date('2026-08-31T21:30:00Z'); // 1 Sep 00:30 Beirut
+const SEP_01_MORNING = new Date('2026-09-01T03:00:00Z'); // 1 Sep 06:00 Beirut
 const MID_SEP = new Date('2026-09-15T09:00:00Z');
 
 describe('isMonthOpen', () => {
@@ -25,10 +26,24 @@ describe('isMonthOpen', () => {
     expect(isMonthOpen('2026-08', AUG_31_LATE)).toBe(true);
   });
 
-  it('closes August the moment Beirut reaches September', () => {
-    expect(currentPayMonth(SEP_01_EARLY)).toBe('2026-09');
-    expect(isMonthOpen('2026-08', SEP_01_EARLY)).toBe(false);
+  it('holds August open through the small hours of 1 September', () => {
+    // The month ends where the working DAY ends, which is the rule payroll
+    // already pays by: an employee on a 04:00 boundary who clocks in at 00:30
+    // on the 1st is starting AUGUST's last shift, and is paid in August.
+    // Closing the lock at midnight meant that shift was attributed to a month
+    // already refusing rulings on it - and both undecided outcomes go against
+    // the employee: a shortfall is docked, a blocked credit grants nothing.
+    expect(currentPayMonth(SEP_01_EARLY)).toBe('2026-08');
+    expect(isMonthOpen('2026-08', SEP_01_EARLY)).toBe(true);
     expect(isMonthOpen('2026-09', SEP_01_EARLY)).toBe(true);
+  });
+
+  it('closes it once every working day of it is over', () => {
+    // 06:00 - MONTH_CLOSE_HOUR, which is also the highest boundary any employee
+    // may be given, so nobody is still working August at this instant.
+    expect(currentPayMonth(SEP_01_MORNING)).toBe('2026-09');
+    expect(isMonthOpen('2026-08', SEP_01_MORNING)).toBe(false);
+    expect(isMonthOpen('2026-09', SEP_01_MORNING)).toBe(true);
   });
 
   it('accepts a full date and reads its month', () => {

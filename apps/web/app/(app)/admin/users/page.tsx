@@ -731,7 +731,7 @@ function ManageModal({
                   '',
                   'Leave everybody else blank. A day worker on 4 who clocks in once at 00:24 has that whole shift filed under the previous day - and often the previous month.',
                   '',
-                  'Enter 0-23, or leave blank for midnight.',
+                  'Enter 0-6, or leave blank for midnight.',
                 ].join('\n'),
                 user.day_start_hour === null ? '' : String(user.day_start_hour),
               );
@@ -739,8 +739,10 @@ function ManageModal({
               const trimmed = raw.trim();
               if (trimmed === '') { onDayStart(null); return; }
               const n = Number(trimmed);
-              if (!Number.isInteger(n) || n < 0 || n > 23) {
-                window.alert('That has to be a whole number from 0 to 23.');
+              // Capped at the hour the pay month closes on - past that, the
+              // month would settle while they were still working its last shift.
+              if (!Number.isInteger(n) || n < 0 || n > 6) {
+                window.alert('That has to be a whole number from 0 to 6.');
                 return;
               }
               onDayStart(n);
