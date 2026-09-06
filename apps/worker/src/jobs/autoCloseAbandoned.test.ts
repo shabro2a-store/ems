@@ -3,7 +3,7 @@ import { MAX_OPEN_SESSION_MIN as WEB_MAX_OPEN_SESSION_MIN } from '@/lib/services
 import { systemCheckoutAt as webSystemCheckoutAt } from '@/lib/services/autoClose';
 import { computePayoutFromRows } from '@/lib/services/payout';
 
-type UserRow = { id: string; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER' };
+type UserRow = { id: string; username: string; role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER'; branch?: { name: string } | null };
 type PunchRow = {
   id: string;
   user_id: string;
@@ -45,7 +45,9 @@ function makeDb() {
   const db = {
     user: {
       findMany: async ({ where }: { where: { role: { in: string[] } } }) =>
-        store.users.filter((u) => where.role.in.includes(u.role)).map((u) => ({ id: u.id })),
+        store.users
+          .filter((u) => where.role.in.includes(u.role))
+          .map((u) => ({ id: u.id, username: u.username, branch: u.branch ?? null })),
     },
     punch: {
       findFirst: async ({ where }: { where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt?: Date } } }) => {
@@ -96,7 +98,7 @@ function makeDb() {
 }
 
 function seedEmployee(shiftMinByWeekday: Record<number, number> = {}) {
-  store.users.push({ id: 'u1', role: 'EMPLOYEE' });
+  store.users.push({ id: 'u1', username: 'bilal.f', role: 'EMPLOYEE', branch: { name: 'Mar lias' } });
   for (const [weekday, shift_min] of Object.entries(shiftMinByWeekday)) {
     store.schedules.push({ user_id: 'u1', weekday: Number(weekday), shift_min });
   }
@@ -306,5 +308,81 @@ describe('runAutoCloseAbandoned', () => {
     expect((await runAutoCloseAbandoned({ db: db as never, now })).closed).toBe(1);
     expect((await runAutoCloseAbandoned({ db: db as never, now })).closed).toBe(0);
     expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
+  });
+});
+
+describe('telling the owner a checkout was written for somebody', () => {
+  function collector() {
+    const sent: Array<{ template: string; context: Record<string, unknown> }> = [];
+    return {
+      sent,
+      notifier: {
+        send: async (p: { template: string; context: unknown }) => {
+          sent.push({ template: p.template, context: p.context as Record<string, unknown> });
+        },
+      },
+    };
+  }
+
+  it('names the shift, the hours paid, and that overtime is not in them', async () => {
+    // A 17h employee who clocked in Friday 07:00 and never punched out. The job
+    // runs 31h later, past the threshold.
+    seedEmployee({ 0: 1020, 1: 1020, 2: 1020, 3: 1020, 4: 1020, 5: 1020, 6: 1020 });
+    punchIn(new Date('2026-09-04T07:00:00+03:00'));
+    const { sent, notifier } = collector();
+
+    const r = await runAutoCloseAbandoned({
+      db: makeDb() as never,
+      now: new Date('2026-09-05T14:00:00+03:00'),
+      notifier: notifier as never,
+    });
+
+    expect(r).toEqual({ closed: 1, notified: 1 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.template).toBe('punch.auto_close');
+    const msg = String(sent[0]!.context.message);
+    expect(msg).toContain('bilal.f');
+    expect(msg).toContain('Mar lias');
+    expect(msg).toContain('2026-09-04 07:00'); // the arrival nobody closed
+    expect(msg).toContain('2026-09-05 00:00'); // 07:00 + 17h, in Beirut
+    expect(msg).toContain('17h');
+    expect(msg).toContain('overtime actually worked is NOT included');
+    expect(sent[0]!.context.required_min).toBe(1020);
+  });
+
+  it('says nothing when there was nothing to close', async () => {
+    seedEmployee({ 5: 1020 });
+    punchIn(new Date('2026-09-04T07:00:00+03:00'));
+    const { sent, notifier } = collector();
+    // Only 20h open - well inside the 30h threshold. This is a long shift, not
+    // an abandoned one, and the owner must not be told his hours were decided.
+    const r = await runAutoCloseAbandoned({
+      db: makeDb() as never,
+      now: new Date('2026-09-05T03:00:00+03:00'),
+      notifier: notifier as never,
+    });
+    expect(r).toEqual({ closed: 0, notified: 0 });
+    expect(sent).toEqual([]);
+  });
+
+  it('still writes the checkout when the notification throws', async () => {
+    // The punch is what unblocks tomorrow's check-in. Telegram being down is
+    // not a reason to leave the employee locked out.
+    seedEmployee({ 5: 480 });
+    punchIn(new Date('2026-09-04T07:00:00+03:00'));
+    const r = await runAutoCloseAbandoned({
+      db: makeDb() as never,
+      now: new Date('2026-09-05T14:00:00+03:00'),
+      notifier: { send: async () => { throw new Error('telegram down'); } } as never,
+    });
+    expect(r).toEqual({ closed: 1, notified: 0 });
+    expect(store.punches.filter((p) => p.kind === 'OUT' && p.system_generated)).toHaveLength(1);
+  });
+
+  it('closes normally with no notifier at all', async () => {
+    seedEmployee({ 5: 480 });
+    punchIn(new Date('2026-09-04T07:00:00+03:00'));
+    const r = await runAutoCloseAbandoned({ db: makeDb() as never, now: new Date('2026-09-05T14:00:00+03:00') });
+    expect(r).toEqual({ closed: 1, notified: 0 });
   });
 });

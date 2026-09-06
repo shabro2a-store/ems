@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
-import { shiftDateOf, shiftWeekdayOf } from 'time';
+import { shiftDateOf, shiftWeekdayOf, inBeirut } from 'time';
+import type { Notifier } from 'notify';
 import { prisma as defaultPrisma } from '../db/prisma';
 import { resolveRequiredMin } from './requiredMin';
 
@@ -40,10 +41,16 @@ export function systemCheckoutAt(arrivalAt: Date, requiredMin: number): Date {
 export interface AutoCloseAbandonedOpts {
   db?: PrismaClient;
   now?: Date;
+  // Optional so the tests and any manual run can leave it out; the worker
+  // always passes one. A missing notifier must never stop a checkout being
+  // written - the punch is the thing that unblocks the employee's next
+  // check-in, the message is only how the owner hears about it.
+  notifier?: Notifier;
 }
 
 export interface AutoCloseAbandonedResult {
   closed: number;
+  notified: number;
 }
 
 /**
@@ -73,10 +80,11 @@ export async function runAutoCloseAbandoned(
     // be open, and payroll still has to pay that month correctly. Leaving it
     // open is what pays a runaway span whenever somebody eventually closes it.
     where: { role: { in: ['EMPLOYEE', 'DRIVER'] } },
-    select: { id: true },
+    select: { id: true, username: true, branch: { select: { name: true } } },
   });
 
   let closed = 0;
+  let notified = 0;
 
   for (const u of users) {
     const lastIn = await db.punch.findFirst({
@@ -202,8 +210,48 @@ export async function runAutoCloseAbandoned(
       return punch;
     });
 
-    if (wrote) closed += 1;
+    if (!wrote) continue;
+    closed += 1;
+
+    // Tell the owner. missedCheckout already warned him hours ago that somebody
+    // was still clocked in - but that message asks a question ("overtime, or
+    // forgot to punch out?") and this is the answer being decided FOR him, in
+    // money, by a job running at 03:00. Writing a paid checkout in silence is
+    // the part he cannot review, because nothing on the dashboard distinguishes
+    // it from a punch the employee made.
+    //
+    // Sent after the transaction, and never allowed to fail it: Telegram being
+    // down must not roll back the checkout that unblocks tomorrow's shift.
+    const hours = Math.round((requiredMin / 60) * 10) / 10;
+    const { date: inDateB, hhmm: inHhmm } = inBeirut(lastIn.at);
+    const { date: outDateB, hhmm: outHhmm } = inBeirut(wrote.at);
+    if (!opts.notifier) continue;
+    try {
+      await opts.notifier.send({
+        channel: 'telegram',
+        recipient: 'admin',
+        template: 'punch.auto_close',
+        context: {
+          user: { id: u.id, username: u.username },
+          branch: u.branch ? { name: u.branch.name } : null,
+          punch_id: wrote.id,
+          in_at: lastIn.at.toISOString(),
+          closed_at: wrote.at.toISOString(),
+          open_min: openMin,
+          required_min: requiredMin,
+          message:
+            `${u.username}${u.branch ? `, ${u.branch.name}` : ''} never punched out from ` +
+            `${inDateB} ${inHhmm}. The system has closed it at ${outDateB} ${outHhmm} and paid ` +
+            `the ${hours}h that day required. Any overtime actually worked is NOT included - ` +
+            `add it as a bonus if it was real, or correct the checkout.`,
+        },
+      });
+      notified += 1;
+    } catch {
+      // Already written and already audited. Losing the message is not a reason
+      // to retry the punch, and this job runs again in ten minutes.
+    }
   }
 
-  return { closed };
+  return { closed, notified };
 }

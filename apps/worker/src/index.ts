@@ -43,7 +43,7 @@ cron.schedule('*/1 * * * *', safe('missedCheckout', () => runMissedCheckout({ no
 cron.schedule('*/1 * * * *', safe('tripThreshold', () => runTripThreshold({ notifier })));
 // Every 10 min is plenty for a 30h threshold, and keeps a job that writes
 // punches off the same minute tick as the read-only alerting jobs.
-cron.schedule('*/10 * * * *', safe('autoCloseAbandoned', () => runAutoCloseAbandoned()));
+cron.schedule('*/10 * * * *', safe('autoCloseAbandoned', () => runAutoCloseAbandoned({ notifier })));
 // Same tick, same reason: a trip nobody closed blocks the driver's punches and
 // their dispatch, and a driver who never comes back cannot clear it themselves.
 cron.schedule('*/10 * * * *', safe('autoCloseAbandonedTrips', () => runAutoCloseAbandonedTrips()));
