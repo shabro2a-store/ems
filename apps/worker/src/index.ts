@@ -30,7 +30,15 @@ function safe(name: string, fn: () => Promise<unknown>) {
 // reminder. The query is one indexed read over a table that is empty except in
 // the forty-five seconds after somebody is called.
 cron.schedule('*/5 * * * * *', safe('ringRepeater', () => runRingRepeater()));
-cron.schedule('10 0 * * *', safe('watchedDetector', () => runWatchedDetector()));
+// Hourly, not once at a fixed clock time. The job judges the last working day
+// that has fully ended, and a branch's working day ends at its own
+// day_start_hour - which the container, running UTC, is no longer able to be
+// lined up against by hand: 00:10 UTC is 03:10 Beirut in summer and 02:10 in
+// winter, both BEFORE a 04:00 boundary, so the day that just closed would not
+// be judged until the following night. Running every hour reports an absence
+// within the hour whatever the boundary and whatever the season. The job is
+// idempotent - one flag per user per working day, keyed on the day itself.
+cron.schedule('10 * * * *', safe('watchedDetector', () => runWatchedDetector()));
 cron.schedule('*/1 * * * *', safe('missedCheckout', () => runMissedCheckout({ notifier })));
 cron.schedule('*/1 * * * *', safe('tripThreshold', () => runTripThreshold({ notifier })));
 // Every 10 min is plenty for a 30h threshold, and keeps a job that writes
@@ -45,7 +53,7 @@ cron.schedule('0 23 * * *', safe('dailySummary', () => runDailySummary({ notifie
 
 console.log('cron schedule registered:');
 console.log('  */5s    ringRepeater');
-console.log('  10 0    watchedDetector');
+console.log('  10 *    watchedDetector');
 console.log('  */1     missedCheckout, tripThreshold');
 console.log('  */10    autoCloseAbandoned, autoCloseAbandonedTrips');
 console.log('  */30    driverStale');

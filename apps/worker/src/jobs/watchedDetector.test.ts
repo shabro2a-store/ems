@@ -352,3 +352,31 @@ describe('two absences in a row', () => {
     expect(store.flags).toHaveLength(1);
   });
 });
+
+describe('running hourly', () => {
+  it('reports a working day once, on the first run after it ends', async () => {
+    // The job is scheduled every hour now, so it must judge the same day many
+    // times over and write exactly one flag - and it must not reach back and
+    // re-report days it has already dealt with.
+    store.branches.push({ id: 'b1', day_start_hour: 4 });
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Mar lias' },
+    });
+    for (let w = 0; w < 7; w++) store.schedules.push({ id: `s${w}`, user_id: 'u1', weekday: w, shift_min: 480 });
+
+    const created: number[] = [];
+    // Every hour from 04:10 Sunday through 06:10 Monday: Sunday's working day
+    // (04:00 Sun -> 04:00 Mon) closes part-way through.
+    for (const [day, hour] of [[12, 4], [12, 12], [12, 20], [13, 3], [13, 4], [13, 5], [13, 6]] as const) {
+      const r = await runWatchedDetector({
+        db: makeDb() as never,
+        now: new Date(`2026-07-${day}T${String(hour).padStart(2, '0')}:10:00+03:00`),
+      });
+      created.push(r.flags_created);
+    }
+    // Saturday is flagged by the first run, Sunday by the first run after 04:00
+    // on Monday. Nothing else writes anything.
+    expect(created).toEqual([1, 0, 0, 0, 1, 0, 0]);
+    expect(store.flags.map((f) => (f.context_json as { date: string }).date)).toEqual(['2026-07-11', '2026-07-12']);
+  });
+});
