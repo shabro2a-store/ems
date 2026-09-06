@@ -121,13 +121,14 @@ export default function AdminEmployeesPage() {
     await load();
   }
 
-  // The working day this one person is filed under, overriding their branch's.
+  // The working day this one person's shifts are filed against.
   //
-  // A branch-wide boundary cannot serve a branch holding both a night worker
-  // and day staff, and every branch here holds both. dani starts before 04:00
-  // on every shift and needs it; Bilal did it once, and that once filed his
-  // shift under the previous day - which he had already worked - and moved
-  // sixteen hours into a month that then closed.
+  // Null - which is what everybody has until somebody sets this - is midnight,
+  // and midnight cannot move a shift anywhere. It used to come from the branch,
+  // and that was the bug: a branch holds both a night worker who needs a
+  // boundary and day staff whom it only harms. Bilal inherited 04:00 from Mar
+  // lias because dani works there, clocked in once at 00:24, and that shift was
+  // filed under a day he had already worked - in the month before.
   async function setDayStart(u: User, value: number | null) {
     setErr(null);
     const res = await apiSend(`/api/admin/users/${u.id}`, {
@@ -137,7 +138,7 @@ export default function AdminEmployeesPage() {
     if (!res.ok) { setErr(errorMessage(res)); return; }
     setNotice(
       value === null
-        ? `${u.name || u.username} follows their branch's working day again.`
+        ? `${u.name || u.username}'s working day is midnight to midnight again.`
         : `${u.name || u.username}'s working day now starts at ${String(value).padStart(2, '0')}:00.`,
     );
     await load();
@@ -715,12 +716,12 @@ function ManageModal({
           {
             label:
               user.day_start_hour === null
-                ? 'Their working day starts at midnight'
-                : `Their working day starts at ${String(user.day_start_hour).padStart(2, '0')}:00`,
+                ? 'Working day: midnight (normal)'
+                : `Working day starts at ${String(user.day_start_hour).padStart(2, '0')}:00`,
             hint:
               user.day_start_hour === null
-                ? "They follow their branch's setting. Set it here only for somebody whose shift sits ON the midnight line - a night worker who clocks in at 23:00 some nights and 00:10 others."
-                : 'Set for this person, whatever their branch says. Clear it to follow the branch again.',
+                ? 'Their day runs midnight to midnight, like almost everybody. Set this ONLY for someone whose shift sits on the midnight line - a night worker who clocks in at 23:00 some nights and 00:10 others.'
+                : 'Their shifts are filed against this hour instead of midnight. Clear it to put them back to midnight.',
             onClick: () => {
               const raw = window.prompt(
                 [
@@ -728,9 +729,9 @@ function ManageModal({
                   '',
                   'A shift belongs to the day it CLOCKS IN. For somebody who starts at 23:00 some nights and 00:10 others, that puts one shift on each side of midnight - so their day is moved to start at, say, 4, and both land together.',
                   '',
-                  'Anyone who starts in the morning must be 0. A day worker left on 4 who clocks in once at 00:24 has that whole shift filed under the previous day - and often the previous month.',
+                  'Leave everybody else blank. A day worker on 4 who clocks in once at 00:24 has that whole shift filed under the previous day - and often the previous month.',
                   '',
-                  'Enter 0-23, or leave blank to follow the branch.',
+                  'Enter 0-23, or leave blank for midnight.',
                 ].join('\n'),
                 user.day_start_hour === null ? '' : String(user.day_start_hour),
               );
