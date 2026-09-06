@@ -5,6 +5,7 @@ import {
   type DayCoverage,
   type OverrideLite,
   type PunchLite,
+  dayStartHourFor,
 } from './coverage';
 import { coverageWithBlockedCredit, loadBlockedCreditInputs } from './blockedCredit';
 
@@ -205,7 +206,7 @@ export async function penaltiesForUser(
     }),
     db.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { shift_grace_min: true, day_start_hour: true } } },
+      select: { day_start_hour: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
     loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
   ]);
@@ -230,7 +231,7 @@ export async function penaltiesForUser(
   // Blocked-time credit is folded in here, which is the whole point of it: an
   // employee held at the door by somebody else's forgotten checkout must not
   // then be docked for the hours they could not clock.
-  const dayStartHour = user?.branch?.day_start_hour ?? 0;
+  const dayStartHour = dayStartHourFor(user);
   const { coverage } = coverageWithBlockedCredit({
     punches: punches as PunchLite[],
     shiftMinByWeekday,
@@ -335,7 +336,7 @@ export async function pendingPenaltyNotices(
     }),
     db.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
+      select: { id: true, day_start_hour: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
     loadBlockedCreditInputs(ids, punchFrom, punchTo, db),
   ]);
@@ -364,7 +365,7 @@ export async function pendingPenaltyNotices(
   const dayStartByUser = new Map<string, number>();
   for (const u of userBranches) {
     graceByUser.set(u.id, u.branch?.shift_grace_min ?? DEFAULT_GRACE_MIN);
-    dayStartByUser.set(u.id, u.branch?.day_start_hour ?? 0);
+    dayStartByUser.set(u.id, dayStartHourFor(u));
   }
 
   const notices: PenaltyNotice[] = [];

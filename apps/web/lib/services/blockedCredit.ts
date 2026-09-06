@@ -8,6 +8,7 @@ import {
   type OverrideLite,
   type PunchLite,
   type WorkInterval,
+  dayStartHourFor,
 } from './coverage';
 
 /**
@@ -334,7 +335,7 @@ export async function blockedCreditForUser(
     loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
     db.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { day_start_hour: true } } },
+      select: { day_start_hour: true, branch: { select: { day_start_hour: true } } },
     }),
   ]);
 
@@ -354,7 +355,7 @@ export async function blockedCreditForUser(
     rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
-    dayStartHour: user?.branch?.day_start_hour ?? 0,
+    dayStartHour: dayStartHourFor(user),
     // The window reaches into the neighbouring months to close the shifts that
     // straddle a boundary; only this month's days may come back.
   }).credits.filter((c) => c.date.slice(0, 7) === month);
@@ -476,7 +477,7 @@ async function allBlockedCredits(
     loadBlockedCreditInputs(ids, punchFrom, punchTo, db),
     db.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, branch: { select: { day_start_hour: true } } },
+      select: { id: true, day_start_hour: true, branch: { select: { day_start_hour: true } } },
     }),
   ]);
 
@@ -493,7 +494,7 @@ async function allBlockedCredits(
   const schedulesBy = by(schedules);
   const overridesBy = by(overrides);
   const ratesBy = by(rateChanges);
-  const dayStartByUser = new Map(userBranches.map((u) => [u.id, u.branch?.day_start_hour ?? 0]));
+  const dayStartByUser = new Map(userBranches.map((u) => [u.id, dayStartHourFor(u)]));
 
   for (const id of ids) {
     const attempts = blocked.attemptsByUser.get(id);

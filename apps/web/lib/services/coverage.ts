@@ -30,6 +30,35 @@ export function requiredMinFor(
   return weekdayShiftMin ?? 0;
 }
 
+/**
+ * The working-day boundary that applies to one person: their own if the owner
+ * set one, otherwise their branch's, otherwise midnight.
+ *
+ * A branch-wide setting cannot serve a branch that has both a night worker and
+ * day staff, and every branch here has both. Hamra's dani starts before 04:00
+ * on every shift he works; Hamra's ghayth.s did it once in nineteen. The first
+ * needs the boundary and the second is only harmed by it - Bilal's 00:24
+ * check-in was filed under the previous day, which he had already worked, and
+ * the shift left September for a month that then closed.
+ *
+ * Exported for the same reason requiredMinFor is: payroll, penalties, overtime,
+ * the punch guard, the auto-close and the absence sweep must all answer "which
+ * day is this" identically, and each re-deriving the fallback chain is how they
+ * stop agreeing. Null at both levels is midnight, so nothing changes anywhere
+ * until the owner sets a value.
+ */
+export function dayStartHourFor(
+  user:
+    | {
+        day_start_hour?: number | null;
+        branch?: { day_start_hour?: number | null } | null;
+      }
+    | null
+    | undefined,
+): number {
+  return user?.day_start_hour ?? user?.branch?.day_start_hour ?? 0;
+}
+
 export interface DayCoverage {
   date: string; // YYYY-MM-DD (Beirut)
   requiredMin: number;

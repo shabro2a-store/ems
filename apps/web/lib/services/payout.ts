@@ -3,7 +3,7 @@ import { shiftDateOf, scheduledToUtc } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
-import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval } from './coverage';
+import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval, dayStartHourFor } from './coverage';
 
 export interface PayoutForUserResult {
   hours: number;
@@ -277,7 +277,7 @@ export async function payoutForUser(
     blockedCreditForUser(userId, month, db),
     db.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { day_start_hour: true } } },
+      select: { day_start_hour: true, branch: { select: { day_start_hour: true } } },
     }),
   ]);
   return computePayoutFromRows({
@@ -290,7 +290,7 @@ export async function payoutForUser(
     overtimeDeductionCent,
     creditedIntervals: grantedIntervals(credits),
     month,
-    dayStartHour: user?.branch?.day_start_hour ?? 0,
+    dayStartHour: dayStartHourFor(user),
   });
 }
 
@@ -319,7 +319,7 @@ export async function accruedEarningsThisMonth(
     blockedCreditForUser(userId, month, db),
     db.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { day_start_hour: true } } },
+      select: { day_start_hour: true, branch: { select: { day_start_hour: true } } },
     }),
   ]);
   return grossWithCredit(
@@ -327,7 +327,7 @@ export async function accruedEarningsThisMonth(
     rateChanges as RateChangeRow[],
     grantedIntervals(credits),
     month,
-    user?.branch?.day_start_hour ?? 0,
+    dayStartHourFor(user),
   );
 }
 
@@ -390,9 +390,9 @@ export async function payrollRoster(
     (
       await db.user.findMany({
         where: { id: { in: [...new Set(arrivals.map((a) => a.user_id))] } },
-        select: { id: true, branch: { select: { day_start_hour: true } } },
+        select: { id: true, day_start_hour: true, branch: { select: { day_start_hour: true } } },
       })
-    ).map((u) => [u.id, u.branch?.day_start_hour ?? 0]),
+    ).map((u) => [u.id, dayStartHourFor(u)]),
   );
   const workedIds = [
     ...new Set(

@@ -19,6 +19,13 @@ const Patch = z.object({
   // bites on the very next punch - nothing about it is cached or copied onto a
   // token, so a shift already in progress finishes under the new rule.
   canRoamBranches: z.boolean().optional(),
+  // This employee's own working-day boundary. null clears it back to "use the
+  // branch's", which is what every account has until the owner sets one.
+  //
+  // 0-23 rather than a free number: it is an hour of the day, and a value the
+  // hour arithmetic cannot name would file shifts on a day nothing else agrees
+  // exists.
+  dayStartHour: z.number().int().min(0).max(23).nullable().optional(),
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -89,6 +96,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         ...(body.canRoamBranches !== undefined
           ? { can_roam_branches: body.canRoamBranches }
           : {}),
+        ...(body.dayStartHour !== undefined ? { day_start_hour: body.dayStartHour } : {}),
       },
     });
     if (body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent) {
@@ -115,6 +123,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       hourly_rate_cent: before.hourly_rate_cent,
       expected_monthly_salary_cent: before.expected_monthly_salary_cent,
       can_roam_branches: before.can_roam_branches,
+      day_start_hour: before.day_start_hour,
     },
     after: {
       username: user.username,
@@ -123,6 +132,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       hourly_rate_cent: user.hourly_rate_cent,
       expected_monthly_salary_cent: user.expected_monthly_salary_cent,
       can_roam_branches: user.can_roam_branches,
+      day_start_hour: user.day_start_hour,
     },
   });
 

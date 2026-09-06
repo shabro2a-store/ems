@@ -1,7 +1,7 @@
 import type { PrismaClient, Punch, Trip } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
-import { MAX_OPEN_SESSION_MIN } from './coverage';
+import { MAX_OPEN_SESSION_MIN, dayStartHourFor } from './coverage';
 import { writeAuditLog } from './audit';
 import {
   abandonedSessionClose,
@@ -289,7 +289,7 @@ export async function punchEmployee(
       db,
       user.id,
       openIn!.at,
-      user.branch.day_start_hour,
+      dayStartHourFor(user),
     );
     const stale =
       input.kind === 'IN'
@@ -298,7 +298,7 @@ export async function punchEmployee(
             now,
             requiredMin,
             graceMin: user.branch.shift_grace_min,
-            dayStartHour: user.branch.day_start_hour,
+            dayStartHour: dayStartHourFor(user),
           })
         : abandonedSessionClose({
             arrivalAt: openIn!.at,
@@ -462,7 +462,7 @@ export async function punchEmployee(
 
   await resolveWatchedFlag(db, user, punch, notify);
   if (input.kind === 'IN') {
-    await warnIfShiftPulledBack(db, user, atBranch, now, notify);
+    await warnIfShiftPulledBack(db, user, atBranch, dayStartHourFor(user), now, notify);
   }
 
   let minutes_since_in: number | null = null;
@@ -637,11 +637,16 @@ async function warnIfShiftPulledBack(
   db: PrismaClient,
   user: { id: string; username: string },
   branch: { id: string; name?: string },
+  // The boundary that will actually PAY this shift, which is the employee's own
+  // or their home branch's - never the branch they happen to be standing at. A
+  // roaming employee covering elsewhere is still filed under their own day, so
+  // reading the host branch's hour here would warn about a move that is not the
+  // one payroll is about to make.
+  dayStartHour: number,
   at: Date,
   notify: Notifier,
 ): Promise<void> {
   try {
-    const dayStartHour = await branchDayStartHour(db, branch.id);
     if (dayStartHour <= 0) return;
 
     const shiftDate = shiftDateOf(at, dayStartHour);
@@ -684,15 +689,6 @@ async function warnIfShiftPulledBack(
     // A warning is not worth failing a punch that has already been written.
     console.error('[punch] could not warn about a pulled-back shift', e);
   }
-}
-
-/** The branch's working-day start hour, 0 when it has none. */
-async function branchDayStartHour(db: PrismaClient, branchId: string): Promise<number> {
-  const row = await db.branch.findUnique({
-    where: { id: branchId },
-    select: { day_start_hour: true },
-  });
-  return row?.day_start_hour ?? 0;
 }
 
 interface UserWithBranch {

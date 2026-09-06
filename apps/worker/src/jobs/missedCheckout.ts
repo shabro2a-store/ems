@@ -3,6 +3,7 @@ import { todayInBeirut, todayInBeirutDateRange, shiftWeekdayOf } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
+import { resolveDayStartHour } from './dayStart';
 
 export interface MissedCheckoutOpts {
   db?: PrismaClient;
@@ -38,9 +39,9 @@ export async function runMissedCheckout(
     (
       await db.user.findMany({
         where: { id: { in: [...new Set(schedules.map((s) => s.user_id))] } },
-        select: { id: true, branch: { select: { day_start_hour: true } } },
+        select: { id: true, day_start_hour: true, branch: { select: { day_start_hour: true } } },
       })
-    ).map((u) => [u.id, u.branch?.day_start_hour ?? 0]),
+    ).map((u) => [u.id, resolveDayStartHour(u)]),
   );
 
   for (const s of schedules) {

@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
 import { currentOpenIn } from '@/lib/services/punch';
 import { payoutForUser } from '@/lib/services/payout';
-import { currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
+import { currentShiftDayMinutes, type PunchLite, dayStartHourFor } from '@/lib/services/coverage';
 import { abandonedSessionClose, requiredMinForArrival } from '@/lib/services/autoClose';
 import { grantedCreditMinutesByDate } from '@/lib/services/blockedCredit';
 import { todayInBeirut, todayInBeirutDateRange } from 'time';
@@ -43,11 +43,11 @@ export async function GET() {
     grantedCreditMinutesByDate([userId], month, prisma),
     prisma.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { day_start_hour: true } } },
+      select: { day_start_hour: true, branch: { select: { day_start_hour: true } } },
     }),
   ]);
 
-  const dayStartHour = me?.branch?.day_start_hour ?? 0;
+  const dayStartHour = dayStartHourFor(me);
 
   const shiftDay = currentShiftDayMinutes({
     punches: punches as PunchLite[],

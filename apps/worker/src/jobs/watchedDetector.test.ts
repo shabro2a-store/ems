@@ -13,6 +13,7 @@ type FlagRow = {
 type ScheduleRow = { id: string; user_id: string; weekday: number; shift_min: number | null };
 type UserRow = {
   id: string;
+  day_start_hour?: number | null;
   username: string;
   is_active: boolean;
   role: 'EMPLOYEE' | 'DRIVER' | 'ADMIN';
@@ -61,8 +62,21 @@ function makeDb() {
         return store.schedules
           .filter((s) => s.weekday === where.weekday)
           .filter((s) => !where.shift_min || (s.shift_min != null && s.shift_min > where.shift_min.gt))
-          .map((s) => ({ ...s, user: store.users.get(s.user_id)! }));
+          .map((s) => {
+            // Prisma's include hands back the real branch row, day_start_hour
+            // and all - the job resolves the boundary from the USER now, so the
+            // double has to join the same way or every branch reads as midnight.
+            const u = store.users.get(s.user_id)!;
+            const b = u.branch ? store.branches.find((x) => x.id === u.branch!.id) : null;
+            return { ...s, user: { ...u, branch: u.branch ? { ...u.branch, day_start_hour: b?.day_start_hour ?? 0 } : null } };
+          });
       },
+    },
+    user: {
+      findMany: async () =>
+        [...store.users.values()]
+          .filter((u) => (u as { day_start_hour?: number | null }).day_start_hour != null)
+          .map((u) => ({ day_start_hour: (u as { day_start_hour?: number | null }).day_start_hour })),
     },
     scheduleOverride: {
       findMany: async ({ where }: { where: { date: Date; kind?: 'DAY_OFF' | 'HOURS_CHANGE' } }) => {

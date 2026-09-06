@@ -5,6 +5,7 @@ import {
   type DayCoverage,
   type OverrideLite,
   type PunchLite,
+  dayStartHourFor,
 } from './coverage';
 import { coverageWithBlockedCredit, loadBlockedCreditInputs } from './blockedCredit';
 
@@ -123,7 +124,7 @@ export async function overtimeForUser(
     }),
     db.user.findUnique({
       where: { id: userId },
-      select: { branch: { select: { shift_grace_min: true, day_start_hour: true } } },
+      select: { day_start_hour: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
     loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
   ]);
@@ -161,7 +162,7 @@ export async function overtimeForUser(
     rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
-    dayStartHour: user?.branch?.day_start_hour ?? 0,
+    dayStartHour: dayStartHourFor(user),
   });
   // Back to the month asked for. The window above deliberately reaches into the
   // neighbouring months to close the shifts that straddle a boundary; only the
@@ -252,7 +253,7 @@ export async function pendingOvertimeNotices(
     }),
     db.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
+      select: { id: true, day_start_hour: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
     }),
     loadBlockedCreditInputs(ids, punchFrom, punchTo, db),
   ]);
@@ -284,7 +285,7 @@ export async function pendingOvertimeNotices(
   const dayStartByUser = new Map<string, number>();
   for (const u of userBranches) {
     graceByUser.set(u.id, u.branch?.shift_grace_min ?? 15);
-    dayStartByUser.set(u.id, u.branch?.day_start_hour ?? 0);
+    dayStartByUser.set(u.id, dayStartHourFor(u));
   }
 
   const notices: OvertimeNotice[] = [];

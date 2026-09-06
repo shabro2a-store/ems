@@ -3,6 +3,7 @@ import { shiftDateOf, shiftWeekdayOf, inBeirut } from 'time';
 import type { Notifier } from 'notify';
 import { prisma as defaultPrisma } from '../db/prisma';
 import { resolveRequiredMin } from './requiredMin';
+import { resolveDayStartHour } from './dayStart';
 
 /**
  * Past this, an open check-in is treated as a forgotten checkout.
@@ -88,7 +89,12 @@ export async function runAutoCloseAbandoned(
     // be open, and payroll still has to pay that month correctly. Leaving it
     // open is what pays a runaway span whenever somebody eventually closes it.
     where: { role: { in: ['EMPLOYEE', 'DRIVER'] } },
-    select: { id: true, username: true, branch: { select: { name: true } } },
+    select: {
+      id: true,
+      username: true,
+      day_start_hour: true,
+      branch: { select: { name: true, day_start_hour: true } },
+    },
   });
 
   let closed = 0;
@@ -127,7 +133,11 @@ export async function runAutoCloseAbandoned(
     // The shift belongs to the WORKING day it started - which on a branch whose
     // day starts at 06:00 is not the calendar day for anyone clocking in before
     // dawn. Not today either, which may be two days later.
-    const dayStart = lastIn.branch?.day_start_hour ?? 0;
+    // The employee's own boundary, not the branch the shift was worked at: a
+    // roaming employee covering elsewhere is still paid against their own day,
+    // so reading the host branch's hour would close the shift onto a different
+    // day than payroll will pay it on.
+    const dayStart = resolveDayStartHour(u);
     const inDate = shiftDateOf(lastIn.at, dayStart);
     const [schedule, override] = await Promise.all([
       db.schedule.findUnique({

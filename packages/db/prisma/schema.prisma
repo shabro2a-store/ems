@@ -84,6 +84,20 @@ model User {
   // single-branch until the owner grants this, and revoking it takes effect on
   // the very next punch because nothing is cached.
   can_roam_branches    Boolean            @default(false)
+  // This employee's own working-day boundary, overriding their branch's.
+  //
+  // A branch-wide setting cannot serve one branch's night worker and its day
+  // staff at once, and every branch here has both. Hamra's dani starts before
+  // 04:00 on every shift he works and NEEDS the boundary; Hamra's ghayth.s did
+  // it once in nineteen. For the second kind the boundary is pure harm: Bilal
+  // clocked in at 00:24 on 1 September and it filed the shift under 31 August,
+  // a day he had already worked - stacking 25h onto one day, inventing eight
+  // hours of overtime and moving sixteen hours into a month that then closed.
+  //
+  // Null means "whatever the branch says", so this changes nothing until the
+  // owner sets it, and a branch-wide value still works for a branch where
+  // everyone genuinely starts at night.
+  day_start_hour       Int?
   // Retired, not erased. Set when the owner deletes somebody who has worked:
   // the login dies, the username is freed for reuse, and every present-tense
   // screen stops showing them - but the row stays, because punches, advances

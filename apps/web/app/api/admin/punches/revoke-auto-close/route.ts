@@ -7,6 +7,7 @@ import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
 import { isMonthOpen, CLOSED_MONTH_MESSAGE } from '@/lib/services/periodLock';
+import { dayStartHourFor } from '@/lib/services/coverage';
 
 const Body = z.object({
   punchId: z.string().min(1),
@@ -70,7 +71,7 @@ export async function POST(req: Request) {
       kind: true,
       at: true,
       system_generated: true,
-      user: { select: { branch: { select: { day_start_hour: true } } } },
+      user: { select: { day_start_hour: true, branch: { select: { day_start_hour: true } } } },
     },
   });
   if (!out) return jsonError('NOT_FOUND', 'Punch not found', 404);
@@ -93,7 +94,7 @@ export async function POST(req: Request) {
   // The month the shift belongs to, by the working day it STARTED - the same
   // rule payroll pays it under. Reopening a shift changes the hours, so it may
   // only happen while that month can still be recalculated.
-  const dayStartHour = out.user.branch?.day_start_hour ?? 0;
+  const dayStartHour = dayStartHourFor(out.user);
   const shiftDate = shiftDateOf(arrival.at, dayStartHour);
   if (!isMonthOpen(shiftDate)) {
     return jsonError('MONTH_CLOSED', CLOSED_MONTH_MESSAGE, 409);

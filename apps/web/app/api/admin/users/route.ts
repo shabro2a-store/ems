@@ -51,6 +51,7 @@ export async function GET() {
       hourly_rate_cent: true,
       is_active: true,
       can_roam_branches: true,
+      day_start_hour: true,
       telegram_chat_id: true,
       notify_daily_summary: true,
       notify_routine_pings: true,

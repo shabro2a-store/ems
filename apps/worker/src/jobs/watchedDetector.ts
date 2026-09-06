@@ -3,6 +3,7 @@ import { beirutWeekday, previousBeirutDate, shiftDateOf, shiftDayRange } from 't
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
+import { resolveDayStartHour } from './dayStart';
 
 export interface WatchedDetectorOpts {
   db?: PrismaClient;
@@ -36,17 +37,28 @@ export async function runWatchedDetector(
   const db = opts.db ?? defaultPrisma;
   const now = opts.now ?? new Date();
 
-  const branches = await db.branch.findMany({ select: { id: true, day_start_hour: true } });
-  const hourByBranch = new Map(branches.map((b) => [b.id, b.day_start_hour ?? 0]));
-  const hourFor = (branchId: string | null): number =>
-    branchId === null ? 0 : hourByBranch.get(branchId) ?? 0;
+  const [branches, ownBoundaries] = await Promise.all([
+    db.branch.findMany({ select: { id: true, day_start_hour: true } }),
+    // Employees whose own boundary overrides their branch's. Their hour has to
+    // be in the set even when no branch uses it, or the pass that would judge
+    // them never runs and they are simply never checked for absence.
+    db.user.findMany({
+      where: { day_start_hour: { not: null } },
+      select: { day_start_hour: true },
+    }),
+  ]);
 
-  // The setting is per-branch, so at one instant two branches can be part-way
-  // through different working days and have different days to judge. Each
-  // boundary in use is therefore judged on its own. Midnight is always in the
-  // set: it is what a user with no branch, or one whose branch has been
-  // removed, falls back to.
-  const boundaries = [...new Set<number>([0, ...hourByBranch.values()])].sort((a, b) => a - b);
+  // Two people can be part-way through different working days at one instant,
+  // with different days to judge - so each boundary in use is judged on its own
+  // pass. Midnight is always in the set: it is what somebody with no branch, or
+  // whose branch has been removed, falls back to.
+  const boundaries = [
+    ...new Set<number>([
+      0,
+      ...branches.map((b) => b.day_start_hour ?? 0),
+      ...ownBoundaries.map((u) => u.day_start_hour ?? 0),
+    ]),
+  ].sort((a, b) => a - b);
 
   let flags_created = 0;
   let skipped_off = 0;
@@ -67,10 +79,12 @@ export async function runWatchedDetector(
       where: { weekday: wd, shift_min: { gt: 0 } },
       include: { user: { include: { branch: true } } },
     });
-    // Only the people this boundary actually governs. Another branch's staff are
-    // in this result set because the weekday is queried globally, but their
-    // working day starts at a different hour and is judged on its own pass.
-    const mine = scheduled.filter((s) => hourFor(s.user.branch_id) === dayStartHour);
+    // Only the people this boundary actually governs. Everyone else is in this
+    // result set because the weekday is queried globally, but their working day
+    // starts at a different hour and is judged on its own pass. Resolved per
+    // PERSON, so an employee whose own boundary differs from their branch's is
+    // judged on theirs - which is the whole point of the override.
+    const mine = scheduled.filter((s) => resolveDayStartHour(s.user) === dayStartHour);
     if (mine.length === 0) continue;
     users_scanned += mine.length;
 

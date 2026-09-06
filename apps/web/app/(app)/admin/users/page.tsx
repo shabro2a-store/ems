@@ -17,6 +17,7 @@ interface User {
   hourly_rate_cent: number;
   is_active: boolean;
   can_roam_branches: boolean;
+  day_start_hour: number | null;
 }
 interface Branch { id: string; name: string; deleted_at?: string | null }
 interface Status { status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT'; since_min: number; over: boolean }
@@ -117,6 +118,28 @@ export default function AdminEmployeesPage() {
       body: { canRoamBranches: !u.can_roam_branches },
     });
     if (!res.ok) { setErr(errorMessage(res)); return; }
+    await load();
+  }
+
+  // The working day this one person is filed under, overriding their branch's.
+  //
+  // A branch-wide boundary cannot serve a branch holding both a night worker
+  // and day staff, and every branch here holds both. dani starts before 04:00
+  // on every shift and needs it; Bilal did it once, and that once filed his
+  // shift under the previous day - which he had already worked - and moved
+  // sixteen hours into a month that then closed.
+  async function setDayStart(u: User, value: number | null) {
+    setErr(null);
+    const res = await apiSend(`/api/admin/users/${u.id}`, {
+      method: 'PATCH',
+      body: { dayStartHour: value },
+    });
+    if (!res.ok) { setErr(errorMessage(res)); return; }
+    setNotice(
+      value === null
+        ? `${u.name || u.username} follows their branch's working day again.`
+        : `${u.name || u.username}'s working day now starts at ${String(value).padStart(2, '0')}:00.`,
+    );
     await load();
   }
 
@@ -268,6 +291,7 @@ export default function AdminEmployeesPage() {
           onClose={() => setManage(null)}
           onPassword={() => { setManage(null); setPwTarget(manage); }}
           onRoam={() => { setManage(null); void toggleRoam(manage); }}
+          onDayStart={(v) => { setManage(null); void setDayStart(manage, v); }}
           onActive={() => { setManage(null); void toggleActive(manage); }}
           onRemove={() => { setManage(null); setRemoving(manage); }}
         />
@@ -660,6 +684,7 @@ function ManageModal({
   onClose,
   onPassword,
   onRoam,
+  onDayStart,
   onActive,
   onRemove,
 }: {
@@ -667,6 +692,7 @@ function ManageModal({
   onClose: () => void;
   onPassword: () => void;
   onRoam: () => void;
+  onDayStart: (value: number | null) => void;
   onActive: () => void;
   onRemove: () => void;
 }) {
@@ -681,6 +707,43 @@ function ManageModal({
               ? 'They currently clock in and out at any branch. This puts them back to their own.'
               : 'Let them cover at another branch and clock in and out there. They must still be AT a branch.',
             onClick: onRoam,
+          },
+        ]
+      : []),
+    ...(paid
+      ? [
+          {
+            label:
+              user.day_start_hour === null
+                ? 'Their working day starts at midnight'
+                : `Their working day starts at ${String(user.day_start_hour).padStart(2, '0')}:00`,
+            hint:
+              user.day_start_hour === null
+                ? "They follow their branch's setting. Set it here only for somebody whose shift sits ON the midnight line - a night worker who clocks in at 23:00 some nights and 00:10 others."
+                : 'Set for this person, whatever their branch says. Clear it to follow the branch again.',
+            onClick: () => {
+              const raw = window.prompt(
+                [
+                  `Working day for ${user.name || user.username}.`,
+                  '',
+                  'A shift belongs to the day it CLOCKS IN. For somebody who starts at 23:00 some nights and 00:10 others, that puts one shift on each side of midnight - so their day is moved to start at, say, 4, and both land together.',
+                  '',
+                  'Anyone who starts in the morning must be 0. A day worker left on 4 who clocks in once at 00:24 has that whole shift filed under the previous day - and often the previous month.',
+                  '',
+                  'Enter 0-23, or leave blank to follow the branch.',
+                ].join('\n'),
+                user.day_start_hour === null ? '' : String(user.day_start_hour),
+              );
+              if (raw === null) return; // cancelled
+              const trimmed = raw.trim();
+              if (trimmed === '') { onDayStart(null); return; }
+              const n = Number(trimmed);
+              if (!Number.isInteger(n) || n < 0 || n > 23) {
+                window.alert('That has to be a whole number from 0 to 23.');
+                return;
+              }
+              onDayStart(n);
+            },
           },
         ]
       : []),
