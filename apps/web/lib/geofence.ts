@@ -1,5 +1,9 @@
 export interface GeofenceBranch {
   id: string;
+  // Carried purely so a refusal can name where the employee is standing. The
+  // geofence maths never reads it; a message that says "at Mar lias" instead of
+  // "at a branch" is what makes the alert actionable without a lookup.
+  name?: string;
   lat: number;
   lng: number;
   gps_radius_m: number;

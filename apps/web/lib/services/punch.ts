@@ -11,6 +11,7 @@ import {
 } from './autoClose';
 import { abandonedTripClose, writeSystemTripClose, MAX_OPEN_TRIP_MIN } from './tripClose';
 import { punchableBranches } from './branchScope';
+import { inBeirut } from 'time';
 import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
@@ -442,7 +443,18 @@ export async function punchEmployee(
     //
     // Written outside the lock on purpose: it is a log row nobody is waiting
     // on, and holding the lock across it would make every duplicate tap slower.
-    await recordBlockedAttempt(db, user, atBranch.id, outcome.openInAt, input, now);
+    await recordBlockedAttempt(
+      db,
+      user,
+      // A roaming employee can be refused at a branch that is not their own, so
+      // the name comes from where they are standing. It falls back rather than
+      // failing: a message naming no branch is still worth far more than none.
+      { id: atBranch.id, name: atBranch.name ?? user.branch.name },
+      outcome.openInAt!,
+      input,
+      now,
+      notify,
+    );
     return { code: 'ALREADY_PUNCHED_IN', openInAt: outcome.openInAt };
   }
 
@@ -483,14 +495,15 @@ export async function punchEmployee(
  */
 async function recordBlockedAttempt(
   db: PrismaClient,
-  user: { id: string },
-  branchId: string,
+  user: { id: string; username: string },
+  branch: { id: string; name: string },
   openInAt: Date,
   input: PunchInput,
   at: Date,
+  notify: Notifier,
 ): Promise<void> {
   try {
-    await writeBlockedAttempt(db, user, branchId, openInAt, input, at);
+    await writeBlockedAttempt(db, user, branch, openInAt, input, at, notify);
   } catch (e) {
     console.error('[punch] could not record blocked attempt', e);
   }
@@ -498,16 +511,17 @@ async function recordBlockedAttempt(
 
 async function writeBlockedAttempt(
   db: PrismaClient,
-  user: { id: string },
-  branchId: string,
+  user: { id: string; username: string },
+  branch: { id: string; name: string },
   openInAt: Date,
   input: PunchInput,
   at: Date,
+  notify: Notifier,
 ): Promise<void> {
   const attempt = await db.blockedPunchAttempt.create({
     data: {
       user_id: user.id,
-      branch_id: branchId,
+      branch_id: branch.id,
       at,
       open_in_at: openInAt,
       lat: input.lat,
@@ -533,6 +547,63 @@ async function writeBlockedAttempt(
       reason: 'Check-in refused: an earlier check-in is still open. Recorded past the geofence check.',
     },
     db,
+  });
+
+  await alertBlockedAtTheDoor(db, user, branch, openInAt, at, notify);
+}
+
+/**
+ * Tell the owner somebody is standing at a branch unable to start their shift.
+ *
+ * These rows already reached him - as a blocked-CREDIT item on the dashboard,
+ * asking whether to pay the wait. That is the wrong question at the wrong time.
+ * It arrives after the fact, it is about money rather than about somebody being
+ * stuck, and it is filtered off the queue the moment its month closes: a real
+ * ten-hour lockout in August (07:59 open, refused at 18:00) was never seen by
+ * anyone, never ruled on, and can no longer be paid.
+ *
+ * The employee already knows - their screen says they are still clocked in. The
+ * person who can actually fix it is the one who was never told, and the fix is
+ * a one-minute punch correction. Sent while they are still at the door, it is
+ * the difference between a lost hour and a lost shift.
+ *
+ * Once per stuck session, not once per tap. Somebody refused at the door presses
+ * the button again, and again - all real refusals, all worth recording, but one
+ * situation. Keyed on the check-in that is in the way, so a second lockout later
+ * the same day still speaks.
+ */
+async function alertBlockedAtTheDoor(
+  db: PrismaClient,
+  user: { id: string; username: string },
+  branch: { id: string; name: string },
+  openInAt: Date,
+  at: Date,
+  notify: Notifier,
+): Promise<void> {
+  const earlier = await db.blockedPunchAttempt.count({
+    where: { user_id: user.id, open_in_at: openInAt, at: { lt: at } },
+  });
+  if (earlier > 0) return;
+
+  const waitedMin = Math.max(0, Math.floor((at.getTime() - openInAt.getTime()) / 60_000));
+  const { hhmm: sinceHhmm } = inBeirut(openInAt);
+  const { hhmm: nowHhmm } = inBeirut(at);
+  await notify.send({
+    channel: 'telegram',
+    recipient: 'admin',
+    template: 'punch.blocked',
+    context: {
+      user: { id: user.id, username: user.username },
+      branch: { id: branch.id, name: branch.name },
+      at: at.toISOString(),
+      open_in_at: openInAt.toISOString(),
+      waited_min: waitedMin,
+      message:
+        `${user.username} is at ${branch.name} and CANNOT clock in: they are still ` +
+        `checked in from ${sinceHhmm} (${Math.floor(waitedMin / 60)}h ${waitedMin % 60}m ago). ` +
+        `They tried at ${nowHhmm}. Correct that missing checkout on the punches page and ` +
+        `they can start. Their waiting time is paid once you approve it.`,
+    },
   });
 }
 

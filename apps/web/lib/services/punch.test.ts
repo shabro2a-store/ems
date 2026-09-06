@@ -107,7 +107,7 @@ const mocks = vi.hoisted(() => ({
   trip: { findFirst: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
   branch: { findMany: vi.fn(), findUnique: vi.fn() },
   punch: { findFirst: vi.fn(), create: vi.fn() },
-  blockedPunchAttempt: { create: vi.fn() },
+  blockedPunchAttempt: { create: vi.fn(), count: vi.fn() },
   auditLog: { create: vi.fn() },
   flag: { findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
   schedule: { findUnique: vi.fn() },
@@ -306,6 +306,16 @@ beforeEach(() => {
     store.blocked.push(row);
     return row;
   });
+
+  mocks.blockedPunchAttempt.count.mockImplementation(
+    async ({ where }: { where: { user_id: string; open_in_at: Date; at: { lt: Date } } }) =>
+      store.blocked.filter(
+        (b) =>
+          b.user_id === where.user_id &&
+          b.open_in_at.getTime() === where.open_in_at.getTime() &&
+          b.at < where.at.lt,
+      ).length,
+  );
 
   mocks.auditLog.create.mockImplementation(async ({ data }: { data: { action: string } }) => {
     store.auditSeq += 1;
@@ -1326,5 +1336,120 @@ describe('two check-ins arriving together', () => {
 
     expect('code' in r && r.code).toBe('NOT_PUNCHED_IN');
     expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
+  });
+});
+
+/*
+ * Somebody standing at a branch who cannot start their shift.
+ *
+ * This is abdullah's August: clocked in 07:59, never punched out, came back at
+ * 18:00 for the evening and was refused. The refusal is correct - the system
+ * cannot tell it from a duplicate tap during one long shift - so the only thing
+ * that can help him is somebody being told while he is still at the door.
+ *
+ * The row already existed. What it produced was a blocked-CREDIT item on the
+ * dashboard asking whether to pay the wait: after the fact, about money rather
+ * than about a person being stuck, and dropped off the queue entirely once
+ * August closed. Nobody ever saw it and it can no longer be paid.
+ */
+describe('an employee refused at the door', () => {
+  function lockedOutFixture() {
+    const branch = makeBranch({ name: 'Mar lias' });
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    store.schedules.push({ user_id: 'u1', weekday: 0, shift_min: 480 });
+    return { branch, user };
+  }
+
+  const MORNING = new Date('2026-07-12T04:59:00Z'); // 07:59 Beirut Sunday
+  const EVENING = new Date('2026-07-12T15:00:00Z'); // 18:00 Beirut, 10h01m later
+
+  function tryToClockIn(now: Date, sent: unknown[]) {
+    return punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now,
+      notifier: { send: async (p) => { sent.push(p); } },
+    });
+  }
+
+  it('alerts the owner, naming the branch, the stuck shift and the wait', async () => {
+    const { branch, user } = lockedOutFixture();
+    seedOpenIn(user.id, branch.id, MORNING);
+    const sent: Array<{ template: string; context: Record<string, unknown> }> = [];
+
+    const r = await tryToClockIn(EVENING, sent);
+    expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
+
+    const alert = sent.find((p) => p.template === 'punch.blocked');
+    expect(alert).toBeDefined();
+    const msg = String(alert!.context.message);
+    expect(msg).toContain('u1');
+    expect(msg).toContain('Mar lias');
+    expect(msg).toContain('07:59'); // the check-in that is in the way
+    expect(msg).toContain('18:00'); // when they tried
+    expect(msg).toContain('10h 1m');
+    expect(msg).toContain('Correct that missing checkout');
+    expect(alert!.context.waited_min).toBe(601);
+  });
+
+  it('says it once per stuck session, not once per tap', async () => {
+    // Somebody refused at the door presses again, and again. All real refusals,
+    // all recorded - but one situation, and one message.
+    const { branch, user } = lockedOutFixture();
+    seedOpenIn(user.id, branch.id, MORNING);
+    const sent: Array<{ template: string }> = [];
+
+    await tryToClockIn(EVENING, sent);
+    await tryToClockIn(new Date(EVENING.getTime() + 60_000), sent);
+    await tryToClockIn(new Date(EVENING.getTime() + 5 * 60_000), sent);
+
+    expect(store.blocked).toHaveLength(3); // every refusal still recorded
+    expect(sent.filter((p) => p.template === 'punch.blocked')).toHaveLength(1);
+  });
+
+  it('speaks again for a different stuck shift', async () => {
+    // Keyed on the check-in that is in the way, so being locked out again later
+    // by a NEW forgotten checkout is a new message, not a silenced repeat.
+    const { branch, user } = lockedOutFixture();
+    seedOpenIn(user.id, branch.id, MORNING);
+    const sent: Array<{ template: string }> = [];
+    await tryToClockIn(EVENING, sent);
+
+    store.punches.length = 0;
+    const laterShift = new Date('2026-07-12T18:00:00Z');
+    seedOpenIn(user.id, branch.id, laterShift);
+    await tryToClockIn(new Date('2026-07-12T20:00:00Z'), sent);
+
+    expect(sent.filter((p) => p.template === 'punch.blocked')).toHaveLength(2);
+  });
+
+  it('still refuses the punch when the alert throws', async () => {
+    // The refusal is the answer the employee is waiting on. Telegram being down
+    // must not turn it into a 500 they cannot act on.
+    const { branch, user } = lockedOutFixture();
+    seedOpenIn(user.id, branch.id, MORNING);
+
+    const r = await punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: EVENING,
+      notifier: { send: async () => { throw new Error('telegram down'); } },
+    });
+
+    expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
+  });
+
+  it('says nothing when the punch was not refused', async () => {
+    const { branch, user } = lockedOutFixture();
+    seedOpenIn(user.id, branch.id, MORNING);
+    const sent: Array<{ template: string }> = [];
+
+    // A clock-OUT closing that same shift is not a lockout.
+    await punchEmployee({
+      userId: 'u1', kind: 'OUT', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date('2026-07-12T12:59:00Z'),
+      notifier: { send: async (p) => { sent.push(p as { template: string }); } },
+    });
+
+    expect(sent.filter((p) => p.template === 'punch.blocked')).toHaveLength(0);
   });
 });

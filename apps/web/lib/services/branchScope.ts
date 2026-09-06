@@ -12,6 +12,10 @@ export interface GeoBranch {
 
 export const GEO_BRANCH_SELECT = {
   id: true,
+  // Only so a message can say WHERE somebody is standing. A refusal that names
+  // the branch is the difference between "someone is stuck" and an instruction
+  // the owner can act on without opening the dashboard first.
+  name: true,
   lat: true,
   lng: true,
   gps_radius_m: true,
