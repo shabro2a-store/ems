@@ -62,3 +62,47 @@ describe('shiftDateOf with a 6am boundary', () => {
     expect(shiftDateOf(beirut('2026-10-24T22:30:00Z'), 6)).toBe('2026-10-24'); // 01:30 local
   });
 });
+
+describe('shiftDayRange', () => {
+  it('is the exact inverse of shiftDateOf', async () => {
+    const { shiftDayRange, shiftDateOf } = await import('./index');
+    for (const h of [0, 1, 4, 6]) {
+      const { startUtc, endUtc } = shiftDayRange('2026-07-12', h);
+      // The first instant of the day answers the day; the instant before it does
+      // not, and neither does the first instant of the next.
+      expect(shiftDateOf(startUtc, h)).toBe('2026-07-12');
+      expect(shiftDateOf(new Date(startUtc.getTime() - 60_000), h)).toBe('2026-07-11');
+      expect(shiftDateOf(endUtc, h)).toBe('2026-07-13');
+      expect(shiftDateOf(new Date(endUtc.getTime() - 60_000), h)).toBe('2026-07-12');
+    }
+  });
+
+  it('is the calendar day, unchanged, at hour 0', async () => {
+    const { shiftDayRange, todayInBeirutDateRange } = await import('./index');
+    for (const date of ['2026-07-12', '2026-03-29', '2026-10-25']) {
+      expect(shiftDayRange(date, 0)).toEqual(todayInBeirutDateRange(date));
+    }
+  });
+
+  it('starts at the named hour, Beirut, summer and winter', async () => {
+    const { shiftDayRange } = await import('./index');
+    // Beirut is UTC+3 in July, UTC+2 in December.
+    expect(shiftDayRange('2026-07-12', 4).startUtc.toISOString()).toBe('2026-07-12T01:00:00.000Z');
+    expect(shiftDayRange('2026-12-12', 4).startUtc.toISOString()).toBe('2026-12-12T02:00:00.000Z');
+  });
+
+  it('covers a DST day end to end, with no gap into the next', async () => {
+    const { shiftDayRange } = await import('./index');
+    for (const date of ['2026-03-28', '2026-03-29', '2026-10-24', '2026-10-25']) {
+      for (const h of [0, 4]) {
+        const a = shiftDayRange(date, h);
+        const b = shiftDayRange(
+          new Date(Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10) + 1)).toISOString().slice(0, 10),
+          h,
+        );
+        expect(a.endUtc.toISOString()).toBe(b.startUtc.toISOString());
+        expect(a.endUtc.getTime()).toBeGreaterThan(a.startUtc.getTime());
+      }
+    }
+  });
+});

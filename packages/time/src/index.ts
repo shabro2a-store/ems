@@ -78,6 +78,25 @@ export function todayInBeirutDateRange(date: string): { startUtc: Date; endUtc: 
   return { startUtc: beirutDayStart(date), endUtc: beirutDayStart(shiftCalendarDate(date, 1)) };
 }
 /**
+ * The UTC [start, end) range of one working day, when the day does not begin at
+ * midnight. The inverse of shiftDateOf: every instant in this range answers
+ * `date` from that function, and no instant outside it does.
+ *
+ * `dayStartHour` 0 delegates to todayInBeirutDateRange, so it is the calendar
+ * day exactly - DST handling included, rather than reimplemented beside it.
+ * Above 0 the hour is unambiguous by construction: Beirut moves its clocks at
+ * midnight, so 01:00 and later exist exactly once on every date of the year.
+ */
+export function shiftDayRange(date: string, dayStartHour = 0): { startUtc: Date; endUtc: Date } {
+  if (dayStartHour <= 0) return todayInBeirutDateRange(date);
+  const hhmm = `${String(dayStartHour).padStart(2, '0')}:00:00`;
+  return {
+    startUtc: scheduledToUtc(date, hhmm),
+    endUtc: scheduledToUtc(shiftCalendarDate(date, 1), hhmm),
+  };
+}
+
+/**
  * The working day a moment belongs to, when the day does not begin at midnight.
  *
  * Some shifts sit ON the midnight line. Dani starts at 23:00 some nights and
