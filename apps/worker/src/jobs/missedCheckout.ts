@@ -39,7 +39,7 @@ export async function runMissedCheckout(
     (
       await db.user.findMany({
         where: { id: { in: [...new Set(schedules.map((s) => s.user_id))] } },
-        select: { id: true, day_start_hour: true, branch: { select: { day_start_hour: true } } },
+        select: { id: true, day_start_hour: true },
       })
     ).map((u) => [u.id, resolveDayStartHour(u)]),
   );

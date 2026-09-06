@@ -9,14 +9,12 @@ import { resolveDayStartHour } from './dayStart';
  * would judge it on another, and nothing would look broken from either side.
  */
 const CASES: Array<[string, Parameters<typeof resolveDayStartHour>[0], number]> = [
-  ['nothing set anywhere is midnight', { branch: null }, 0],
+  ['nobody configured is midnight', {}, 0],
   ['a null user with no row at all', null, 0],
   ['undefined', undefined, 0],
-  ["the branch's, when the user has none", { day_start_hour: null, branch: { day_start_hour: 4 } }, 4],
-  ["the user's own beats the branch's", { day_start_hour: 0, branch: { day_start_hour: 4 } }, 0],
-  ['and the other way round too', { day_start_hour: 4, branch: { day_start_hour: 0 } }, 4],
-  ['a user with no branch at all', { day_start_hour: 3, branch: null }, 3],
-  ['a branch that has been removed', { day_start_hour: null, branch: null }, 0],
+  ['an explicit hour is theirs', { day_start_hour: 4 }, 4],
+  ['an explicit 0 is midnight', { day_start_hour: 0 }, 0],
+  ['null is midnight, not a branch lookup', { day_start_hour: null }, 0],
 ];
 
 describe('the working-day boundary that applies to one person', () => {
@@ -28,11 +26,20 @@ describe('the working-day boundary that applies to one person', () => {
   }
 
   it('treats an explicit 0 as a real answer, not a missing one', () => {
-    // The case the whole column exists for. Bilal sits at a branch set to 4 and
-    // needs midnight; `||` instead of `??` here would silently give him 4 back
-    // and put his 00:24 check-in in the previous month all over again.
-    const bilal = { day_start_hour: 0, branch: { day_start_hour: 4 } };
-    expect(resolveDayStartHour(bilal)).toBe(0);
-    expect(dayStartHourFor(bilal)).toBe(0);
+    // `||` instead of `??` would read a deliberate midnight as "unset". Today
+    // both land on 0 so nothing breaks, but the moment any fallback is added
+    // back this is the test that catches it turning a choice into a default.
+    expect(resolveDayStartHour({ day_start_hour: 0 })).toBe(0);
+    expect(dayStartHourFor({ day_start_hour: 0 })).toBe(0);
+  });
+
+  it('ignores a branch that still carries an hour', () => {
+    // The column still exists on Branch for history, and the deploy that moved
+    // this setting onto people did not clear it. If anything ever reads it
+    // again, every unconfigured employee at that branch silently inherits a
+    // boundary nobody chose - which is the whole failure this replaced.
+    const atBranchWithFour = { day_start_hour: null, branch: { day_start_hour: 4 } };
+    expect(resolveDayStartHour(atBranchWithFour)).toBe(0);
+    expect(dayStartHourFor(atBranchWithFour)).toBe(0);
   });
 });

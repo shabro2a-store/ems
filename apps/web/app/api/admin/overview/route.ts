@@ -8,6 +8,7 @@ import { grantedCreditMinutesByDate, pendingBlockedCreditNotices } from '@/lib/s
 import { requiredMinFor, currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
 import { lookbackMonths, mergeNotices } from '@/lib/services/noticeWindow';
 import { isMonthOpen } from '@/lib/services/periodLock';
+import { dayStartHourFor } from '@/lib/services/coverage';
 
 // How far back the penalty review queue looks. Older ones are a payroll matter.
 const PENALTY_LOOKBACK_DAYS = 7;
@@ -87,11 +88,11 @@ export async function GET(req: Request) {
       prisma.branch.findMany({
         where: { is_active: true },
         orderBy: { name: 'asc' },
-        select: { id: true, name: true, trip_threshold_min: true, day_start_hour: true },
+        select: { id: true, name: true, trip_threshold_min: true },
       }),
       prisma.user.findMany({
         where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] } },
-        select: { id: true, username: true, name: true, role: true, branch_id: true, hourly_rate_cent: true },
+        select: { id: true, username: true, name: true, role: true, branch_id: true, hourly_rate_cent: true, day_start_hour: true },
       }),
       prisma.punch.findMany({
         where: { at: { gte: punchesFromUtc, lt: endUtc } },
@@ -174,7 +175,6 @@ export async function GET(req: Request) {
   let hoursMinutes = 0;
   let laborCent = 0;
 
-  const dayStartByBranch = new Map(branches.map((b) => [b.id, b.day_start_hour]));
   const people = users
     .filter((u) => inScope(u.branch_id))
     .map((u) => {
@@ -183,7 +183,10 @@ export async function GET(req: Request) {
         punches: punchesByUser.get(u.id) ?? [],
         now: nowDate,
         creditedMinByDate: creditMinByUser.get(u.id),
-        dayStartHour: dayStartByBranch.get(u.branch_id ?? '') ?? 0,
+        // The person's own boundary. Reading the branch's here would put an
+        // unconfigured employee's live hours on a different working day than
+        // payroll pays them on, on the same screen.
+        dayStartHour: dayStartHourFor(u),
       });
       hoursMinutes += minutes;
       laborCent += Math.floor((minutes * u.hourly_rate_cent) / 60);

@@ -124,7 +124,7 @@ export async function overtimeForUser(
     }),
     db.user.findUnique({
       where: { id: userId },
-      select: { day_start_hour: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
+      select: { day_start_hour: true, branch: { select: { shift_grace_min: true } } },
     }),
     loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
   ]);
@@ -253,7 +253,7 @@ export async function pendingOvertimeNotices(
     }),
     db.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, day_start_hour: true, branch: { select: { shift_grace_min: true, day_start_hour: true } } },
+      select: { id: true, day_start_hour: true, branch: { select: { shift_grace_min: true } } },
     }),
     loadBlockedCreditInputs(ids, punchFrom, punchTo, db),
   ]);

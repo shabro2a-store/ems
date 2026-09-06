@@ -270,9 +270,13 @@ describe('a branch whose working day does not start at midnight', () => {
   // after midnight is starting the PREVIOUS day's shift. Judging him by the
   // calendar looked at a day his punches were never going to be in.
   function nightWorker(opts: { sundayOff?: boolean } = {}) {
+    // Still 4 on the branch, and deliberately so: it must govern nobody.
     store.branches.push({ id: 'b1', day_start_hour: 4 });
     store.users.set('dani', {
       id: 'dani', username: 'dani', is_active: true, role: 'EMPLOYEE',
+      // On dani himself. A branch cannot carry this any more - it held both him
+      // and the day staff a 04:00 boundary only ever harmed.
+      day_start_hour: 4,
       branch_id: 'b1', branch: { id: 'b1', name: 'Mar lias' },
     });
     for (let w = 0; w < 7; w++) {
@@ -372,9 +376,11 @@ describe('running hourly', () => {
     // The job is scheduled every hour now, so it must judge the same day many
     // times over and write exactly one flag - and it must not reach back and
     // re-report days it has already dealt with.
+    // Still 4 on the branch, and deliberately so: it must govern nobody.
     store.branches.push({ id: 'b1', day_start_hour: 4 });
     store.users.set('u1', {
-      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Mar lias' },
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', day_start_hour: 4,
+      branch_id: 'b1', branch: { id: 'b1', name: 'Mar lias' },
     });
     for (let w = 0; w < 7; w++) store.schedules.push({ id: `s${w}`, user_id: 'u1', weekday: w, shift_min: 480 });
 

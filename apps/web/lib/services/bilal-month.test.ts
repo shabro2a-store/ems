@@ -37,11 +37,13 @@ const cover = (dayStartHour: number) =>
     dayStartHour,
   });
 
-describe("Bilal's branch keeps its 04:00 boundary", () => {
-  const BRANCH_ONLY = { day_start_hour: null, branch: { day_start_hour: 4 } };
+describe('with a 04:00 boundary on him', () => {
+  // How he had one at all is the point: it came from his BRANCH, which also
+  // held dani. Nobody chose it for Bilal and nobody could see it applied to him.
+  const WITH_FOUR = { day_start_hour: 4 };
 
-  it('and that is what loses the day', () => {
-    const days = cover(dayStartHourFor(BRANCH_ONLY));
+  it('that is what loses the day', () => {
+    const days = cover(dayStartHourFor(WITH_FOUR));
     expect(days.map((d) => d.date)).toEqual(['2026-08-31']);
     expect(days[0]!.workedMin).toBe(544 + 970); // 25h14m on one day
     expect(days[0]!.deltaMin).toBe(494); // 8h14m of overtime nobody worked
@@ -59,12 +61,16 @@ describe("Bilal's branch keeps its 04:00 boundary", () => {
   });
 });
 
-describe('with his own boundary at midnight', () => {
-  const HIS_OWN = { day_start_hour: 0, branch: { day_start_hour: 4 } };
+describe('with no boundary, which is now what everybody starts with', () => {
+  // The fix is not that Bilal was given 0 - it is that nothing gives anyone a
+  // boundary unless a person deliberately does. His branch still carries 4 and
+  // it reaches nobody.
+  const HIS_OWN = { day_start_hour: null, branch: { day_start_hour: 4 } };
 
-  it('resolves to 0 even though his branch says 4', () => {
-    // `??`, not `||`. An explicit 0 is the answer here, not a missing value.
+  it('is midnight, whatever the branch still says', () => {
     expect(dayStartHourFor(HIS_OWN)).toBe(0);
+    expect(dayStartHourFor({})).toBe(0);
+    expect(dayStartHourFor({ day_start_hour: 0 })).toBe(0);
   });
 
   it('gives him two days, in the two months he worked them', () => {
@@ -85,11 +91,12 @@ describe('with his own boundary at midnight', () => {
   });
 });
 
-describe('dani, on the same branch, is untouched', () => {
+describe('dani, who was given one on purpose, is untouched', () => {
   it('still gets both halves of one night on one day', () => {
     // 23:00 one night and 00:02 the next are one shift pattern, not two days.
-    // This is what the branch boundary is FOR, and it has to keep working.
-    const dani = { day_start_hour: null, branch: { day_start_hour: 4 } };
+    // This is what the boundary is FOR, and it has to keep working for the
+    // handful of people somebody actually set it on.
+    const dani = { day_start_hour: 4 };
     const nights: PunchLite[] = [
       { kind: 'IN', at: new Date('2026-09-01T20:00:00Z') }, // Tue 23:00
       { kind: 'OUT', at: new Date('2026-09-02T04:00:00Z') }, // Wed 07:00

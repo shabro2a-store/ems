@@ -17,7 +17,11 @@ const Create = z.object({
   // branch has; 1-12 moves the boundary for a branch whose shifts sit on
   // midnight. Capped at noon because a boundary past it would start splitting
   // ordinary day shifts.
-  dayStartHour: z.number().int().min(0).max(12).optional(),
+  // Branch.day_start_hour no longer governs anybody - the working-day boundary
+  // moved onto the employee, because a branch holds both a night worker who
+  // needs one and day staff whom it silently moves into the previous month.
+  // The column is kept so historical audit rows still resolve, but nothing may
+  // set it: a value here would look effective and do nothing.
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -70,7 +74,6 @@ export async function POST(req: Request) {
       ...(body.gpsAccuracyMaxM !== undefined ? { gps_accuracy_max_m: body.gpsAccuracyMaxM } : {}),
       ...(body.shiftGraceMin !== undefined ? { shift_grace_min: body.shiftGraceMin } : {}),
       ...(body.tripThresholdMin !== undefined ? { trip_threshold_min: body.tripThresholdMin } : {}),
-      ...(body.dayStartHour !== undefined ? { day_start_hour: body.dayStartHour } : {}),
     },
   });
 

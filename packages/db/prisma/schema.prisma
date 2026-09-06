@@ -94,9 +94,10 @@ model User {
   // a day he had already worked - stacking 25h onto one day, inventing eight
   // hours of overtime and moving sixteen hours into a month that then closed.
   //
-  // Null means "whatever the branch says", so this changes nothing until the
-  // owner sets it, and a branch-wide value still works for a branch where
-  // everyone genuinely starts at night.
+  // Null means midnight, and midnight cannot move a shift anywhere - so a new
+  // account, or anyone nobody has thought about, is safe by default. That is
+  // the entire reason this lives here rather than on the branch: while the
+  // branch carried it, the harmful value was the one people INHERITED.
   day_start_hour       Int?
   // Retired, not erased. Set when the owner deletes somebody who has worked:
   // the login dies, the username is freed for reuse, and every present-tense
@@ -148,14 +149,20 @@ model Branch {
   trip_threshold_min Int     @default(30)
   // The hour the working day starts, for a branch whose shifts straddle
   // midnight. Dani clocks in at 23:00 some nights and 00:00 others for the same
-  // 7-hour shift; with a midnight boundary those are different days, so one
-  // night stacked two shifts onto one day (reported as eight hours of overtime)
-  // and left the next looking absent. At 6 the day runs 06:00-06:00 and both
-  // starts name the same day, while the 07:00 handover and every day shift stay
-  // where they are.
+  // DEAD. Nothing reads this any more - see dayStartHourFor, which resolves the
+  // boundary from the employee alone, and the migration that copied this value
+  // onto the people who were actually using it.
   //
-  // 0 is the calendar day and is what every branch has by default - see
-  // shiftDateOf, which reproduces inBeirut().date exactly at 0.
+  // A branch cannot carry this setting. Every branch that did held both a night
+  // worker who needed it and day staff whom it silently filed into the previous
+  // day - and the previous month: Bilal inherited 04:00 from Mar lias, one
+  // 00:24 check-in put a sixteen-hour shift onto a day he had already worked,
+  // and the hours left September for a month that closed before anyone noticed.
+  // Every new hire at that branch inherited the same trap.
+  //
+  // The column stays so historical audit rows still resolve, and the API and UI
+  // no longer let it be set - a value here would look effective and do nothing.
+  // dayStart.test.ts pins that it is ignored. Do not read it again.
   day_start_hour     Int     @default(0)
   is_active          Boolean @default(true)
   // Closed for good, as opposed to is_active=false which is "archived, might

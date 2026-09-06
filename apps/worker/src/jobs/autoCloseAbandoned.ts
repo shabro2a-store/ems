@@ -93,7 +93,7 @@ export async function runAutoCloseAbandoned(
       id: true,
       username: true,
       day_start_hour: true,
-      branch: { select: { name: true, day_start_hour: true } },
+      branch: { select: { name: true } },
     },
   });
 
@@ -109,7 +109,7 @@ export async function runAutoCloseAbandoned(
         at: true,
         branch_id: true,
         auto_close_revoked_at: true,
-        branch: { select: { lat: true, lng: true, day_start_hour: true } },
+        branch: { select: { lat: true, lng: true } },
       },
     });
     if (!lastIn) continue;

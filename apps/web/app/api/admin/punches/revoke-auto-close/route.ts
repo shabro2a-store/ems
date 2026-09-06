@@ -71,7 +71,7 @@ export async function POST(req: Request) {
       kind: true,
       at: true,
       system_generated: true,
-      user: { select: { day_start_hour: true, branch: { select: { day_start_hour: true } } } },
+      user: { select: { day_start_hour: true } },
     },
   });
   if (!out) return jsonError('NOT_FOUND', 'Punch not found', 404);

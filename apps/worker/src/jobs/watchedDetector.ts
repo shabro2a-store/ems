@@ -37,27 +37,22 @@ export async function runWatchedDetector(
   const db = opts.db ?? defaultPrisma;
   const now = opts.now ?? new Date();
 
-  const [branches, ownBoundaries] = await Promise.all([
-    db.branch.findMany({ select: { id: true, day_start_hour: true } }),
-    // Employees whose own boundary overrides their branch's. Their hour has to
-    // be in the set even when no branch uses it, or the pass that would judge
-    // them never runs and they are simply never checked for absence.
-    db.user.findMany({
-      where: { day_start_hour: { not: null } },
-      select: { day_start_hour: true },
-    }),
-  ]);
+  // Every boundary anybody actually has. The setting lives on the person now,
+  // so this is the only place it can come from - a branch's own column governs
+  // nobody and must not be read here, or an employee who was never configured
+  // would be judged on a working day that nothing else in the system agrees
+  // they are on.
+  const configured = await db.user.findMany({
+    where: { day_start_hour: { not: null } },
+    select: { day_start_hour: true },
+  });
 
   // Two people can be part-way through different working days at one instant,
   // with different days to judge - so each boundary in use is judged on its own
-  // pass. Midnight is always in the set: it is what somebody with no branch, or
-  // whose branch has been removed, falls back to.
+  // pass. Midnight is always in the set: it is what everybody who has not been
+  // given a boundary falls back to, which is almost everybody.
   const boundaries = [
-    ...new Set<number>([
-      0,
-      ...branches.map((b) => b.day_start_hour ?? 0),
-      ...ownBoundaries.map((u) => u.day_start_hour ?? 0),
-    ]),
+    ...new Set<number>([0, ...configured.map((u) => u.day_start_hour ?? 0)]),
   ].sort((a, b) => a - b);
 
   let flags_created = 0;

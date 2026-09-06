@@ -14,7 +14,6 @@ interface Branch {
   shift_grace_min: number;
   trip_threshold_min: number;
   is_active: boolean;
-  day_start_hour: number;
   deleted_at: string | null;
   staff_count: number;
 }
@@ -231,7 +230,6 @@ function EditBranchModal({ branch, onClose, onSaved }: { branch: Branch; onClose
     gpsAccuracyMaxM: String(branch.gps_accuracy_max_m),
     shiftGraceMin: String(branch.shift_grace_min),
     tripThresholdMin: String(branch.trip_threshold_min),
-    dayStartHour: String(branch.day_start_hour),
     isActive: branch.is_active,
   });
   const [busy, setBusy] = useState(false);
@@ -247,7 +245,6 @@ function EditBranchModal({ branch, onClose, onSaved }: { branch: Branch; onClose
         gpsAccuracyMaxM: parseInt(f.gpsAccuracyMaxM, 10),
         shiftGraceMin: parseInt(f.shiftGraceMin, 10),
         tripThresholdMin: parseInt(f.tripThresholdMin, 10),
-        dayStartHour: parseInt(f.dayStartHour, 10),
         isActive: f.isActive,
       },
     });
@@ -265,13 +262,6 @@ function EditBranchModal({ branch, onClose, onSaved }: { branch: Branch; onClose
           <Field label="Max accuracy (m)" htmlFor="ea"><Input id="ea" type="number" min="1" value={f.gpsAccuracyMaxM} onChange={(e) => setF({ ...f, gpsAccuracyMaxM: e.target.value })} /></Field>
           <Field label="Shift grace (min)" htmlFor="eg" hint="A day over or under its hours by less than this raises nothing - no overtime notice, no shortfall penalty."><Input id="eg" type="number" min="0" value={f.shiftGraceMin} onChange={(e) => setF({ ...f, shiftGraceMin: e.target.value })} /></Field>
           <Field label="Trip threshold (min)" htmlFor="et"><Input id="et" type="number" min="1" value={f.tripThresholdMin} onChange={(e) => setF({ ...f, tripThresholdMin: e.target.value })} /></Field>
-          <Field
-            label="Day starts at (hour)"
-            htmlFor="ed"
-            hint="0 = midnight. Raise it only if a shift here STARTS near midnight, so both sides of it count as one night."
-          >
-            <Input id="ed" type="number" min="0" max="12" value={f.dayStartHour} onChange={(e) => setF({ ...f, dayStartHour: e.target.value })} />
-          </Field>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={f.isActive} onChange={(e) => setF({ ...f, isActive: e.target.checked })} />

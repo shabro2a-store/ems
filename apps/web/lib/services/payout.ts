@@ -277,7 +277,7 @@ export async function payoutForUser(
     blockedCreditForUser(userId, month, db),
     db.user.findUnique({
       where: { id: userId },
-      select: { day_start_hour: true, branch: { select: { day_start_hour: true } } },
+      select: { day_start_hour: true },
     }),
   ]);
   return computePayoutFromRows({
@@ -319,7 +319,7 @@ export async function accruedEarningsThisMonth(
     blockedCreditForUser(userId, month, db),
     db.user.findUnique({
       where: { id: userId },
-      select: { day_start_hour: true, branch: { select: { day_start_hour: true } } },
+      select: { day_start_hour: true },
     }),
   ]);
   return grossWithCredit(
@@ -390,7 +390,7 @@ export async function payrollRoster(
     (
       await db.user.findMany({
         where: { id: { in: [...new Set(arrivals.map((a) => a.user_id))] } },
-        select: { id: true, day_start_hour: true, branch: { select: { day_start_hour: true } } },
+        select: { id: true, day_start_hour: true },
       })
     ).map((u) => [u.id, dayStartHourFor(u)]),
   );

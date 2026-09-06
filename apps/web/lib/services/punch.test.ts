@@ -1504,9 +1504,11 @@ describe('an employee refused at the door', () => {
 describe('a check-in the working-day boundary pulls onto a day already worked', () => {
   const MAR_LIAS = () => makeBranch({ name: 'Mar lias', day_start_hour: 4 });
 
-  function seedAt(branchDayStart: number) {
-    const branch = makeBranch({ name: 'Mar lias', day_start_hour: branchDayStart });
-    const user = makeUser('bilal', branch);
+  function seedAt(dayStartHour: number) {
+    // On the person. The branch still carries 4 and must reach nobody through
+    // it - that inheritance is what gave Bilal a boundary nobody chose.
+    const branch = makeBranch({ name: 'Mar lias', day_start_hour: 4 });
+    const user = { ...makeUser('bilal', branch), day_start_hour: dayStartHour };
     store.users.set(user.id, user);
     store.branches.set(branch.id, branch);
     store.schedules.push({ user_id: 'bilal', weekday: 1, shift_min: 1020 });
@@ -1559,8 +1561,9 @@ describe('a check-in the working-day boundary pulls onto a day already worked', 
   });
 
   it('stays quiet on a branch whose day starts at midnight', async () => {
-    // shiftDateOf is the calendar date by construction there, so an ordinary
-    // split shift - two real arrivals on one day - must raise nothing.
+    // Which is now everybody by default. shiftDateOf is the calendar date by
+    // construction at 0, so an ordinary split shift - two real arrivals on one
+    // day - must raise nothing.
     const { branch, user } = seedAt(0);
     seedClosedShift(user.id, branch.id, new Date('2026-09-01T04:00:00Z'), new Date('2026-09-01T09:00:00Z'));
     const sent: Array<{ template: string }> = [];

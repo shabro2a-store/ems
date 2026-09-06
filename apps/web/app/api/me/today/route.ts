@@ -43,7 +43,7 @@ export async function GET() {
     grantedCreditMinutesByDate([userId], month, prisma),
     prisma.user.findUnique({
       where: { id: userId },
-      select: { day_start_hour: true, branch: { select: { day_start_hour: true } } },
+      select: { day_start_hour: true },
     }),
   ]);
 

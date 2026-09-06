@@ -31,32 +31,34 @@ export function requiredMinFor(
 }
 
 /**
- * The working-day boundary that applies to one person: their own if the owner
- * set one, otherwise their branch's, otherwise midnight.
+ * The working-day boundary that applies to one person.
  *
- * A branch-wide setting cannot serve a branch that has both a night worker and
- * day staff, and every branch here has both. Hamra's dani starts before 04:00
- * on every shift he works; Hamra's ghayth.s did it once in nineteen. The first
- * needs the boundary and the second is only harmed by it - Bilal's 00:24
- * check-in was filed under the previous day, which he had already worked, and
- * the shift left September for a month that then closed.
+ * Theirs, or midnight. Deliberately NOT their branch's any more.
+ *
+ * A branch cannot hold this setting, because every branch that used it held
+ * both kinds of worker at once - Hamra's dani started before 04:00 on every
+ * shift he worked and needed it, Hamra's ghayth.s did it once in nineteen and
+ * was only harmed by it. While it lived on the branch the DEFAULT was the
+ * harmful one: Bilal inherited a boundary nobody chose for him, one late start
+ * filed a sixteen-hour shift under a day he had already worked, and sixteen
+ * hours left September for a month that closed before it could be corrected.
+ * Every new hire at those branches inherited the same trap, and the owner had
+ * to remember to turn it off for each of them, forever.
+ *
+ * Now nobody has a boundary unless somebody deliberately gave them one. Null -
+ * a new account, an employee never configured, a branch change - is midnight,
+ * and midnight cannot move a shift anywhere: shiftDateOf at 0 reproduces
+ * inBeirut().date exactly, by construction.
  *
  * Exported for the same reason requiredMinFor is: payroll, penalties, overtime,
- * the punch guard, the auto-close and the absence sweep must all answer "which
- * day is this" identically, and each re-deriving the fallback chain is how they
- * stop agreeing. Null at both levels is midnight, so nothing changes anywhere
- * until the owner sets a value.
+ * blocked credit, the punch guard, the auto-close and the absence sweep must
+ * all answer "which day is this" identically, and each re-deriving it is how
+ * they stop agreeing.
  */
 export function dayStartHourFor(
-  user:
-    | {
-        day_start_hour?: number | null;
-        branch?: { day_start_hour?: number | null } | null;
-      }
-    | null
-    | undefined,
+  user: { day_start_hour?: number | null } | null | undefined,
 ): number {
-  return user?.day_start_hour ?? user?.branch?.day_start_hour ?? 0;
+  return user?.day_start_hour ?? 0;
 }
 
 export interface DayCoverage {
