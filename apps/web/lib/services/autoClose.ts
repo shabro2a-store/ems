@@ -1,6 +1,26 @@
 import type { PrismaClient, Punch } from '@prisma/client';
 import { shiftDateOf, shiftWeekdayOf } from 'time';
-import { requiredMinFor, MAX_OPEN_SESSION_MIN } from './coverage';
+import { requiredMinFor } from './coverage';
+
+/**
+ * How long an open check-in may run before the system decides nobody is going
+ * to close it.
+ *
+ * Deliberately NOT `MAX_OPEN_SESSION_MIN` (30h), which is a different question:
+ * that one asks "may this session still be counted in today's hours", and it
+ * sits above a full 24h shift_min so no real shift is ever clamped by it.
+ *
+ * Twenty hours is the owner's number, and it is a judgement, not a derivation.
+ * A 34h double cover and a forgotten checkout are INDISTINGUISHABLE from the
+ * arrival alone - no threshold can separate them, because the only thing that
+ * can is the employee's own OUT punch, which by definition has not arrived yet.
+ * So the choice is which error to make by default, and 20h makes the one that
+ * is visible: it closes early, tells the owner, and gives him a Revoke that
+ * puts the session back. The 30h version made the invisible error instead - it
+ * waited, said nothing, and the truncation only surfaced in a payroll figure
+ * nobody could trace back to a night three weeks earlier.
+ */
+export const AUTO_CLOSE_AFTER_MIN = 20 * 60;
 
 /**
  * When a check-in nobody closed is deemed to have ended.
@@ -37,9 +57,13 @@ export interface StaleSessionCheck {
  * Whether an open check-in has stopped being a shift at all.
  *
  * The only basis on which the system may overrule a punch the employee is
- * making right now. `MAX_OPEN_SESSION_MIN` is the codebase's own definition of
- * "no longer a shift" - above a full 24h `shift_min`, so no real shift reaches
- * it - and it is the one threshold the dashboard, the sweep and this all share.
+ * making right now, and the sweep and the clock-out path share it so the two
+ * can never disagree about whether a session is still a shift.
+ *
+ * Note what `revoked` does to THIS path in particular: once the owner has
+ * revoked, an employee who worked 34 hours and clocks out at 34 hours has
+ * their real punch written, instead of being handed the 17h the system had
+ * already decided for them. That is the whole point of the button.
  *
  * NOT `staleSessionClose`. That fires at `required + grace`, which is exactly
  * when legitimate overtime begins - the reason autoCloseAbandoned refuses to
@@ -54,13 +78,25 @@ export function abandonedSessionClose(args: {
   arrivalAt: Date;
   now: Date;
   requiredMin: number;
+  /**
+   * The owner has already thrown away a checkout written for this arrival.
+   *
+   * He has looked at this exact session and said the employee really was still
+   * there, so the guess must not be made again - on the sweep's next tick ten
+   * minutes later, or against the employee's own clock-out. Without this the
+   * Revoke button does nothing you can keep: the row comes straight back.
+   */
+  revoked?: boolean;
 }): StaleSessionCheck | null {
+  if (args.revoked) return null;
   const elapsedMin = Math.floor((args.now.getTime() - args.arrivalAt.getTime()) / 60_000);
-  if (elapsedMin <= MAX_OPEN_SESSION_MIN) return null;
+  if (elapsedMin <= AUTO_CLOSE_AFTER_MIN) return null;
   const closeAt = systemCheckoutAt(args.arrivalAt, args.requiredMin);
-  // Always true at this point (the close is at most 24h past the arrival and
-  // the arrival is over 30h old), but the guard is what stops a checkout that
-  // no "is this open" query can see - see systemCheckoutAt.
+  // Not always true now the threshold is 20h: a 24h shift_min closes at
+  // arrival + 24h, which is still in the future at 20h. Such a session simply
+  // is not closed yet, and the next tick reconsiders it. Without this guard it
+  // would be closed into the future, where no "is this open" query can see the
+  // checkout - see systemCheckoutAt.
   if (closeAt.getTime() >= args.now.getTime()) return null;
   return { closeAt, requiredMin: args.requiredMin };
 }
@@ -68,6 +104,12 @@ export function abandonedSessionClose(args: {
 /**
  * Whether an open check-in belongs to a shift-day that is over, and so may be
  * closed when the employee starts a NEW shift.
+ *
+ * Deliberately NOT suppressed by `auto_close_revoked_at`. A revoke says "he
+ * was still working", and a check-in the next day is the proof that he no
+ * longer is. If a revoke silenced this path too, the arrival could never be
+ * closed by anything and the employee would be locked out of clocking in for
+ * good - the exact failure the whole auto-close exists to prevent.
  *
  * Check-in only. The new check-in is itself the evidence the old shift ended,
  * and nothing the employee made is discarded - their IN is still written at

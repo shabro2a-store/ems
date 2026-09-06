@@ -182,6 +182,14 @@ model Punch {
   // stood at the branch and pressed a button, which the lat/lng of a system
   // punch (the branch's own coordinates) would otherwise imply.
   system_generated  Boolean   @default(false)
+  // Set on the IN punch when the owner throws away a checkout the system wrote
+  // for it. The auto-close guesses that a session still open after 20 hours was
+  // forgotten and pays the shift; a double cover looks identical from the
+  // arrival alone, so this is how the owner says "no, he really was still
+  // there". Once set, neither the sweep nor the clock-out path may close this
+  // arrival again - otherwise the next tick would simply re-write the checkout
+  // he just removed, and the employee's own punch would keep being refused.
+  auto_close_revoked_at DateTime?
   created_at        DateTime  @default(now())
 
   @@index([user_id, at])

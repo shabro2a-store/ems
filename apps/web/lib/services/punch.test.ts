@@ -52,6 +52,7 @@ type Store = {
     corrected_by: string | null;
     correction_reason: string | null;
     system_generated: boolean;
+    auto_close_revoked_at?: Date | null;
     created_at: Date;
   }>;
   overrides: Array<{ id: string; user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE'; shift_min?: number | null }>;
@@ -706,18 +707,18 @@ describe('self-resolving a session left open from a shift-day that is over', () 
     expect(store.blocked).toHaveLength(0);
   });
 
-  it('closes it on a clock-out only once the session is past 30h', async () => {
+  it('closes it on a clock-out only once the session is past the abandoned threshold', async () => {
     seedNightWorker();
-    // 31 hours after the arrival: past MAX_OPEN_SESSION_MIN, so not a shift.
+    // 21 hours after the arrival: past AUTO_CLOSE_AFTER_MIN, so not a shift.
     const r = await punchEmployee({
       userId: 'u1', kind: 'OUT', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
-      now: new Date(NIGHT_BEFORE.getTime() + 31 * 3_600_000),
+      now: new Date(NIGHT_BEFORE.getTime() + 21 * 3_600_000),
     });
 
     expect('punch' in r).toBe(true);
     if (!('punch' in r)) return;
     expect(r.systemClosedInsteadOfPunch).toBe(true);
-    // No punch of theirs: writing one at `now` pays the 31h span, and
+    // No punch of theirs: writing one at `now` pays the 21h span, and
     // backdating theirs would make the record lie about when they pressed it.
     expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
     expect(r.minutes_since_in).toBe(480);
@@ -876,19 +877,43 @@ describe('a clock-out the employee makes is never overruled below 30h', () => {
     expect(store.punches.find((p) => p.kind === 'OUT')!.at.toISOString()).toBe(now.toISOString());
   });
 
-  it('holds right up to the 30h boundary, and gives way one minute past it', async () => {
+  it('holds right up to the 20h boundary, and gives way one minute past it', async () => {
     const arrival = new Date('2026-07-11T18:00:00Z');
     seedWorker(6, 600, arrival);
 
-    const atBoundary = await clockOut(new Date(arrival.getTime() + 30 * 3_600_000));
+    const atBoundary = await clockOut(new Date(arrival.getTime() + 20 * 3_600_000));
     expect('punch' in atBoundary && atBoundary.systemClosedInsteadOfPunch).toBeUndefined();
     expect(store.punches.find((p) => p.kind === 'OUT')!.system_generated).toBe(false);
 
     store.punches.length = 0;
     seedOpenIn('u1', 'b1', arrival);
-    const past = await clockOut(new Date(arrival.getTime() + 30 * 3_600_000 + 60_000));
+    const past = await clockOut(new Date(arrival.getTime() + 20 * 3_600_000 + 60_000));
     expect('punch' in past && past.systemClosedInsteadOfPunch).toBe(true);
     expect(store.punches.find((p) => p.kind === 'OUT')!.system_generated).toBe(true);
+  });
+
+  it('takes a real punch-out at 34h once the owner has revoked the guess', async () => {
+    // The double cover. Twenty hours in, the sweep decided he had forgotten and
+    // paid him his 10h shift; the owner revoked it, which deleted that checkout
+    // and marked the arrival. He finally clocks out at 34 hours - and the whole
+    // point of the button is that THIS punch is the one that counts.
+    const arrival = new Date('2026-07-11T18:00:00Z');
+    seedWorker(6, 600, arrival);
+    store.punches.length = 0;
+    seedOpenIn('u1', 'b1', arrival);
+    const openIn = store.punches.find((p) => p.kind === 'IN')!;
+    openIn.auto_close_revoked_at = new Date(arrival.getTime() + 20 * 3_600_000);
+
+    const now = new Date(arrival.getTime() + 34 * 3_600_000);
+    const r = await clockOut(now);
+
+    expect('punch' in r).toBe(true);
+    if (!('punch' in r)) return;
+    expect(r.systemClosedInsteadOfPunch).toBeUndefined();
+    const out = store.punches.find((p) => p.kind === 'OUT')!;
+    expect(out.system_generated).toBe(false);
+    expect(out.at.toISOString()).toBe(now.toISOString());
+    expect(r.minutes_since_in).toBe(34 * 60); // all of it, not the 600 he was owed
   });
 });
 

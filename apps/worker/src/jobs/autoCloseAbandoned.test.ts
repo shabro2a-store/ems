@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MAX_OPEN_SESSION_MIN as WEB_MAX_OPEN_SESSION_MIN } from '@/lib/services/coverage';
+import { AUTO_CLOSE_AFTER_MIN as WEB_AUTO_CLOSE_AFTER_MIN } from '@/lib/services/autoClose';
+import { MAX_OPEN_SESSION_MIN } from '@/lib/services/coverage';
 import { systemCheckoutAt as webSystemCheckoutAt } from '@/lib/services/autoClose';
 import { computePayoutFromRows } from '@/lib/services/payout';
 
@@ -27,7 +28,7 @@ const store: {
   seq: number;
 } = { users: [], punches: [], schedules: [], overrides: [], audits: [], flags: [], branches: new Map(), seq: 0 };
 
-import { runAutoCloseAbandoned, MAX_OPEN_SESSION_MIN, systemCheckoutAt } from './autoCloseAbandoned';
+import { runAutoCloseAbandoned, AUTO_CLOSE_AFTER_MIN, systemCheckoutAt } from './autoCloseAbandoned';
 
 function resetStore() {
   store.users.length = 0;
@@ -128,11 +129,24 @@ const CHECK_IN = new Date('2026-07-12T09:00:00+03:00');
 
 describe('runAutoCloseAbandoned', () => {
   it('is the same abandoned threshold the web app already uses', () => {
-    // Reusing one notion of "abandoned" is the point: if the dashboard stops
-    // counting a session at 30h and this job closed it at some other figure,
-    // there would be a window where the hours are invisible and the punch is
-    // still open, or one where a live shift is closed under the employee.
-    expect(MAX_OPEN_SESSION_MIN).toBe(WEB_MAX_OPEN_SESSION_MIN);
+    // Reusing one notion of "abandoned" is the point: the sweep and the
+    // clock-out path both refuse a session past it, and if they disagreed there
+    // would be a window where this job has closed a shift the clock-out would
+    // still have accepted - or the reverse, where the employee is handed the
+    // scheduled hours by a rule the sweep does not think has fired yet.
+    expect(AUTO_CLOSE_AFTER_MIN).toBe(WEB_AUTO_CLOSE_AFTER_MIN);
+    expect(AUTO_CLOSE_AFTER_MIN).toBe(20 * 60);
+  });
+
+  it('is a different question from MAX_OPEN_SESSION_MIN, and lower', () => {
+    // Two thresholds that are easy to conflate. MAX_OPEN_SESSION_MIN asks "may
+    // this session still be counted in today's hours" and has to sit above a
+    // full 24h shift_min so no real shift is clamped. This one asks "should we
+    // stop waiting for a checkout", which is a judgement, and 20h is deliberately
+    // low enough to reach a real double cover - the notification and the Revoke
+    // button are what make that the recoverable error rather than a silent one.
+    expect(AUTO_CLOSE_AFTER_MIN).toBeLessThan(MAX_OPEN_SESSION_MIN);
+    expect(MAX_OPEN_SESSION_MIN).toBe(30 * 60);
   });
 
   it('writes the checkout at the same instant the web rule says, including the one-minute floor', () => {
@@ -191,7 +205,7 @@ describe('runAutoCloseAbandoned', () => {
 
     // 14h in: two hours of real overtime, and well past the missedCheckout
     // trigger of required + grace (720 + 15 = 735 min). Closing here is exactly
-    // the mistake the 30h threshold avoids - it would truncate the overrun into
+    // the mistake the threshold avoids - it would truncate the overrun into
     // the plain 12h shift and quietly take two hours' pay.
     const now = new Date('2026-07-12T23:00:00+03:00');
     const elapsedMin = (now.getTime() - CHECK_IN.getTime()) / 60_000;
@@ -208,7 +222,7 @@ describe('runAutoCloseAbandoned', () => {
     punchIn(CHECK_IN);
     const db = makeDb();
 
-    const atThreshold = new Date(CHECK_IN.getTime() + MAX_OPEN_SESSION_MIN * 60_000);
+    const atThreshold = new Date(CHECK_IN.getTime() + AUTO_CLOSE_AFTER_MIN * 60_000);
     expect((await runAutoCloseAbandoned({ db: db as never, now: atThreshold })).closed).toBe(0);
 
     const pastThreshold = new Date(atThreshold.getTime() + 60_000);
@@ -354,8 +368,8 @@ describe('telling the owner a checkout was written for somebody', () => {
     seedEmployee({ 5: 1020 });
     punchIn(new Date('2026-09-04T07:00:00+03:00'));
     const { sent, notifier } = collector();
-    // Only 20h open - well inside the 30h threshold. This is a long shift, not
-    // an abandoned one, and the owner must not be told his hours were decided.
+    // 16h open - inside the threshold. This is a long shift, not an abandoned
+    // one, and the owner must not be told his hours were decided.
     const r = await runAutoCloseAbandoned({
       db: makeDb() as never,
       now: new Date('2026-09-05T03:00:00+03:00'),

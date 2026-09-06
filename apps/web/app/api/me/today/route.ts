@@ -71,6 +71,11 @@ export async function GET() {
         arrivalAt: open.in_at,
         now,
         requiredMin: await requiredMinForArrival(prisma, userId, open.in_at, dayStartHour),
+        // A revoked session is not stale: the owner has said this person really
+        // is still working, so the clock-out button must stay on their screen.
+        // Hiding it would leave somebody covering a double with no way to punch
+        // out at all - which is what the revoke was for.
+        revoked: open.autoCloseRevoked,
       }) !== null
     : false;
 

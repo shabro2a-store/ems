@@ -5,21 +5,29 @@ import { prisma as defaultPrisma } from '../db/prisma';
 import { resolveRequiredMin } from './requiredMin';
 
 /**
- * Past this, an open check-in is a forgotten checkout rather than a shift.
+ * Past this, an open check-in is treated as a forgotten checkout.
  *
- * This is the worker's copy of MAX_OPEN_SESSION_MIN in
- * apps/web/lib/services/coverage.ts, where the dashboard already uses it to
- * stop counting a runaway session. The worker is a separate pnpm package and
- * cannot import from apps/web; autoCloseAbandoned.test.ts pins the two
- * together the same way requiredMin.test.ts pins resolveRequiredMin.
+ * The worker's copy of AUTO_CLOSE_AFTER_MIN in
+ * apps/web/lib/services/autoClose.ts, which is the definition of record; the
+ * worker is a separate pnpm package and cannot import from apps/web, so
+ * autoCloseAbandoned.test.ts pins the two together the way requiredMin.test.ts
+ * pins resolveRequiredMin.
  *
  * It must NOT be the missedCheckout threshold. That fires at the day's
  * required minutes plus the branch grace, which is precisely the moment
  * legitimate overtime starts - closing there would truncate every genuine
- * overrun into the exact shift. 30h is above a full 24h shift_min, so no real
- * shift can reach it.
+ * overrun into the exact shift.
+ *
+ * Nor is it MAX_OPEN_SESSION_MIN (30h) in coverage.ts, which answers a
+ * different question: whether a session may still be counted in today's hours.
+ * That one has to sit above a full 24h shift_min. This one is a judgement
+ * about when to stop waiting, and 20h is the owner's. It will reach real
+ * double covers - a 34h double and a forgotten punch look identical from the
+ * arrival alone - which is why closing now notifies him and why he can revoke
+ * it. Closing early and loudly is the recoverable error; closing late and
+ * silently is not.
  */
-export const MAX_OPEN_SESSION_MIN = 30 * 60;
+export const AUTO_CLOSE_AFTER_MIN = 20 * 60;
 
 /**
  * When a check-in nobody closed is deemed to have ended: arrival + the hours
@@ -72,7 +80,7 @@ export async function runAutoCloseAbandoned(
 ): Promise<AutoCloseAbandonedResult> {
   const db = opts.db ?? defaultPrisma;
   const now = opts.now ?? new Date();
-  const cutoff = new Date(now.getTime() - MAX_OPEN_SESSION_MIN * 60_000);
+  const cutoff = new Date(now.getTime() - AUTO_CLOSE_AFTER_MIN * 60_000);
 
   const users = await db.user.findMany({
     // Deliberately not filtered on is_active. A deactivated employee cannot
@@ -94,11 +102,22 @@ export async function runAutoCloseAbandoned(
         id: true,
         at: true,
         branch_id: true,
+        auto_close_revoked_at: true,
         branch: { select: { lat: true, lng: true, day_start_hour: true } },
       },
     });
     if (!lastIn) continue;
     if (lastIn.at >= cutoff) continue;
+    // The owner has already thrown away a checkout written for this arrival: he
+    // looked at this session and said the employee really was still there. This
+    // job runs every ten minutes, so without this check the row he revoked
+    // would simply be written again before he had finished reading the message
+    // telling him about it.
+    //
+    // It cannot strand anyone. A revoked arrival is still closed by
+    // staleSessionClose the moment they clock in again, which is the evidence
+    // that the shift is genuinely over.
+    if (lastIn.auto_close_revoked_at) continue;
     const laterOut = await db.punch.findFirst({
       where: { user_id: u.id, kind: 'OUT', at: { gt: lastIn.at } },
       select: { id: true },
@@ -175,9 +194,9 @@ export async function runAutoCloseAbandoned(
             in_at: lastIn.at.toISOString(),
             open_min: openMin,
             required_min: requiredMin,
-            threshold_min: MAX_OPEN_SESSION_MIN,
+            threshold_min: AUTO_CLOSE_AFTER_MIN,
             reason:
-              `Check-in open ${openMin} min with no checkout, past the ${MAX_OPEN_SESSION_MIN} min ` +
+              `Check-in open ${openMin} min with no checkout, past the ${AUTO_CLOSE_AFTER_MIN} min ` +
               `abandoned-session threshold. Closed at check-in plus the ${requiredMin} min this day ` +
               `required, so the shift is paid and the runaway span is not. Overtime actually worked ` +
               `that night is not included and must be added as a bonus.`,
@@ -243,7 +262,8 @@ export async function runAutoCloseAbandoned(
             `${u.username}${u.branch ? `, ${u.branch.name}` : ''} never punched out from ` +
             `${inDateB} ${inHhmm}. The system has closed it at ${outDateB} ${outHhmm} and paid ` +
             `the ${hours}h that day required. Any overtime actually worked is NOT included - ` +
-            `add it as a bonus if it was real, or correct the checkout.`,
+            `add it as a bonus if it was real. If he was covering a double and is ` +
+            `still there, Revoke it on the punches page and his own punch-out will count.`,
         },
       });
       notified += 1;

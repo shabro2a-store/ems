@@ -33,6 +33,8 @@ export default function AdminPunchesPage() {
   const [limit, setLimit] = useState(200);
   const [loading, setLoading] = useState(true);
   const [target, setTarget] = useState<Punch | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<Punch | null>(null);
+  const [revokeReason, setRevokeReason] = useState('');
   const [corrAt, setCorrAt] = useState('');
   const [corrBranch, setCorrBranch] = useState('');
   const [corrReason, setCorrReason] = useState('');
@@ -73,6 +75,33 @@ export default function AdminPunchesPage() {
   const staffOptions = staff
     .filter((x) => branchId === 'all' || x.branch_id === branchId || x.id === userId)
     .sort((a, b) => (a.name || a.username).localeCompare(b.name || b.username));
+
+  function openRevoke(p: Punch) {
+    setRevokeTarget(p);
+    setRevokeReason('');
+    setErr(null);
+    setSuccess(null);
+  }
+
+  async function submitRevoke(e: React.FormEvent) {
+    e.preventDefault();
+    if (!revokeTarget) return;
+    setBusy(true);
+    setErr(null);
+    const res = await apiSend('/api/admin/punches/revoke-auto-close', {
+      idempotent: true,
+      idemPrefix: 'revoke-auto-close',
+      body: { punchId: revokeTarget.id, reason: revokeReason },
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setErr(errorMessage(res));
+      return;
+    }
+    setRevokeTarget(null);
+    setSuccess('Checkout revoked. The shift is open again - their own punch-out will close it.');
+    await load();
+  }
 
   function openCorrect(p: Punch) {
     setTarget(p);
@@ -188,7 +217,7 @@ export default function AdminPunchesPage() {
                       <Badge tone={p.kind === 'IN' ? 'success' : 'neutral'}>{p.kind}</Badge>
                       {p.corrected && <span className="ml-1"><Badge tone="warning">corrected</Badge></span>}
                       {p.system_generated && (
-                        <span className="ml-1" title="Written by the system to close a forgotten check-in at that day's shift hours. Correct it if the real hours differ.">
+                        <span className="ml-1" title="Written by the system after 20h with no checkout, at that day's shift hours. If they were covering a double and really were still there, Revoke it and their own punch-out will count.">
                           <Badge tone="warning">auto</Badge>
                         </span>
                       )}
@@ -199,7 +228,12 @@ export default function AdminPunchesPage() {
                     </td>
                     <td className="tabular px-4 py-2.5 text-xs">{p.accuracy_m}m</td>
                     <td className="px-4 py-2.5 text-right">
-                      <Button size="sm" variant="secondary" onClick={() => openCorrect(p)}>Correct</Button>
+                      <div className="flex justify-end gap-2">
+                        {p.system_generated && p.kind === 'OUT' && (
+                          <Button size="sm" variant="secondary" onClick={() => openRevoke(p)}>Revoke</Button>
+                        )}
+                        <Button size="sm" variant="secondary" onClick={() => openCorrect(p)}>Correct</Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -207,6 +241,40 @@ export default function AdminPunchesPage() {
             </table>
           </div>
         </Card>
+      )}
+
+      {revokeTarget && (
+        <Modal
+          title="Revoke system checkout"
+          onClose={() => setRevokeTarget(null)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setRevokeTarget(null)}>Cancel</Button>
+              <Button form="revoke-form" type="submit" variant="danger" loading={busy}>Revoke checkout</Button>
+            </>
+          }
+        >
+          <form id="revoke-form" onSubmit={submitRevoke} className="space-y-4">
+            <p className="text-sm">
+              The system wrote this checkout for <strong>{revokeTarget.user.username}</strong> at{' '}
+              {formatBeirut(revokeTarget.at)}, because their check-in had been open for more than 20 hours.
+            </p>
+            <p className="text-xs text-muted">
+              Revoking deletes it and leaves the shift open, so their own punch-out is what closes it - at
+              the hour they actually left. The system will not write another checkout for this shift.
+              Use this when they were covering a double, not when they simply forgot.
+            </p>
+            <Field label="Reason" htmlFor="revokeReason">
+              <Input
+                id="revokeReason"
+                value={revokeReason}
+                onChange={(e) => setRevokeReason(e.target.value)}
+                placeholder="Covering a double shift"
+                required
+              />
+            </Field>
+          </form>
+        </Modal>
       )}
 
       {target && (

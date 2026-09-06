@@ -239,7 +239,13 @@ export async function punchEmployee(
     // actually worked at, which is not always the employee's current branch -
     // nor, once roaming exists, the branch they are standing at now. Its
     // coordinates travel with it for the same reason.
-    select: { id: true, at: true, branch_id: true, branch: { select: { lat: true, lng: true } } },
+    select: {
+      id: true,
+      at: true,
+      branch_id: true,
+      auto_close_revoked_at: true,
+      branch: { select: { lat: true, lng: true } },
+    },
   });
   const laterOpenOut = openIn
     ? await db.punch.findFirst({
@@ -293,7 +299,19 @@ export async function punchEmployee(
             graceMin: user.branch.shift_grace_min,
             dayStartHour: user.branch.day_start_hour,
           })
-        : abandonedSessionClose({ arrivalAt: openIn!.at, now, requiredMin });
+        : abandonedSessionClose({
+            arrivalAt: openIn!.at,
+            now,
+            requiredMin,
+            // The owner already ruled on this exact session. Without this the
+            // Revoke button would put the arrival back only for the employee's
+            // own clock-out to be refused by the same rule all over again, and
+            // he would be handed the 17h a second time.
+            // Boolean, not `!== null`: an absent column reads as undefined,
+            // and `undefined !== null` is true - which would mark every session
+            // revoked and switch the abandoned rule off everywhere at once.
+            revoked: Boolean(openIn!.auto_close_revoked_at),
+          });
     if (stale) {
       resolvedStaleSession = true;
       systemClosed = await writeSystemCheckout(db, {
@@ -552,7 +570,7 @@ export async function resolveWatchedFlag(
 export async function currentOpenIn(
   userId: string,
   db: PrismaClient = defaultPrisma,
-): Promise<{ in_at: Date; minutes_since_in: number } | null> {
+): Promise<{ in_at: Date; minutes_since_in: number; autoCloseRevoked: boolean } | null> {
   const lastIn = await db.punch.findFirst({
     where: { user_id: userId, kind: 'IN' },
     orderBy: { at: 'desc' },
@@ -564,5 +582,9 @@ export async function currentOpenIn(
   if (laterOut) return null;
   const sinceMs = Date.now() - lastIn.at.getTime();
   const minutes_since_in = Math.max(0, Math.floor(sinceMs / 60_000));
-  return { in_at: lastIn.at, minutes_since_in };
+  return {
+    in_at: lastIn.at,
+    minutes_since_in,
+    autoCloseRevoked: Boolean(lastIn.auto_close_revoked_at),
+  };
 }
