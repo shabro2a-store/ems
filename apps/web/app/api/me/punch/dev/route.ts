@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     // only be overruled past MAX_OPEN_SESSION_MIN.
     const stale =
       body.kind === 'IN'
-        ? staleSessionClose({ arrivalAt: lastIn.at, now, requiredMin, graceMin: user.branch.shift_grace_min, dayStartHour: dayStartHourFor(user) })
+        ? staleSessionClose({ arrivalAt: lastIn.at, now, requiredMin, graceMin: user.branch.shift_grace_min })
         : abandonedSessionClose({ arrivalAt: lastIn.at, now, requiredMin });
     if (stale) {
       devSystemClosed = true;

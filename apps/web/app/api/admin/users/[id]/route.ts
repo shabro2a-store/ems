@@ -6,7 +6,6 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
 import { userHistory, hasHistory, deleteUserAndSetup, retireUser } from '@/lib/services/userDelete';
-import { MONTH_CLOSE_HOUR } from '@/lib/services/periodLock';
 
 const Patch = z.object({
   username: z.string().min(1).max(64).optional(),
@@ -23,11 +22,15 @@ const Patch = z.object({
   // This employee's own working-day boundary. null clears it back to "use the
   // branch's", which is what every account has until the owner sets one.
   //
-  // Capped at MONTH_CLOSE_HOUR, and that ceiling is load-bearing rather than
-  // cosmetic: the pay month closes on that same hour, so a boundary above it
-  // would put an employee still working the month's last shift into a month the
-  // lock had already settled - which is exactly the bug the shared hour fixes.
-  dayStartHour: z.number().int().min(0).max(MONTH_CLOSE_HOUR).nullable().optional(),
+  // day_start_hour is NOT settable, and its absence here is load-bearing.
+  //
+  // It stopped being a setting at REST_RULE_FROM. What it does now is answer
+  // "which day was this filed under BEFORE the changeover" - it is the legacy
+  // rule, read live, for every punch older than the cutover. Editing it would
+  // silently re-file months that have already been paid, which is the one thing
+  // the cutover exists to prevent: a single shift moving cost a manual top-up.
+  //
+  // The rest rule needs no hour from anybody, so nothing is lost by freezing it.
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -98,7 +101,6 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         ...(body.canRoamBranches !== undefined
           ? { can_roam_branches: body.canRoamBranches }
           : {}),
-        ...(body.dayStartHour !== undefined ? { day_start_hour: body.dayStartHour } : {}),
       },
     });
     if (body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent) {

@@ -1,5 +1,5 @@
 import type { PrismaClient, Punch } from '@prisma/client';
-import { shiftDateOf, shiftWeekdayOf } from 'time';
+import { SHIFT_GAP_MIN } from 'time';
 import { requiredMinFor, workingDaysOf, weekdayOfWorkingDay, type PunchLite } from './coverage';
 
 /**
@@ -137,16 +137,27 @@ export function staleSessionClose(args: {
   now: Date;
   requiredMin: number;
   graceMin: number;
-  /** The branch's working-day start hour; 0 is the calendar day. */
-  dayStartHour?: number;
 }): StaleSessionCheck | null {
-  // "An earlier day" means an earlier WORKING day. On a branch whose day starts
-  // at 06:00, somebody who clocked in at 23:00 and taps again at 01:00 is still
-  // inside the same shift-day and must be refused, not silently closed.
-  const dayStart = args.dayStartHour ?? 0;
-  if (shiftDateOf(args.arrivalAt, dayStart) >= shiftDateOf(args.now, dayStart)) return null;
+  // One condition now, and no hour of the clock in it.
+  //
+  // It used to be two: an earlier working DAY, plus past required + grace. The
+  // first was there to stop a duplicate tap closing a shift in progress, and it
+  // needed a day boundary to ask "earlier than what". Under the rest rule there
+  // is no such hour, and the open session has no checkout to measure rest
+  // against - so the question is asked directly instead.
+  //
+  // Enough time for the whole thing: their shift, the grace on it, and the rest
+  // that would end the working day. Below that, somebody tapping IN is still
+  // inside a shift and must be refused rather than silently closed - a 17-hour
+  // worker tapping at 17h30m is mid-shift, not returning. Above it they have
+  // had time to work the day, go home, and come back, which is the only story
+  // that fits an arrival this old with a new check-in against it.
+  //
+  // It cannot strand anybody: the sweep closes an abandoned session at
+  // AUTO_CLOSE_AFTER_MIN regardless, which is sooner than this for every
+  // schedule under 15h45m.
   const elapsedMin = Math.floor((args.now.getTime() - args.arrivalAt.getTime()) / 60_000);
-  if (elapsedMin <= args.requiredMin + args.graceMin) return null;
+  if (elapsedMin <= args.requiredMin + args.graceMin + SHIFT_GAP_MIN) return null;
   const closeAt = systemCheckoutAt(args.arrivalAt, args.requiredMin);
   if (closeAt.getTime() >= args.now.getTime()) return null;
   return { closeAt, requiredMin: args.requiredMin };

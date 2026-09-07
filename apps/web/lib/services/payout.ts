@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { shiftDateOf, scheduledToUtc } from 'time';
+import { shiftDateOf, scheduledToUtc, inBeirut } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
@@ -401,10 +401,24 @@ export async function payrollRoster(
       })
     ).map((u) => [u.id, dayStartHourFor(u)]),
   );
+  // Who to build a payslip for. Deliberately WIDE: an arrival counts if either
+  // the calendar month or the old boundary's month matches, because this is
+  // only a list of candidates and each one's payout is computed properly
+  // afterwards. Resolving the exact working day here would mean pulling every
+  // candidate's surrounding punches to answer a question whose wrong answers
+  // are not symmetric - including somebody who worked nothing shows a payslip
+  // of zero, while excluding somebody drops a month of their pay off the screen
+  // entirely.
   const workedIds = [
     ...new Set(
       arrivals
-        .filter((a) => shiftDateOf(a.at, hourByUser.get(a.user_id) ?? 0).slice(0, 7) === month)
+        .filter((a) => {
+          const hour = hourByUser.get(a.user_id) ?? 0;
+          return (
+            inBeirut(a.at).date.slice(0, 7) === month ||
+            shiftDateOf(a.at, hour).slice(0, 7) === month
+          );
+        })
         .map((a) => a.user_id),
     ),
   ];

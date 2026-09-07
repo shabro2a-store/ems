@@ -121,29 +121,6 @@ export default function AdminEmployeesPage() {
     await load();
   }
 
-  // The working day this one person's shifts are filed against.
-  //
-  // Null - which is what everybody has until somebody sets this - is midnight,
-  // and midnight cannot move a shift anywhere. It used to come from the branch,
-  // and that was the bug: a branch holds both a night worker who needs a
-  // boundary and day staff whom it only harms. Bilal inherited 04:00 from Mar
-  // lias because dani works there, clocked in once at 00:24, and that shift was
-  // filed under a day he had already worked - in the month before.
-  async function setDayStart(u: User, value: number | null) {
-    setErr(null);
-    const res = await apiSend(`/api/admin/users/${u.id}`, {
-      method: 'PATCH',
-      body: { dayStartHour: value },
-    });
-    if (!res.ok) { setErr(errorMessage(res)); return; }
-    setNotice(
-      value === null
-        ? `${u.name || u.username}'s working day is midnight to midnight again.`
-        : `${u.name || u.username}'s working day now starts at ${String(value).padStart(2, '0')}:00.`,
-    );
-    await load();
-  }
-
   // Mirrors the branches page: one button, and the server decides whether the
   // record can go. An account with punches behind it is a month payroll still
   // has to be able to reconstruct, so it is deactivated instead and the message
@@ -292,7 +269,6 @@ export default function AdminEmployeesPage() {
           onClose={() => setManage(null)}
           onPassword={() => { setManage(null); setPwTarget(manage); }}
           onRoam={() => { setManage(null); void toggleRoam(manage); }}
-          onDayStart={(v) => { setManage(null); void setDayStart(manage, v); }}
           onActive={() => { setManage(null); void toggleActive(manage); }}
           onRemove={() => { setManage(null); setRemoving(manage); }}
         />
@@ -685,7 +661,6 @@ function ManageModal({
   onClose,
   onPassword,
   onRoam,
-  onDayStart,
   onActive,
   onRemove,
 }: {
@@ -693,7 +668,6 @@ function ManageModal({
   onClose: () => void;
   onPassword: () => void;
   onRoam: () => void;
-  onDayStart: (value: number | null) => void;
   onActive: () => void;
   onRemove: () => void;
 }) {
@@ -708,45 +682,6 @@ function ManageModal({
               ? 'They currently clock in and out at any branch. This puts them back to their own.'
               : 'Let them cover at another branch and clock in and out there. They must still be AT a branch.',
             onClick: onRoam,
-          },
-        ]
-      : []),
-    ...(paid
-      ? [
-          {
-            label:
-              user.day_start_hour === null
-                ? 'Working day: midnight (normal)'
-                : `Working day starts at ${String(user.day_start_hour).padStart(2, '0')}:00`,
-            hint:
-              user.day_start_hour === null
-                ? 'Their day runs midnight to midnight, like almost everybody. Set this ONLY for someone whose shift sits on the midnight line - a night worker who clocks in at 23:00 some nights and 00:10 others.'
-                : 'Their shifts are filed against this hour instead of midnight. Clear it to put them back to midnight.',
-            onClick: () => {
-              const raw = window.prompt(
-                [
-                  `Working day for ${user.name || user.username}.`,
-                  '',
-                  'A shift belongs to the day it CLOCKS IN. For somebody who starts at 23:00 some nights and 00:10 others, that puts one shift on each side of midnight - so their day is moved to start at, say, 4, and both land together.',
-                  '',
-                  'Leave everybody else blank. A day worker on 4 who clocks in once at 00:24 has that whole shift filed under the previous day - and often the previous month.',
-                  '',
-                  'Enter 0-6, or leave blank for midnight.',
-                ].join('\n'),
-                user.day_start_hour === null ? '' : String(user.day_start_hour),
-              );
-              if (raw === null) return; // cancelled
-              const trimmed = raw.trim();
-              if (trimmed === '') { onDayStart(null); return; }
-              const n = Number(trimmed);
-              // Capped at the hour the pay month closes on - past that, the
-              // month would settle while they were still working its last shift.
-              if (!Number.isInteger(n) || n < 0 || n > 6) {
-                window.alert('That has to be a whole number from 0 to 6.');
-                return;
-              }
-              onDayStart(n);
-            },
           },
         ]
       : []),

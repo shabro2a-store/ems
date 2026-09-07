@@ -1,9 +1,9 @@
 import { PrismaClient } from '@prisma/client';
-import { todayInBeirut, todayInBeirutDateRange, shiftWeekdayOf } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
-import { resolveDayStartHour } from './dayStart';
+import { resolveDayStartHour, resolveWorkingDays } from './dayStart';
 
 export interface MissedCheckoutOpts {
   db?: PrismaClient;
@@ -62,8 +62,23 @@ export async function runMissedCheckout(
     // the schedule row for the weekday it actually started on - the WORKING
     // weekday, which on a branch whose day starts at 06:00 is the previous one
     // for anybody clocking in before dawn.
+    // Which working day this arrival opened, asked of the same rule payroll
+    // asks. It cannot come from the timestamp alone: two shifts can share a
+    // calendar date, and only the walk knows which of them claimed it.
     const dayStart = branchDayStart.get(s.user_id) ?? 0;
-    if (shiftWeekdayOf(lastIn.at, dayStart) !== s.weekday) continue;
+    const around = await db.punch.findMany({
+      where: { user_id: s.user_id, at: { gte: new Date(lastIn.at.getTime() - 3 * 86_400_000), lte: lastIn.at } },
+      orderBy: { at: 'asc' },
+      select: { kind: true, at: true },
+    });
+    const labels = resolveWorkingDays(around, dayStart);
+    const idx = around.findIndex((p) => p.kind === 'IN' && p.at.getTime() === lastIn.at.getTime());
+    const inDate =
+      (idx >= 0 ? labels[idx] : null) ?? resolveWorkingDays([{ kind: 'IN', at: lastIn.at }], dayStart)[0]!;
+    // The weekday of the LABEL, not of the punch: a shift starting 23:58 can be
+    // filed on the following date, and this has to read the same schedule row
+    // payroll will.
+    if (beirutWeekday(new Date(`${inDate}T12:00:00.000Z`)) !== s.weekday) continue;
 
     // An override for that specific date beats the weekly pattern, exactly as
     // it does for payroll - judging four hours of approved time off against
@@ -71,7 +86,6 @@ export async function runMissedCheckout(
     // actually owed. A date that ends up owing nothing is skipped rather than
     // measured against zero, which would alert one grace period after arrival;
     // the weekly query already skips unscheduled weekdays the same way.
-    const inDate = todayInBeirut(lastIn.at);
     const override = await db.scheduleOverride.findUnique({
       where: { user_id_date: { user_id: s.user_id, date: new Date(`${inDate}T00:00:00.000Z`) } },
       select: { kind: true, shift_min: true },

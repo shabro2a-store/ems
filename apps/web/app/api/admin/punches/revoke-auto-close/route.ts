@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { z } from 'zod';
-import { shiftDateOf } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
 import { isMonthOpen, CLOSED_MONTH_MESSAGE } from '@/lib/services/periodLock';
-import { dayStartHourFor } from '@/lib/services/coverage';
+import { dayStartHourFor, workingDaysOf, type PunchLite } from '@/lib/services/coverage';
 
 const Body = z.object({
   punchId: z.string().min(1),
@@ -95,7 +94,20 @@ export async function POST(req: Request) {
   // rule payroll pays it under. Reopening a shift changes the hours, so it may
   // only happen while that month can still be recalculated.
   const dayStartHour = dayStartHourFor(out.user);
-  const shiftDate = shiftDateOf(arrival.at, dayStartHour);
+  // The working day the shift is filed under, asked of the same rule payroll
+  // asks - not of the timestamp, which cannot know which shift claimed the date.
+  const nearby = await prisma.punch.findMany({
+    where: {
+      user_id: out.user_id,
+      at: { gte: new Date(arrival.at.getTime() - 3 * 86_400_000), lte: arrival.at },
+    },
+    orderBy: { at: 'asc' },
+    select: { kind: true, at: true },
+  });
+  const labels = workingDaysOf(nearby as PunchLite[], dayStartHour);
+  const idx = nearby.findIndex((p) => p.kind === 'IN' && p.at.getTime() === arrival.at.getTime());
+  const shiftDate =
+    (idx >= 0 ? labels[idx] : null) ?? workingDaysOf([{ kind: 'IN', at: arrival.at }], dayStartHour)[0]!;
   if (!isMonthOpen(shiftDate)) {
     return jsonError('MONTH_CLOSED', CLOSED_MONTH_MESSAGE, 409);
   }

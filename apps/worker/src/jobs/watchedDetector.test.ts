@@ -86,6 +86,12 @@ function makeDb() {
       },
     },
     punch: {
+      findMany: async ({ where }: { where: { user_id: string; at?: { gte?: Date; lte?: Date } } }) =>
+        store.punches
+          .filter((p) => p.user_id === where.user_id)
+          .filter((p) => (where.at?.gte ? p.at >= where.at.gte : true))
+          .filter((p) => (where.at?.lte ? p.at <= where.at.lte : true))
+          .sort((a, b) => a.at.getTime() - b.at.getTime()),
       findFirst: async ({ where }: { where: { user_id: string; kind?: 'IN' | 'OUT'; at?: { gte: Date; lt: Date } } }) => {
         return store.punches.find((p) =>
           p.user_id === where.user_id &&
@@ -394,9 +400,12 @@ describe('running hourly', () => {
       });
       created.push(r.flags_created);
     }
-    // Saturday is flagged by the first run, Sunday by the first run after 04:00
-    // on Monday. Nothing else writes anything.
-    expect(created).toEqual([1, 0, 0, 0, 1, 0, 0]);
+    // Saturday is flagged by the first run, Sunday by the first run after
+    // MIDNIGHT on Monday - 03:10, not 04:10. The 4 on the branch and on the
+    // employee governs nothing any more: a working day is named by the calendar
+    // date of the arrival that opened it, so the day that just ended is simply
+    // yesterday, for everybody, whatever hours they keep.
+    expect(created).toEqual([1, 0, 0, 1, 0, 0, 0]);
     expect(store.flags.map((f) => (f.context_json as { date: string }).date)).toEqual(['2026-07-11', '2026-07-12']);
   });
 });

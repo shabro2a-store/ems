@@ -1499,108 +1499,147 @@ describe('an employee refused at the door', () => {
 });
 
 /*
- * The day that vanished.
+ * A second working day opened on one date.
  *
- * Bilal clocked in at 00:24 on 1 September. His branch's working day starts at
- * 04:00, so the shift belongs to 31 August - a day he had already worked
- * 07:05-16:09. Both landed on that one day: 25h14m against 17h owed, eight
- * hours of overtime nobody worked, and sixteen hours of September's work paid
- * in August. September read seventeen hours light and nothing anywhere said
- * where the day had gone.
- *
- * The boundary did what it is for. What was missing was anybody being told.
+ * The rest rule names a working day by the calendar date of the arrival that
+ * opened it, and moves it forward when an earlier shift already took that date.
+ * A label that differs from the date somebody clocked in on therefore means one
+ * thing exactly: they have started a second working day. That is the shape that
+ * put 25h14m on one day, invented eight hours of overtime and moved sixteen
+ * hours into a month that then closed - so it gets a message.
  */
-describe('a check-in the working-day boundary pulls onto a day already worked', () => {
-  const MAR_LIAS = () => makeBranch({ name: 'Mar lias', day_start_hour: 4 });
-
-  function seedAt(dayStartHour: number) {
-    // On the person. The branch still carries 4 and must reach nobody through
-    // it - that inheritance is what gave Bilal a boundary nobody chose.
-    const branch = makeBranch({ name: 'Mar lias', day_start_hour: 4 });
-    const user = { ...makeUser('bilal', branch), day_start_hour: dayStartHour };
+describe('a check-in that opens a second working day on one date', () => {
+  function seed() {
+    const branch = makeBranch({ name: 'Hamra - coffee mart' });
+    const user = makeUser('u1', branch);
     store.users.set(user.id, user);
     store.branches.set(branch.id, branch);
-    store.schedules.push({ user_id: 'bilal', weekday: 1, shift_min: 1020 });
-    store.schedules.push({ user_id: 'bilal', weekday: 2, shift_min: 1020 });
+    for (let w = 0; w < 7; w++) store.schedules.push({ user_id: 'u1', weekday: w, shift_min: 480 });
     return { branch, user };
   }
 
-  function clockIn(now: Date, sent: unknown[]) {
-    return punchEmployee({
-      userId: 'bilal', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+  const clockIn = (now: Date, sent: unknown[]) =>
+    punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
       now,
       notifier: { send: async (p) => { sent.push(p); } },
     });
-  }
 
-  it('warns, and says the month it will be paid in', async () => {
-    const { branch, user } = seedAt(4);
-    // Monday 31 Aug, worked and closed. Beirut is UTC+3 in summer.
-    seedClosedShift(user.id, branch.id, new Date('2026-08-31T04:05:00Z'), new Date('2026-08-31T13:09:00Z'));
+  it("names both shifts and the date the second one lands on", async () => {
+    // aaref's real Friday: in 16:02, out 18:21, back at 23:53 after 5h32m -
+    // sleep, so a new working day. Both start on the same date, and no clock
+    // boundary could ever have separated them.
+    const { branch, user } = seed();
+    seedClosedShift(user.id, branch.id, new Date('2026-09-11T13:02:00Z'), new Date('2026-09-11T15:21:00Z'));
     const sent: Array<{ template: string; context: Record<string, unknown> }> = [];
 
-    // 00:24 on Tuesday 1 September.
-    const r = await clockIn(new Date('2026-08-31T21:24:00Z'), sent);
+    const r = await clockIn(new Date('2026-09-11T20:53:00Z'), sent); // 23:53 Beirut
     expect('punch' in r).toBe(true);
 
-    const warn = sent.find((p) => p.template === 'punch.pulled_back');
+    const warn = sent.find((p) => p.template === 'punch.second_working_day');
     expect(warn).toBeDefined();
-    expect(warn!.context.calendar_date).toBe('2026-09-01');
-    expect(warn!.context.shift_date).toBe('2026-08-31');
-    expect(warn!.context.moves_month).toBe(true);
+    expect(warn!.context.clocked_in_on).toBe('2026-09-11');
+    expect(warn!.context.filed_under).toBe('2026-09-12');
+    expect(warn!.context.moves_month).toBe(false);
     const msg = String(warn!.context.message);
-    expect(msg).toContain('00:24');
-    expect(msg).toContain('ALREADY worked');
-    expect(msg).toContain('paid in 2026-08, not 2026-09');
+    expect(msg).toContain('23:53');
+    expect(msg).toContain('16:02'); // the shift that took the date first
+    expect(msg).toContain("judged against that day's scheduled hours");
   });
 
-  it('stays quiet for the night worker the boundary exists for', async () => {
-    // dani starts at 00:02 and is pulled back every single night - but onto a
-    // working day with no arrival on it yet, which is the case the boundary was
-    // added to get right. Warning here would make the alert worthless.
-    const { branch, user } = seedAt(4);
-    // His PREVIOUS night: in 00:02 Monday, out 08:00 Monday. That checkout sits
-    // inside Monday's working-day window, so a naive "any punch that day" test
-    // would fire on him. The arrival is what counts, and his belongs to Sunday.
-    seedClosedShift(user.id, branch.id, new Date('2026-08-30T21:02:00Z'), new Date('2026-08-31T05:00:00Z'));
-    const sent: Array<{ template: string }> = [];
+  it('says so when the second day also lands in the next month', async () => {
+    const { branch, user } = seed();
+    seedClosedShift(user.id, branch.id, new Date('2026-09-30T13:00:00Z'), new Date('2026-09-30T15:00:00Z'));
+    const sent: Array<{ template: string; context: Record<string, unknown> }> = [];
 
-    await clockIn(new Date('2026-08-31T21:02:00Z'), sent); // 00:02 Tuesday
-    expect(sent.filter((p) => p.template === 'punch.pulled_back')).toHaveLength(0);
+    await clockIn(new Date('2026-09-30T20:53:00Z'), sent); // 23:53 Beirut, 30 Sep
+    const warn = sent.find((p) => p.template === 'punch.second_working_day')!;
+    expect(warn.context.filed_under).toBe('2026-10-01');
+    expect(warn.context.moves_month).toBe(true);
+    expect(String(warn.context.message)).toContain('paid in 2026-10, not 2026-09');
   });
 
-  it('stays quiet on a branch whose day starts at midnight', async () => {
-    // Which is now everybody by default. shiftDateOf is the calendar date by
-    // construction at 0, so an ordinary split shift - two real arrivals on one
-    // day - must raise nothing.
-    const { branch, user } = seedAt(0);
-    seedClosedShift(user.id, branch.id, new Date('2026-09-01T04:00:00Z'), new Date('2026-09-01T09:00:00Z'));
+  it('stays silent for a night worker starting just after midnight', async () => {
+    // dani, every night. The date he clocks in on is free, so there is no
+    // collision and nothing to say. Warning here - which "the old rule and the
+    // new rule disagree" would have done - buries the real ones within a week.
+    const { branch, user } = seed();
+    seedClosedShift(user.id, branch.id, new Date('2026-09-09T21:02:00Z'), new Date('2026-09-10T05:00:00Z'));
     const sent: Array<{ template: string }> = [];
-
-    await clockIn(new Date('2026-09-01T14:00:00Z'), sent);
-    expect(sent.filter((p) => p.template === 'punch.pulled_back')).toHaveLength(0);
+    await clockIn(new Date('2026-09-10T21:02:00Z'), sent); // 00:02 on the 11th
+    expect(sent.filter((p) => p.template === 'punch.second_working_day')).toHaveLength(0);
   });
 
-  it('stays quiet when the pulled-back day is empty', async () => {
-    const { branch } = seedAt(4);
-    void branch;
+  it('stays silent for an ordinary split shift', async () => {
+    // Back inside the rest window, so it continues the day already open rather
+    // than opening a second one.
+    const { branch, user } = seed();
+    seedClosedShift(user.id, branch.id, new Date('2026-09-11T05:00:00Z'), new Date('2026-09-11T09:00:00Z'));
     const sent: Array<{ template: string }> = [];
-    await clockIn(new Date('2026-08-31T21:24:00Z'), sent);
-    expect(sent.filter((p) => p.template === 'punch.pulled_back')).toHaveLength(0);
+    await clockIn(new Date('2026-09-11T11:00:00Z'), sent); // 2h later
+    expect(sent.filter((p) => p.template === 'punch.second_working_day')).toHaveLength(0);
   });
 
   it('writes the punch even if the warning throws', async () => {
-    const { branch, user } = seedAt(4);
-    seedClosedShift(user.id, branch.id, new Date('2026-08-31T04:05:00Z'), new Date('2026-08-31T13:09:00Z'));
-    void MAR_LIAS;
-
+    const { branch, user } = seed();
+    seedClosedShift(user.id, branch.id, new Date('2026-09-11T13:02:00Z'), new Date('2026-09-11T15:21:00Z'));
     const r = await punchEmployee({
-      userId: 'bilal', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
-      now: new Date('2026-08-31T21:24:00Z'),
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date('2026-09-11T20:53:00Z'),
       notifier: { send: async () => { throw new Error('telegram down'); } },
     });
-
     expect('punch' in r).toBe(true);
     expect(store.punches.filter((p) => p.kind === 'IN')).toHaveLength(2);
+  });
+});
+
+describe('closing a forgotten session on the next check-in, without a clock', () => {
+  // It used to need a day boundary to ask "is that arrival from an earlier
+  // day". There is no such hour now, and an open session has no checkout to
+  // measure rest against - so it asks directly whether enough time has passed
+  // for the whole story: the shift, its grace, and the rest that ends the day.
+  function seedLongShift(shiftMin: number, arrival: Date) {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    store.branches.set(branch.id, branch);
+    for (let w = 0; w < 7; w++) store.schedules.push({ user_id: 'u1', weekday: w, shift_min: shiftMin });
+    seedOpenIn(user.id, branch.id, arrival);
+  }
+
+  const ARRIVAL = new Date('2026-09-10T04:00:00Z'); // 07:00 Beirut
+  const tapAt = (min: number) =>
+    punchEmployee({
+      userId: 'u1', kind: 'IN', lat: 33.8962, lng: 35.4827, accuracy: 10, deviceFp: 'fp', ip: '1.2.3.4',
+      now: new Date(ARRIVAL.getTime() + min * 60_000),
+    });
+
+  it('refuses a 17h worker still mid-shift at 17h30m', async () => {
+    // 1020 + 15 + 255 = 1290. Closing here would take the rest of his shift.
+    seedLongShift(1020, ARRIVAL);
+    const r = await tapAt(17 * 60 + 30);
+    expect('code' in r && r.code).toBe('ALREADY_PUNCHED_IN');
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(0);
+  });
+
+  it('closes it once the shift, the grace and a rest have all had time to pass', async () => {
+    seedLongShift(1020, ARRIVAL);
+    const r = await tapAt(1020 + 15 + 255 + 1);
+    expect('punch' in r).toBe(true);
+    const out = store.punches.find((p) => p.kind === 'OUT')!;
+    expect(out.system_generated).toBe(true);
+    // At the shift he was owed, not the runaway span.
+    expect(out.at.toISOString()).toBe(new Date(ARRIVAL.getTime() + 1020 * 60_000).toISOString());
+  });
+
+  it('holds to the minute', async () => {
+    seedLongShift(480, ARRIVAL);
+    const onTheLine = await tapAt(480 + 15 + 255);
+    expect('code' in onTheLine && onTheLine.code).toBe('ALREADY_PUNCHED_IN');
+
+    store.punches.length = 0;
+    seedOpenIn('u1', 'b1', ARRIVAL);
+    const pastIt = await tapAt(480 + 15 + 255 + 1);
+    expect('punch' in pastIt).toBe(true);
   });
 });

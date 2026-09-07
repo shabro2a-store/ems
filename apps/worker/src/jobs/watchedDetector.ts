@@ -1,9 +1,9 @@
 import { PrismaClient } from '@prisma/client';
-import { beirutWeekday, previousBeirutDate, shiftDateOf, shiftDayRange } from 'time';
+import { beirutWeekday, previousBeirutDate, todayInBeirut } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
-import { resolveDayStartHour } from './dayStart';
+import { resolveDayStartHour, resolveWorkingDays } from './dayStart';
 
 export interface WatchedDetectorOpts {
   db?: PrismaClient;
@@ -23,7 +23,7 @@ export interface WatchedDetectorResult {
 //
 // That day is the branch's working day, not the calendar day. Everything that
 // decides hours - payroll, penalties, overtime, blocked credit, missed checkout,
-// auto-close - reads Branch.day_start_hour and asks shiftDateOf which day a
+// auto-close - asks the rest rule which working day a
 // punch belongs to; this job used to ask the calendar instead. Once a branch
 // moved its boundary off midnight the two stopped naming the same day for
 // anyone who clocks in near it, and a night worker got judged on a day his
@@ -37,50 +37,31 @@ export async function runWatchedDetector(
   const db = opts.db ?? defaultPrisma;
   const now = opts.now ?? new Date();
 
-  // Every boundary anybody actually has. The setting lives on the person now,
-  // so this is the only place it can come from - a branch's own column governs
-  // nobody and must not be read here, or an employee who was never configured
-  // would be judged on a working day that nothing else in the system agrees
-  // they are on.
-  const configured = await db.user.findMany({
-    where: { day_start_hour: { not: null } },
-    select: { day_start_hour: true },
-  });
-
-  // Two people can be part-way through different working days at one instant,
-  // with different days to judge - so each boundary in use is judged on its own
-  // pass. Midnight is always in the set: it is what everybody who has not been
-  // given a boundary falls back to, which is almost everybody.
-  const boundaries = [
-    ...new Set<number>([0, ...configured.map((u) => u.day_start_hour ?? 0)]),
-  ].sort((a, b) => a - b);
+  // One judged day for everybody, and no boundary anywhere.
+  //
+  // A working day is now named by the calendar date of the arrival that opened
+  // it (moved forward only when an earlier shift already claimed that date), so
+  // every shift labelled D has started by the end of D - labels never move
+  // backwards. The day that just ended is therefore simply yesterday, for
+  // everyone, whatever hours they keep.
+  //
+  // From the calendar, not now-24h: on the morning after a short DST day that
+  // arithmetic lands two days back and the short day is never judged.
+  const judged = previousBeirutDate(todayInBeirut(now));
+  // From the date itself at midday, where no DST transition can reach it.
+  const wd = beirutWeekday(new Date(`${judged}T12:00:00.000Z`));
+  const overrideDate = new Date(`${judged}T00:00:00.000Z`);
 
   let flags_created = 0;
   let skipped_off = 0;
   let users_scanned = 0;
 
-  for (const dayStartHour of boundaries) {
-    // shiftDateOf names the working day in progress, so the one before it is the
-    // last one that has fully ended - via the calendar, never now-24h, which
-    // lands on the wrong date the morning after a short DST day.
-    const judged = previousBeirutDate(shiftDateOf(now, dayStartHour));
-    const { startUtc, endUtc } = shiftDayRange(judged, dayStartHour);
-    // From the date itself at midday, where no boundary or DST transition can
-    // reach it - the same way shiftWeekdayOf resolves a working day's weekday.
-    const wd = beirutWeekday(new Date(`${judged}T12:00:00.000Z`));
-    const overrideDate = new Date(`${judged}T00:00:00.000Z`);
-
-    const scheduled = await db.schedule.findMany({
+  {
+    const mine = await db.schedule.findMany({
       where: { weekday: wd, shift_min: { gt: 0 } },
       include: { user: { include: { branch: true } } },
     });
-    // Only the people this boundary actually governs. Everyone else is in this
-    // result set because the weekday is queried globally, but their working day
-    // starts at a different hour and is judged on its own pass. Resolved per
-    // PERSON, so an employee whose own boundary differs from their branch's is
-    // judged on theirs - which is the whole point of the override.
-    const mine = scheduled.filter((s) => resolveDayStartHour(s.user) === dayStartHour);
-    if (mine.length === 0) continue;
+    if (mine.length === 0) return { flags_created, users_scanned, skipped_off };
     users_scanned += mine.length;
 
     // Every override for the day being judged, not just DAY_OFF: approving a
@@ -115,21 +96,31 @@ export async function runWatchedDetector(
         continue;
       }
 
-      // An ARRIVAL in the window, not any punch. A working day is made by the
-      // punch that starts it - that is the rule computeCoverage builds days on,
-      // and the reason a shift belongs to the day it clocked in. A night shift
-      // straddles the boundary, so the checkout of the PREVIOUS day's shift
-      // lands inside this one; counting it as attendance is how a skipped night
-      // hid behind the night before it.
-      const arrived = await db.punch.findFirst({
+      // Did a WORKING DAY named `judged` ever open for them?
+      //
+      // Asked of the labels, not of a time window. A window cannot answer it:
+      // a night shift's checkout lands inside the following day, and counting
+      // that as attendance is exactly how a skipped night hid behind the night
+      // before it. The label is the same one payroll files the shift under, so
+      // "was this day worked" and "was this day paid" cannot disagree.
+      //
+      // Three days either side, because a shift labelled `judged` may have
+      // started the evening before it and may still be running.
+      const around = await db.punch.findMany({
         where: {
           user_id: s.user_id,
-          kind: 'IN',
-          at: { gte: startUtc, lt: endUtc },
+          at: {
+            gte: new Date(`${judged}T00:00:00.000Z`).getTime() - 3 * 86_400_000 > 0
+              ? new Date(new Date(`${judged}T00:00:00.000Z`).getTime() - 3 * 86_400_000)
+              : new Date(0),
+            lte: new Date(new Date(`${judged}T00:00:00.000Z`).getTime() + 3 * 86_400_000),
+          },
         },
-        select: { id: true },
+        orderBy: { at: 'asc' },
+        select: { kind: true, at: true },
       });
-      if (arrived) continue;
+      const labels = resolveWorkingDays(around, resolveDayStartHour(s.user));
+      if (around.some((p, i) => p.kind === 'IN' && labels[i] === judged)) continue;
 
       if (seen.has(`${s.user_id}|${judged}`)) continue;
 
