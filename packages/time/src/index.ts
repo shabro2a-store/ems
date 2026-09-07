@@ -135,3 +135,97 @@ export function shiftWeekdayOf(at: Date, dayStartHour = 0): number {
   if (dayStartHour <= 0) return beirutWeekday(at);
   return beirutWeekday(new Date(`${shiftDateOf(at, dayStartHour)}T12:00:00.000Z`));
 }
+
+/**
+ * The rest that separates one working day from the next.
+ *
+ * 4h15m, and it is measured, not chosen. Across 120 days of this shop's
+ * punches the two populations do not overlap:
+ *
+ *   longest break inside one working day   2h58m  (out 05:48, back 08:46)
+ *   shortest rest between working days     5h32m  (out 18:21, back 23:53)
+ *
+ * 255 minutes is the exact midpoint, leaving about eighty minutes of slack on
+ * each side. The ceiling is set by a 17-hour worker, who is only ever home
+ * 6h54m, and the floor by staff who split a day around a long afternoon; the
+ * owner confirmed the 5½-hour turnarounds are people going home to sleep
+ * before an opening shift, not a break.
+ *
+ * Widen it and two shifts merge into a 34-hour day - phantom overtime, and a
+ * day displaced across a month boundary. Narrow it and a split shift becomes
+ * two days, each judged short and each docked.
+ */
+export const SHIFT_GAP_MIN = 255;
+
+/**
+ * Which working day each punch belongs to, decided by REST rather than by a
+ * clock hour.
+ *
+ * The clock-hour version could not work, and the reason is worth keeping. A
+ * boundary at 04:00 asks "is this before 4am?", which answers a different
+ * question from the one that matters - it files a day worker's single 00:24
+ * start under the previous day, and it cannot separate two shifts that both
+ * begin in the evening. Rest can do both: the gap since the last checkout says
+ * whether somebody went home, and going home is what ends a working day.
+ *
+ * Returns one label per punch, aligned to the input array. A checkout takes the
+ * label of the shift it closes; an orphan checkout with no arrival gets null,
+ * as every other reader already ignores those.
+ *
+ * The collision rule is what unpicks a night worker. Give a new working day the
+ * Beirut calendar date of its check-in, unless an earlier working day has
+ * already claimed that date - then take the next free one. dani starting at
+ * 00:02 on Wednesday takes Wednesday; when he starts again at 23:58 that same
+ * Wednesday, Wednesday is gone and he becomes Thursday. Four consecutive nights
+ * come out as four consecutive days, which is what the schedule and the payroll
+ * month both need, and no hour of the clock appears anywhere in it.
+ */
+export function assignWorkingDays(
+  punches: Array<{ kind: 'IN' | 'OUT'; at: Date }>,
+  gapMin: number = SHIFT_GAP_MIN,
+): Array<string | null> {
+  const order = punches
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => a.p.at.getTime() - b.p.at.getTime() || a.i - b.i);
+
+  const labels: Array<string | null> = new Array(punches.length).fill(null);
+  const claimed = new Set<string>();
+  let currentDay: string | null = null;
+  let lastOutAt: Date | null = null;
+  let openSince: Date | null = null;
+
+  for (const { p, i } of order) {
+    if (p.kind === 'OUT') {
+      // A checkout belongs to whatever shift it closes. One with no arrival
+      // before it names nothing, and is dropped by every consumer already.
+      labels[i] = currentDay;
+      if (currentDay !== null) {
+        lastOutAt = p.at;
+        openSince = null;
+      }
+      continue;
+    }
+
+    // A second arrival while one is still open is a duplicate tap, not a shift.
+    // The advisory lock makes new ones impossible, but the history holds plenty
+    // - four in eight minutes on one night - and they must not each open a day.
+    if (openSince !== null) {
+      labels[i] = currentDay;
+      continue;
+    }
+
+    const restMin = lastOutAt === null ? Infinity : (p.at.getTime() - lastOutAt.getTime()) / 60_000;
+    if (currentDay !== null && restMin < gapMin) {
+      labels[i] = currentDay; // they never went home: same working day
+    } else {
+      let date = inBeirut(p.at).date;
+      while (claimed.has(date)) date = shiftCalendarDate(date, 1);
+      claimed.add(date);
+      currentDay = date;
+      labels[i] = date;
+    }
+    openSince = p.at;
+  }
+
+  return labels;
+}
