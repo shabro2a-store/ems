@@ -158,6 +158,22 @@ export function shiftWeekdayOf(at: Date, dayStartHour = 0): number {
 export const SHIFT_GAP_MIN = 255;
 
 /**
+ * The instant the rest rule takes over. Arrivals before it keep whatever the
+ * clock boundary said; arrivals from it on are decided by rest.
+ *
+ * History is not rewritten, and that is the whole point of having a cutover at
+ * all. Attribution is recomputed from the punches every time anybody opens
+ * payroll, so changing the rule outright would silently move every shift ever
+ * worked - including across month boundaries that have already been paid. One
+ * employee needed a manual top-up when a single shift moved; eleven at once is
+ * not a reconciliation anybody should be asked to do.
+ *
+ * A shift is decided by its ARRIVAL, so one in progress across this instant
+ * keeps its old label whole rather than being cut in half.
+ */
+export const REST_RULE_FROM = new Date('2026-09-08T00:00:00+03:00');
+
+/**
  * Which working day each punch belongs to, decided by REST rather than by a
  * clock hour.
  *
@@ -180,10 +196,32 @@ export const SHIFT_GAP_MIN = 255;
  * come out as four consecutive days, which is what the schedule and the payroll
  * month both need, and no hour of the clock appears anywhere in it.
  */
+export interface WorkingDayOpts {
+  /** Rest that separates two working days. Defaults to SHIFT_GAP_MIN. */
+  gapMin?: number;
+  /**
+   * Arrivals before this keep the answer `legacyDayOf` gives. Omit to decide
+   * everything by rest, which is what the rule looks like once the changeover
+   * is behind us and what the pure tests exercise.
+   */
+  restRuleFrom?: Date;
+  /**
+   * The old rule, for arrivals before the cutover - in practice
+   * `(at) => shiftDateOf(at, dayStartHour)`. Required with restRuleFrom,
+   * because a caller that guessed midnight here would rewrite exactly the
+   * night-worker history the cutover exists to leave alone.
+   */
+  legacyDayOf?: (at: Date) => string;
+}
+
 export function assignWorkingDays(
   punches: Array<{ kind: 'IN' | 'OUT'; at: Date }>,
-  gapMin: number = SHIFT_GAP_MIN,
+  opts: WorkingDayOpts | number = {},
 ): Array<string | null> {
+  const o: WorkingDayOpts = typeof opts === 'number' ? { gapMin: opts } : opts;
+  const gapMin = o.gapMin ?? SHIFT_GAP_MIN;
+  const cutover = o.restRuleFrom ?? null;
+  const legacyDayOf = o.legacyDayOf ?? null;
   const order = punches
     .map((p, i) => ({ p, i }))
     .sort((a, b) => a.p.at.getTime() - b.p.at.getTime() || a.i - b.i);
@@ -211,6 +249,17 @@ export function assignWorkingDays(
     // - four in eight minutes on one night - and they must not each open a day.
     if (openSince !== null) {
       labels[i] = currentDay;
+      continue;
+    }
+
+    // Before the cutover, answer exactly as the old rule did - and claim that
+    // date, so a later shift decided by rest still sees it as taken.
+    if (cutover !== null && legacyDayOf !== null && p.at < cutover) {
+      const legacy = legacyDayOf(p.at);
+      claimed.add(legacy);
+      currentDay = legacy;
+      labels[i] = legacy;
+      openSince = p.at;
       continue;
     }
 

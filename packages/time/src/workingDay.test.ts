@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assignWorkingDays, SHIFT_GAP_MIN } from './index';
+import { assignWorkingDays, SHIFT_GAP_MIN, shiftDateOf } from './index';
 
 /*
  * Every case here is a real one, taken from the shop's own punches. Beirut is
@@ -162,5 +162,81 @@ describe('the history this has to survive', () => {
       b('IN', '2026-09-04T23:00'), b('OUT', '2026-09-05T07:00'),
     ];
     expect(days(punches)).toEqual(['2026-09-01', '2026-09-01', '2026-09-04', '2026-09-04']);
+  });
+});
+
+/*
+ * The changeover. Attribution is recomputed from the punches every time anyone
+ * opens payroll, so switching rules outright would silently move every shift
+ * ever worked - across month boundaries that have already been paid. One
+ * employee needed a manual top-up when a single shift moved. So the rest rule
+ * applies from an instant forward, and everything before it keeps the answer it
+ * has always had.
+ */
+describe('the cutover leaves history exactly as it was', () => {
+  const CUTOVER = new Date('2026-09-08T00:00:00+03:00');
+  // The old rule as Bilal actually had it: his branch's 04:00 boundary.
+  const oldRule = { restRuleFrom: CUTOVER, legacyDayOf: (at: Date) => shiftDateOf(at, 4) };
+
+  const BILAL_AUGUST: P[] = [
+    b('IN', '2026-08-31T07:05'), b('OUT', '2026-08-31T16:09'),
+    b('IN', '2026-09-01T00:24'), b('OUT', '2026-09-01T16:34'),
+  ];
+
+  it('still files his 00:24 under 31 August, wrong and paid', () => {
+    // The bug, preserved on purpose. August was settled against this figure and
+    // topped up by hand; recomputing it now would take the money back.
+    expect(assignWorkingDays(BILAL_AUGUST, oldRule)).toEqual([
+      '2026-08-31', '2026-08-31', '2026-08-31', '2026-08-31',
+    ]);
+  });
+
+  it('and the same punches after the cutover come out right', () => {
+    const september: P[] = [
+      b('IN', '2026-09-30T07:05'), b('OUT', '2026-09-30T16:09'),
+      b('IN', '2026-10-01T00:24'), b('OUT', '2026-10-01T16:34'),
+    ];
+    expect(assignWorkingDays(september, oldRule)).toEqual([
+      '2026-09-30', '2026-09-30', '2026-10-01', '2026-10-01',
+    ]);
+  });
+
+  it('leaves a shift in progress across the instant whole', () => {
+    // Arrival decides, so somebody clocked in on the 7th and out on the 8th is
+    // one shift on the 7th - not half under each rule.
+    const straddling: P[] = [b('IN', '2026-09-07T20:00'), b('OUT', '2026-09-08T13:00')];
+    expect(assignWorkingDays(straddling, oldRule)).toEqual(['2026-09-07', '2026-09-07']);
+  });
+
+  it('sees dates the old rule claimed, so the two cannot collide', () => {
+    // A legacy shift takes the 8th; a rest-decided shift later that same day
+    // must move forward rather than land on top of it.
+    const late = { restRuleFrom: new Date('2026-09-08T12:00:00+03:00'), legacyDayOf: (at: Date) => shiftDateOf(at, 4) };
+    const punches: P[] = [
+      b('IN', '2026-09-08T09:00'), b('OUT', '2026-09-08T11:00'), // legacy: the 8th
+      b('IN', '2026-09-08T20:00'), b('OUT', '2026-09-09T04:00'), // rest: the 8th is taken
+    ];
+    expect(assignWorkingDays(punches, late)).toEqual([
+      '2026-09-08', '2026-09-08', '2026-09-09', '2026-09-09',
+    ]);
+  });
+
+  it('carries a working day across the instant when nobody went home', () => {
+    // Out at 22:00 on the 7th, back at 01:00 on the 8th - three hours, so the
+    // same working day continues even though the rule changed in between.
+    const punches: P[] = [
+      b('IN', '2026-09-07T14:00'), b('OUT', '2026-09-07T22:00'),
+      b('IN', '2026-09-08T01:00'), b('OUT', '2026-09-08T06:00'),
+    ];
+    expect(assignWorkingDays(punches, oldRule)).toEqual([
+      '2026-09-07', '2026-09-07', '2026-09-07', '2026-09-07',
+    ]);
+  });
+
+  it('decides everything by rest when no cutover is given', () => {
+    // What the rule looks like once the changeover is history.
+    expect(assignWorkingDays(BILAL_AUGUST)).toEqual([
+      '2026-08-31', '2026-08-31', '2026-09-01', '2026-09-01',
+    ]);
   });
 });
