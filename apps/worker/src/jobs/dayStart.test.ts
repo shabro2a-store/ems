@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { dayStartHourFor } from '@/lib/services/coverage';
-import { resolveDayStartHour } from './dayStart';
+import { dayStartHourFor, workingDaysOf } from '@/lib/services/coverage';
+import { resolveDayStartHour, resolveWorkingDays } from './dayStart';
 
 /*
  * The worker cannot import from apps/web, so the boundary rule exists twice.
@@ -42,4 +42,42 @@ describe('the working-day boundary that applies to one person', () => {
     expect(resolveDayStartHour(atBranchWithFour)).toBe(0);
     expect(dayStartHourFor(atBranchWithFour)).toBe(0);
   });
+});
+
+describe('the worker and the web agree on which working day a punch is', () => {
+  const cases: Array<[string, Array<{ kind: 'IN' | 'OUT'; at: Date }>]> = [
+    ['a night worker either side of midnight', [
+      { kind: 'IN', at: new Date('2026-10-01T00:02:00+03:00') },
+      { kind: 'OUT', at: new Date('2026-10-01T08:00:00+03:00') },
+      { kind: 'IN', at: new Date('2026-10-01T23:58:00+03:00') },
+      { kind: 'OUT', at: new Date('2026-10-02T08:08:00+03:00') },
+    ]],
+    ['a split shift', [
+      { kind: 'IN', at: new Date('2026-10-05T08:00:00+03:00') },
+      { kind: 'OUT', at: new Date('2026-10-05T12:00:00+03:00') },
+      { kind: 'IN', at: new Date('2026-10-05T14:00:00+03:00') },
+      { kind: 'OUT', at: new Date('2026-10-05T18:00:00+03:00') },
+    ]],
+    ['a shift that starts after midnight on the 1st', [
+      { kind: 'IN', at: new Date('2026-09-30T07:05:00+03:00') },
+      { kind: 'OUT', at: new Date('2026-09-30T16:09:00+03:00') },
+      { kind: 'IN', at: new Date('2026-10-01T00:24:00+03:00') },
+      { kind: 'OUT', at: new Date('2026-10-01T16:34:00+03:00') },
+    ]],
+    ['history from before the cutover', [
+      { kind: 'IN', at: new Date('2026-08-31T07:05:00+03:00') },
+      { kind: 'OUT', at: new Date('2026-08-31T16:09:00+03:00') },
+      { kind: 'IN', at: new Date('2026-09-01T00:24:00+03:00') },
+      { kind: 'OUT', at: new Date('2026-09-01T16:34:00+03:00') },
+    ]],
+  ];
+
+  for (const [name, punches] of cases) {
+    it(name, () => {
+      // Both boundaries, because the legacy half of the answer still reads one.
+      for (const hour of [0, 4]) {
+        expect(resolveWorkingDays(punches, hour)).toEqual(workingDaysOf(punches, hour));
+      }
+    });
+  }
 });

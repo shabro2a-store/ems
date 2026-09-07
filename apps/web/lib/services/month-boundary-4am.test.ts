@@ -34,28 +34,33 @@ const NIGHT_INTO_THE_1ST = [p('IN', '2026-09-30T21:30:00Z'), p('OUT', '2026-10-0
 const DAY_SHIFT_1ST = [p('IN', '2026-10-01T07:00:00Z'), p('OUT', '2026-10-01T16:00:00Z')]; // 10:00-19:00 Thu 1
 const ALL = [...DAY_SHIFT_30TH, ...NIGHT_INTO_THE_1ST, ...DAY_SHIFT_1ST];
 
-describe('payroll already ends the month on the working-day boundary', () => {
-  it('pays a 00:30 start on the 1st in the month before', () => {
-    // The shift that would be "cut off" by a midnight month. It is not: the
-    // month a pair belongs to is decided by shiftDateOf on its ARRIVAL, which
-    // already respects the boundary.
-    expect(pay('2026-09', NIGHT_INTO_THE_1ST, 4).hours).toBe(7.5);
-    expect(pay('2026-10', NIGHT_INTO_THE_1ST, 4).hours).toBe(0);
+describe('a shift that starts after midnight, once the rest rule is in force', () => {
+  it('is paid in the month it was actually worked, not the one before', () => {
+    // A CHANGE, and a deliberate one. The clock boundary pulled a 00:30 start
+    // back onto 30 September; the rest rule files it on 1 October, because that
+    // is the day he came to work. Nothing is lost or cut off - the shift is
+    // paid in full, in October.
+    //
+    // The two are incompatible by construction: pulling a post-midnight arrival
+    // onto the previous day IS the clock boundary, and it is the thing that
+    // filed Bilal's sixteen hours in a month that then closed.
+    expect(pay('2026-09', NIGHT_INTO_THE_1ST, 4).hours).toBe(0);
+    expect(pay('2026-10', NIGHT_INTO_THE_1ST, 4).hours).toBe(7.5);
   });
 
-  it('and would put it in the new month at a midnight boundary', () => {
-    // The same punches with no boundary: now it IS October's, which is correct
-    // for somebody whose day starts at midnight. Same rule, different day.
-    expect(pay('2026-09', NIGHT_INTO_THE_1ST, 0).hours).toBe(0);
+  it('answers the same whatever the old boundary said', () => {
+    // The setting is dead after the cutover. Both values give one answer, which
+    // is the point of taking the hour out of the rule entirely.
     expect(pay('2026-10', NIGHT_INTO_THE_1ST, 0).hours).toBe(7.5);
+    expect(pay('2026-10', NIGHT_INTO_THE_1ST, 4).hours).toBe(7.5);
   });
 
-  it('splits two shifts on one calendar day into the two months they belong to', () => {
-    // 1 October holds both the 00:30 start (September's working day) and the
-    // 07:00 start (October's). Each pair is judged on its own arrival, so one
-    // calendar day feeding two months is not a special case.
-    expect(pay('2026-09', ALL, 4).hours).toBe(9 + 7.5); // the 30th, plus the night
-    expect(pay('2026-10', ALL, 4).hours).toBe(9); // only the 10:00 start
+  it('joins a return inside the rest window to the day already open', () => {
+    // 30 Sep 07:00-16:00, then 1 Oct 00:30-08:00, then 1 Oct 10:00-19:00. The
+    // last one is 2h after the previous checkout - he did not go home - so it
+    // continues 1 October rather than opening a third day.
+    expect(pay('2026-09', ALL, 4).hours).toBe(9); // the 30th alone
+    expect(pay('2026-10', ALL, 4).hours).toBe(7.5 + 9); // the night and the day after it
   });
 
   it('never pays the same shift twice, or drops it', () => {

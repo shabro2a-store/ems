@@ -3,7 +3,7 @@ import { shiftDateOf, scheduledToUtc } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
-import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval, dayStartHourFor } from './coverage';
+import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval, type PunchLite, dayStartHourFor, workingDaysOf } from './coverage';
 
 export interface PayoutForUserResult {
   hours: number;
@@ -138,18 +138,25 @@ function pairHours(
   dayStartHour = 0,
 ): { minutes: number; grossCent: number } {
   const sorted = [...punches].sort((a, b) => a.at.getTime() - b.at.getTime());
+  // The same one pass computeCoverage makes, so a month's gross and the sum of
+  // its days cannot land on different answers about which day a shift is.
+  const labels = workingDaysOf(sorted as PunchLite[], dayStartHour);
   let totalMinutes = 0;
   let grossCent = 0;
   let openIn: PunchRow | null = null;
-  for (const p of sorted) {
+  let openInAt = -1;
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i]!;
     if (p.kind === 'IN') {
-      if (!openIn) openIn = p;
+      if (!openIn) {
+        openIn = p;
+        openInAt = i;
+      }
     } else {
       if (openIn) {
-        // The arrival's Beirut month, so an overnight pair is counted once, in
+        // The arrival's working day, so an overnight pair is counted once, in
         // the month it began. A checkout at 07:00 on the 1st does not move it.
-        const belongs =
-          month === undefined || shiftDateOf(openIn.at, dayStartHour).slice(0, 7) === month;
+        const belongs = month === undefined || (labels[openInAt] ?? '').slice(0, 7) === month;
         if (belongs) {
           const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
           totalMinutes += minutes;

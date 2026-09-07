@@ -9,6 +9,7 @@ import {
   type PunchLite,
   type WorkInterval,
   dayStartHourFor,
+  workingDaysOf,
 } from './coverage';
 
 /**
@@ -118,22 +119,45 @@ export function computeBlockedCredits(args: {
   attempts: BlockedAttemptLite[];
   rateCentAt: (at: Date) => number;
   decisionsByDate: Map<string, CreditDecisionLite>;
+  /** Only for pre-cutover history; the rest rule needs no hour. */
+  dayStartHour?: number;
 }): BlockedCreditItem[] {
   if (args.attempts.length === 0) return [];
 
-  const firstAttemptByDate = new Map<string, Date>();
-  for (const a of args.attempts) {
-    const date = inBeirut(a.at).date;
-    const current = firstAttemptByDate.get(date);
-    if (!current || a.at < current) firstAttemptByDate.set(date, a.at);
-  }
+  // Keyed by the WORKING day, the same one coverage filed the shift under.
+  // A calendar date here would drop the credit whenever the two disagree: the
+  // lookup below finds no coverage for that date, and an employee held at the
+  // door before a shift the rule filed on another day is silently paid nothing
+  // for the wait.
+  const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
+  const labels = workingDaysOf(sorted, args.dayStartHour ?? 0);
 
   const firstInByDate = new Map<string, Date>();
-  for (const p of args.punches) {
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i]!;
     if (p.kind !== 'IN') continue;
-    const date = inBeirut(p.at).date;
+    const date = labels[i];
+    if (date === null) continue;
     const current = firstInByDate.get(date);
     if (!current || p.at < current) firstInByDate.set(date, p.at);
+  }
+
+  // A blocked attempt belongs to the day of the check-in it was waiting for -
+  // the first arrival at or after it. Deciding it by calendar date instead puts
+  // an attempt just before midnight on a different day from the punch that
+  // finally landed just after.
+  const firstAttemptByDate = new Map<string, Date>();
+  for (const a of args.attempts) {
+    let date: string | null = null;
+    for (let i = 0; i < sorted.length; i++) {
+      if (sorted[i]!.kind === 'IN' && sorted[i]!.at >= a.at) {
+        date = labels[i];
+        break;
+      }
+    }
+    if (date === null) date = inBeirut(a.at).date; // never got in: its own day
+    const current = firstAttemptByDate.get(date);
+    if (!current || a.at < current) firstAttemptByDate.set(date, a.at);
   }
 
   const coverageByDate = new Map(args.coverage.map((d) => [d.date, d]));
@@ -248,6 +272,7 @@ export function coverageWithBlockedCredit(args: {
     attempts: args.attempts,
     rateCentAt: args.rateCentAt,
     decisionsByDate: args.decisionsByDate,
+    dayStartHour: args.dayStartHour,
   });
   if (credits.length === 0) return { coverage: uncredited, credits };
   return { coverage: computeCoverage({ ...base, credited: grantedCredit(credits) }), credits };

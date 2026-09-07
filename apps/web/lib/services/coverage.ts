@@ -1,4 +1,4 @@
-import { shiftDateOf, shiftWeekdayOf } from 'time';
+import { shiftDateOf, beirutWeekday, assignWorkingDays, REST_RULE_FROM, SHIFT_GAP_MIN } from 'time';
 
 export interface PunchLite {
   kind: 'IN' | 'OUT';
@@ -59,6 +59,45 @@ export function dayStartHourFor(
   user: { day_start_hour?: number | null } | null | undefined,
 ): number {
   return user?.day_start_hour ?? 0;
+}
+
+/**
+ * Which working day each of one person's punches belongs to.
+ *
+ * The single place the rule is applied. Everything that has to agree about
+ * "which day is this" - payroll, penalties, overtime, blocked credit, the
+ * punch guard, the auto-close - goes through here, because the answer is no
+ * longer a pure function of one timestamp and two consumers deriving it
+ * separately would put a shift's pay in one month and its lock in another.
+ *
+ * Callers must pass the punches they already loaded, and must load them wide
+ * enough: the rest before an arrival is measured against the previous
+ * checkout, so a window that starts mid-shift sees no previous checkout and
+ * calls that arrival a new day. Two days either side is what payout already
+ * reads for pairing and is more than enough - a 24h gap resets the chain
+ * completely.
+ */
+export function workingDaysOf(punches: PunchLite[], dayStartHour: number): Array<string | null> {
+  return assignWorkingDays(punches, {
+    restRuleFrom: REST_RULE_FROM,
+    // The clock boundary, for anything that happened before the changeover.
+    // History keeps the answer it was paid against.
+    legacyDayOf: (at) => shiftDateOf(at, dayStartHour),
+  });
+}
+
+/**
+ * The weekday a working day's schedule should be read from.
+ *
+ * From the LABEL, not from the arrival instant. Under the rest rule a shift
+ * that starts at 23:58 can be labelled the following date, and reading the
+ * weekday off the punch would then look up a different day's hours than the
+ * one the shift is filed under - the schedule and the coverage would disagree
+ * about the same day. Noon UTC is always mid-day in Beirut, so no boundary or
+ * DST transition can reach it.
+ */
+export function weekdayOfWorkingDay(date: string): number {
+  return beirutWeekday(new Date(`${date}T12:00:00.000Z`));
 }
 
 export interface DayCoverage {
@@ -176,19 +215,27 @@ export function computeCoverage(args: {
   const dayStart = args.dayStartHour ?? 0;
   const intervalsByDate = new Map<string, WorkInterval[]>();
   const lastPunchByDate = new Map<string, Date>();
-  // The weekday must come from the ARRIVAL, not the closing punch: an overnight
-  // shift closes on the next calendar day, which is a different weekday.
-  const arrivalByDate = new Map<string, Date>();
   const openDates = new Set<string>();
 
+  // One pass of the rule for this person, and every date below comes out of it.
+  // Indexed rather than recomputed per punch because the answer depends on what
+  // came before: two shifts can share a calendar date, and only the walk knows
+  // which of them already claimed it.
+  const labels = workingDaysOf(sorted, dayStart);
+
   let openIn: PunchLite | null = null;
-  for (const p of sorted) {
+  let openInAt = -1;
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i]!;
     if (p.kind === 'IN') {
-      if (!openIn) openIn = p;
+      if (!openIn) {
+        openIn = p;
+        openInAt = i;
+      }
       continue;
     }
     if (!openIn) continue; // checkout with no arrival - ignore, as payout does
-    const date = shiftDateOf(openIn.at, dayStart);
+    const date = labels[openInAt]!;
     const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
     workedByDate.set(date, (workedByDate.get(date) ?? 0) + minutes);
     // The rate is resolved at the SAME instant payout.ts resolves it (the
@@ -198,15 +245,13 @@ export function computeCoverage(args: {
     if (forDate) forDate.push(interval);
     else intervalsByDate.set(date, [interval]);
     lastPunchByDate.set(date, p.at);
-    if (!arrivalByDate.has(date)) arrivalByDate.set(date, openIn.at);
     openIn = null;
   }
   if (openIn) {
-    const date = shiftDateOf(openIn.at, dayStart);
+    const date = labels[openInAt]!;
     openDates.add(date);
     if (!workedByDate.has(date)) workedByDate.set(date, 0);
     lastPunchByDate.set(date, openIn.at);
-    if (!arrivalByDate.has(date)) arrivalByDate.set(date, openIn.at);
   }
 
   // Credited minutes are the front of the day - the employee was already at the
@@ -232,7 +277,11 @@ export function computeCoverage(args: {
     const intervals = intervalsByDate.get(date) ?? [];
     const requiredMin = requiredMinFor(
       args.overridesByDate.get(date),
-      args.shiftMinByWeekday.get(shiftWeekdayOf(arrivalByDate.get(date)!, dayStart)),
+      // From the LABEL, not from the arrival. Under the rest rule a shift that
+      // starts at 23:58 can be filed on the following date, and reading the
+      // weekday off the punch would look up a different day's hours than the
+      // day it is filed under.
+      args.shiftMinByWeekday.get(weekdayOfWorkingDay(date)),
     );
 
     days.push({
@@ -294,18 +343,28 @@ export function currentShiftDayMinutes(args: {
 }): ShiftDayMinutes {
   const dayStart = args.dayStartHour ?? 0;
   const sorted = [...args.punches].sort((a, b) => a.at.getTime() - b.at.getTime());
+  const labels = workingDaysOf(sorted, dayStart);
 
   const closedByDate = new Map<string, number>();
   let openIn: Date | null = null;
-  for (const p of sorted) {
+  let openInAt = -1;
+  let lastLabel: string | null = null;
+  let lastOutAt: Date | null = null;
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i]!;
     if (p.kind === 'IN') {
-      if (!openIn) openIn = p.at;
+      if (!openIn) {
+        openIn = p.at;
+        openInAt = i;
+      }
       continue;
     }
     if (!openIn) continue; // checkout with no arrival - ignore, as payout does
-    const date = shiftDateOf(openIn, dayStart);
+    const date = labels[openInAt]!;
     const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.getTime()) / 60_000));
     closedByDate.set(date, (closedByDate.get(date) ?? 0) + minutes);
+    lastLabel = date;
+    lastOutAt = p.at;
     openIn = null;
   }
 
@@ -318,7 +377,24 @@ export function currentShiftDayMinutes(args: {
   const stale = openIn !== null && openMinRaw > MAX_OPEN_SESSION_MIN;
   const live = stale ? null : openIn;
 
-  const date = shiftDateOf(live ?? args.now, dayStart);
+  // Which working day this person is ON right now.
+  //
+  // Their open arrival's day if they are clocked in. If they are not, a day is
+  // still in progress while they might come back: inside the rest window a
+  // split shift is not over, and judging it would raise a full day's shortfall
+  // at lunchtime that vanishes when they return. Past that window they have
+  // gone home, the day is closed, and it may be judged - which is the same rule
+  // the day itself is built on rather than a second definition of "over".
+  //
+  // Empty string means no day in progress. It matches no real date, so a caller
+  // comparing against it simply judges everything - which is what "nothing is
+  // unfinished" should mean.
+  const restedMin = lastOutAt === null ? Infinity : (args.now.getTime() - lastOutAt.getTime()) / 60_000;
+  const date = live !== null
+    ? labels[openInAt]!
+    : restedMin < SHIFT_GAP_MIN && lastLabel !== null
+      ? lastLabel
+      : '';
   const openMin = live ? openMinRaw : 0;
   return {
     date,

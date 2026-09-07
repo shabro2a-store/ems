@@ -184,7 +184,11 @@ describe('currentShiftDayMinutes', () => {
     expect(out.minutes).toBe(0);
     expect(out.openInAt).toBeNull();
     expect(out.staleOpenInAt).toEqual(openedAt);
-    expect(out.date).toBe('2026-08-19'); // 02:00 Wed in Beirut - back to today
+    // No day in progress. The abandoned arrival is not one, and there is no
+    // checkout behind it to still be resting from - so nothing is unfinished
+    // and nothing is skipped from judging. The stale arrival is reported
+    // separately, which is what a caller needs to tell it from no punch at all.
+    expect(out.date).toBe('');
   });
 
   it('still counts a long but plausible shift, including a full 24-hour one', () => {
@@ -212,21 +216,39 @@ describe('currentShiftDayMinutes', () => {
     expect(pastTheLimit.staleOpenInAt).toEqual(openedAt);
   });
 
-  it('falls back to today when nothing is open', () => {
+  it('names no day at all when there is nothing to be on', () => {
+    // There is no "today" once the day is defined by rest: somebody with no
+    // punches is not part-way through anything. The empty string matches no
+    // real date, so a caller skipping "the day in progress" skips nothing -
+    // which is what having nothing unfinished should mean.
     const out = currentShiftDayMinutes({ punches: [], now: utc('2026-08-17T21:30:00Z') });
-    expect(out.date).toBe('2026-08-18'); // 00:30 Tue in Beirut
+    expect(out.date).toBe('');
     expect(out.minutes).toBe(0);
     expect(out.openInAt).toBeNull();
   });
 
-  it('does not count yesterday\'s finished shift towards today', () => {
-    // The overnight shift closed at 07:00 Tue but belongs to Mon, so Tuesday
-    // starts from zero - the same attribution computeCoverage makes.
+  it('still counts the shift just finished, while they could come back', () => {
+    // Out at 07:00, and it is 08:00. One hour is not rest, so this working day
+    // is not over: a split-shift worker returning at 10:00 adds to THIS day.
+    // Calling it finished here is what used to raise a full day's shortfall at
+    // lunchtime, only for it to vanish when they came back in the evening.
     const out = currentShiftDayMinutes({
       punches: punches(['2026-08-17T18:00:00Z', 'IN'], ['2026-08-18T04:00:00Z', 'OUT']),
-      now: utc('2026-08-18T05:00:00Z'), // 08:00 Tue Beirut
+      now: utc('2026-08-18T05:00:00Z'), // 08:00 Tue Beirut, 1h after checkout
     });
-    expect(out.date).toBe('2026-08-18');
+    expect(out.date).toBe('2026-08-17');
+    expect(out.minutes).toBe(600);
+  });
+
+  it('lets go of it once they have actually rested', () => {
+    // The same shift five hours later. They went home; the day is closed and
+    // may be judged. Under the clock rule this happened at midnight, whatever
+    // the person was doing.
+    const out = currentShiftDayMinutes({
+      punches: punches(['2026-08-17T18:00:00Z', 'IN'], ['2026-08-18T04:00:00Z', 'OUT']),
+      now: utc('2026-08-18T09:00:00Z'), // 12:00 Tue Beirut, 5h after checkout
+    });
+    expect(out.date).toBe('');
     expect(out.minutes).toBe(0);
   });
 });

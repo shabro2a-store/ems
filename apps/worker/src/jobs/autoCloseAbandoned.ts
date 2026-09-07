@@ -1,9 +1,9 @@
 import { PrismaClient } from '@prisma/client';
-import { shiftDateOf, shiftWeekdayOf, inBeirut } from 'time';
+import { beirutWeekday, inBeirut } from 'time';
 import type { Notifier } from 'notify';
 import { prisma as defaultPrisma } from '../db/prisma';
 import { resolveRequiredMin } from './requiredMin';
-import { resolveDayStartHour } from './dayStart';
+import { resolveDayStartHour, resolveWorkingDays } from './dayStart';
 
 /**
  * Past this, an open check-in is treated as a forgotten checkout.
@@ -138,10 +138,26 @@ export async function runAutoCloseAbandoned(
     // so reading the host branch's hour would close the shift onto a different
     // day than payroll will pay it on.
     const dayStart = resolveDayStartHour(u);
-    const inDate = shiftDateOf(lastIn.at, dayStart);
+    // The working day this arrival is on, asked of the same rule payroll asks.
+    // Three days of punches around it, because the answer depends on the rest
+    // before it and on which shift already claimed the date.
+    const nearby = await db.punch.findMany({
+      where: { user_id: u.id, at: { gte: new Date(lastIn.at.getTime() - 3 * 86_400_000), lte: lastIn.at } },
+      orderBy: { at: 'asc' },
+      select: { kind: true, at: true },
+    });
+    const dayLabels = resolveWorkingDays(nearby, dayStart);
+    const arrivalIdx = nearby.findIndex((p) => p.kind === 'IN' && p.at.getTime() === lastIn.at.getTime());
+    const inDate =
+      (arrivalIdx >= 0 ? dayLabels[arrivalIdx] : null) ??
+      resolveWorkingDays([{ kind: 'IN', at: lastIn.at }], dayStart)[0]!;
     const [schedule, override] = await Promise.all([
       db.schedule.findUnique({
-        where: { user_id_weekday: { user_id: u.id, weekday: shiftWeekdayOf(lastIn.at, dayStart) } },
+        // From the LABEL, not the arrival instant: under the rest rule a shift
+        // starting at 23:58 can be filed on the following date, and the weekday
+        // must be the one the day is filed under or this reads a different
+        // day's hours than payroll does.
+        where: { user_id_weekday: { user_id: u.id, weekday: beirutWeekday(new Date(`${inDate}T12:00:00.000Z`)) } },
         select: { shift_min: true },
       }),
       db.scheduleOverride.findUnique({

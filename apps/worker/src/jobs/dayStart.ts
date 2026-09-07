@@ -1,3 +1,5 @@
+import { assignWorkingDays, shiftDateOf, REST_RULE_FROM } from 'time';
+
 /**
  * The working-day boundary that applies to one person: theirs, or midnight.
  *
@@ -17,4 +19,22 @@ export function resolveDayStartHour(
   user: { day_start_hour?: number | null } | null | undefined,
 ): number {
   return user?.day_start_hour ?? 0;
+}
+
+/**
+ * Which working day each of one person's punches belongs to.
+ *
+ * The worker's copy of workingDaysOf in apps/web/lib/services/coverage.ts,
+ * which is the definition of record; dayStart.test.ts pins them together. Two
+ * copies that drift would have the sweep close a shift onto a different day
+ * from the one payroll pays it on.
+ */
+export function resolveWorkingDays(
+  punches: Array<{ kind: 'IN' | 'OUT'; at: Date }>,
+  dayStartHour: number,
+): Array<string | null> {
+  return assignWorkingDays(punches, {
+    restRuleFrom: REST_RULE_FROM,
+    legacyDayOf: (at) => shiftDateOf(at, dayStartHour),
+  });
 }

@@ -1,6 +1,6 @@
 import type { PrismaClient, Punch } from '@prisma/client';
 import { shiftDateOf, shiftWeekdayOf } from 'time';
-import { requiredMinFor } from './coverage';
+import { requiredMinFor, workingDaysOf, weekdayOfWorkingDay, type PunchLite } from './coverage';
 
 /**
  * How long an open check-in may run before the system decides nobody is going
@@ -159,10 +159,28 @@ export async function requiredMinForArrival(
   arrivalAt: Date,
   dayStartHour = 0,
 ): Promise<number> {
-  const date = shiftDateOf(arrivalAt, dayStartHour);
+  // Which working day this arrival is on, asked of the same rule payroll asks.
+  // It cannot be answered from the timestamp alone any more - two shifts can
+  // share a calendar date and only the walk knows which claimed it - so the
+  // punches around it are read. Three days is far past the point where a gap
+  // resets the chain, and matches the lookback the pairing already uses.
+  const window = 3 * 86_400_000;
+  const nearby = await db.punch.findMany({
+    where: {
+      user_id: userId,
+      at: { gte: new Date(arrivalAt.getTime() - window), lte: arrivalAt },
+    },
+    orderBy: { at: 'asc' },
+    select: { kind: true, at: true },
+  });
+  const labels = workingDaysOf(nearby as PunchLite[], dayStartHour);
+  const i = nearby.findIndex((p) => p.kind === 'IN' && p.at.getTime() === arrivalAt.getTime());
+  // If the arrival is not in the window - a caller asking about a punch it has
+  // not written yet - fall back to the rule's own answer for a lone arrival.
+  const date = (i >= 0 ? labels[i] : null) ?? workingDaysOf([{ kind: 'IN', at: arrivalAt }], dayStartHour)[0]!;
   const [schedule, override] = await Promise.all([
     db.schedule.findUnique({
-      where: { user_id_weekday: { user_id: userId, weekday: shiftWeekdayOf(arrivalAt, dayStartHour) } },
+      where: { user_id_weekday: { user_id: userId, weekday: weekdayOfWorkingDay(date) } },
       select: { shift_min: true },
     }),
     db.scheduleOverride.findUnique({

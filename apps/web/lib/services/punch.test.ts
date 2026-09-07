@@ -106,7 +106,7 @@ const mocks = vi.hoisted(() => ({
   scheduleOverride: { findUnique: vi.fn() },
   trip: { findFirst: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() },
   branch: { findMany: vi.fn(), findUnique: vi.fn() },
-  punch: { findFirst: vi.fn(), create: vi.fn(), count: vi.fn() },
+  punch: { findFirst: vi.fn(), create: vi.fn(), count: vi.fn(), findMany: vi.fn() },
   blockedPunchAttempt: { create: vi.fn(), count: vi.fn() },
   auditLog: { create: vi.fn() },
   flag: { findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
@@ -330,6 +330,15 @@ beforeEach(() => {
     store.blocked.push(row);
     return row;
   });
+
+  mocks.punch.findMany.mockImplementation(
+    async ({ where }: { where: { user_id: string; at?: { gte?: Date; lte?: Date } } }) =>
+      store.punches
+        .filter((p) => p.user_id === where.user_id)
+        .filter((p) => (where.at?.gte ? p.at >= where.at.gte : true))
+        .filter((p) => (where.at?.lte ? p.at <= where.at.lte : true))
+        .sort((a, b) => a.at.getTime() - b.at.getTime()),
+  );
 
   mocks.punch.count.mockImplementation(
     async ({ where }: { where: { user_id: string; kind: 'IN' | 'OUT'; at: { gte: Date; lt: Date } } }) =>

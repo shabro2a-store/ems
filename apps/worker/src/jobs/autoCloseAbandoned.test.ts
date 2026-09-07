@@ -51,6 +51,12 @@ function makeDb() {
           .map((u) => ({ id: u.id, username: u.username, branch: u.branch ?? null })),
     },
     punch: {
+      findMany: async ({ where }: { where: { user_id: string; at?: { gte?: Date; lte?: Date } } }) =>
+        store.punches
+          .filter((p) => p.user_id === where.user_id)
+          .filter((p) => (where.at?.gte ? p.at >= where.at.gte : true))
+          .filter((p) => (where.at?.lte ? p.at <= where.at.lte : true))
+          .sort((a, b) => a.at.getTime() - b.at.getTime()),
       findFirst: async ({ where }: { where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt?: Date } } }) => {
         const rows = store.punches
           .filter((p) => p.user_id === where.user_id && p.kind === where.kind)
