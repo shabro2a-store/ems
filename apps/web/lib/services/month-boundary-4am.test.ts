@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { computePayoutFromRows } from './payout';
 import { scheduledToUtc } from 'time';
-import { currentPayMonth, isMonthOpen, MONTH_CLOSE_HOUR } from './periodLock';
+import { currentPayMonth, isMonthOpen, MONTH_CLOSE_GRACE_MIN } from './periodLock';
 
 /*
  * The month has to end where the working DAY ends, not at calendar midnight.
@@ -86,11 +86,12 @@ describe('the LOCK, which was still using calendar midnight', () => {
     expect(isMonthOpen('2026-09-30', smallHours)).toBe(true);
   });
 
-  it('closes it once that working day is genuinely over', () => {
-    // 06:00 Beirut on 1 October - past every boundary an employee may have.
-    const morning = new Date('2026-10-01T03:00:00Z');
-    expect(currentPayMonth(morning)).toBe('2026-10');
-    expect(isMonthOpen('2026-09', morning)).toBe(false);
+  it('closes it once no working day of it can still be running', () => {
+    // Past the sweep's threshold plus a rest, measured from the last minute of
+    // September - so nobody is still finishing a shift it would pay for.
+    const settled = scheduledToUtc('2026-10-02', '01:00');
+    expect(currentPayMonth(settled)).toBe('2026-10');
+    expect(isMonthOpen('2026-09', settled)).toBe(false);
   });
 
   it('is unchanged in the middle of a month', () => {
@@ -102,28 +103,28 @@ describe('the LOCK, which was still using calendar midnight', () => {
   });
 });
 
-describe('the ceiling that keeps the two in step', () => {
-  it('no working day may start after the month closes', () => {
-    // The invariant the whole fix rests on. If an employee could be given a
-    // boundary later than MONTH_CLOSE_HOUR, their last working day of the month
-    // would still be running after the month had settled - and we would be back
-    // to a shift nobody can rule on. The API refuses it; this states why.
-    const HIGHEST_BOUNDARY_THE_API_ACCEPTS = 6;
-    expect(HIGHEST_BOUNDARY_THE_API_ACCEPTS).toBeLessThanOrEqual(MONTH_CLOSE_HOUR);
+describe('the month stays open until its last working day can be over', () => {
+  it('is still open in the small hours of the 1st', () => {
+    // People are finishing shifts September will pay for. Closing here left the
+    // one shift most likely to need a ruling as the one nobody could rule on.
+    expect(isMonthOpen('2026-09', scheduledToUtc('2026-10-01', '01:00'))).toBe(true);
+    expect(isMonthOpen('2026-09', scheduledToUtc('2026-10-01', '23:00'))).toBe(true);
   });
 
-  it('holds September open to the last minute of every allowed boundary', () => {
-    for (let boundary = 0; boundary <= MONTH_CLOSE_HOUR; boundary++) {
-      // One minute before this person's 30 September rolls into October.
-      const lastMinute =
-        boundary === 0
-          ? scheduledToUtc('2026-09-30', '23:59')
-          : scheduledToUtc('2026-10-01', `${String(boundary - 1).padStart(2, '0')}:59`);
-      expect(isMonthOpen('2026-09', lastMinute)).toBe(true);
-    }
+  it('closes once no working day of it can still be running', () => {
+    // The grace is the sweep's threshold plus the rest that ends a day, so a
+    // shift opened in the last minute of September is certainly finished.
+    expect(isMonthOpen('2026-09', scheduledToUtc('2026-10-02', '01:00'))).toBe(false);
   });
 
-  it('and closes it once the latest of them has passed', () => {
-    expect(isMonthOpen('2026-09', scheduledToUtc('2026-10-01', '06:00'))).toBe(false);
+  it('is derived from the two rules, not picked', () => {
+    expect(MONTH_CLOSE_GRACE_MIN).toBe(20 * 60 + 255);
+  });
+
+  it('leaves the middle of a month exactly as it was', () => {
+    const midMonth = scheduledToUtc('2026-09-15', '12:00');
+    expect(currentPayMonth(midMonth)).toBe('2026-09');
+    expect(isMonthOpen('2026-08', midMonth)).toBe(false);
+    expect(isMonthOpen('2026-10', midMonth)).toBe(true);
   });
 });

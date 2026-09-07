@@ -1,4 +1,5 @@
-import { shiftDateOf } from 'time';
+import { inBeirut, SHIFT_GAP_MIN } from 'time';
+import { AUTO_CLOSE_AFTER_MIN } from './autoClose';
 
 /**
  * A pay month stops accepting changes the moment the next one begins.
@@ -12,33 +13,41 @@ import { shiftDateOf } from 'time';
  * decided in Beirut, and a two-hour disagreement here would leave the first
  * hours of the 1st writing into a month the payroll screen had already closed.
  *
- * And it ends where the working DAY ends, not at calendar midnight, which is
- * the same rule payroll already pays by: a pair belongs to the month of
- * shiftDateOf(arrival), so an employee on a 04:00 boundary who clocks in at
- * 00:30 on the 1st is starting the previous month's last shift. The lock used
- * midnight while payroll used the boundary, and for those few hours a shift was
- * being attributed to a month that was already refusing rulings on it. That
- * fails against the employee in both directions it can: an undecided shortfall
- * is DOCKED and an undecided blocked credit grants NOTHING, so the one shift
- * nobody could waive was the one most likely to need it.
+ * And it ends where the last working day OF that month ends, not at calendar
+ * midnight. A shift belongs to the month of the working day it opened, and that
+ * day is not over until the person has gone home - so at 01:00 on the 1st there
+ * are still people finishing shifts that September will pay for. Closing the
+ * lock at midnight put those shifts in a month already refusing rulings on
+ * them, and both undecided outcomes go against the employee: a shortfall is
+ * DOCKED and a blocked credit grants NOTHING. The one shift nobody could waive
+ * was the one most likely to need it.
  *
- * MONTH_CLOSE_HOUR rather than each person's own boundary, because the lock has
- * no user in hand at most call sites and erring long is free: holding the month
- * open a few extra hours risks a late ruling on a month about to be paid, while
- * closing early takes money off somebody with no button to give it back. It is
- * the ceiling on day_start_hour, so it can never be earlier than any employee's
- * working day ends - the API refuses a boundary above it for exactly that
- * reason.
+ * The grace is derived, not chosen. No working day can outlive the sweep that
+ * closes an abandoned session (AUTO_CLOSE_AFTER_MIN) plus the rest that ends a
+ * working day (SHIFT_GAP_MIN) - so a day opened in the last minute of a month
+ * is certainly over that long after the month was. September therefore closes
+ * just after midnight on 2 October rather than on the 1st.
+ *
+ * A fixed hour cannot do this any more. There is no configured end-of-day left
+ * to follow: the working day is defined by rest, so its end is a different
+ * instant for every person and only knowable from their punches. Erring long is
+ * free - holding a month open risks a late ruling on a month about to be paid,
+ * while closing early takes money from somebody with no button to give it back.
+ *
+ * The residual case: a real shift longer than the sweep's threshold, kept alive
+ * by a revoked auto-close, straddling month end. That is a double cover across
+ * the 1st, it is vanishingly rare, and the owner is notified about it when it
+ * happens.
  *
  * Note what this does NOT cover: an employee's own advance request, and a
  * punch correction. Those are how the record gets fixed, and a shortfall
  * discovered in a paid month still has to be correctable - what is frozen is
  * the money the owner rules on top of the record, not the record itself.
  */
-export const MONTH_CLOSE_HOUR = 6;
+export const MONTH_CLOSE_GRACE_MIN = AUTO_CLOSE_AFTER_MIN + SHIFT_GAP_MIN;
 
 export function currentPayMonth(now: Date = new Date()): string {
-  return shiftDateOf(now, MONTH_CLOSE_HOUR).slice(0, 7);
+  return inBeirut(new Date(now.getTime() - MONTH_CLOSE_GRACE_MIN * 60_000)).date.slice(0, 7);
 }
 
 /** 'YYYY-MM', or a 'YYYY-MM-DD' whose month is taken. */
