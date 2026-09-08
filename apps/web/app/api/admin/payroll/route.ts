@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
-import { payoutForUser, payrollRoster } from '@/lib/services/payout';
+import { payoutForUser, payrollRoster, monthRangeBeirut } from '@/lib/services/payout';
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -29,6 +29,22 @@ export async function GET(req: Request) {
     prisma.branch.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
   ]);
 
+  // The rate in force during the MONTH BEING VIEWED, not whatever the employee
+  // is on today. Scrolling back to August with December's rate beside August's
+  // hours makes the two stop multiplying out, and the payslip PDF prints the
+  // same column - they have to agree.
+  //
+  // One query for the page rather than one per employee: every change up to the
+  // month's end, newest first, and the first hit per user wins.
+  const rateAtMonthEnd = new Map<string, number>();
+  for (const rc of await prisma.rateChange.findMany({
+    where: { user_id: { in: users.map((u) => u.id) }, effective_from: { lt: monthRangeBeirut(month).end } },
+    orderBy: { effective_from: 'desc' },
+    select: { user_id: true, rate_cent: true },
+  })) {
+    if (!rateAtMonthEnd.has(rc.user_id)) rateAtMonthEnd.set(rc.user_id, rc.rate_cent);
+  }
+
   const rows = await Promise.all(
     users.map(async (u) => {
       const r = await payoutForUser(u.id, month, prisma);
@@ -41,7 +57,9 @@ export async function GET(req: Request) {
         role: u.role,
         branch_id: u.branch_id,
         branch_name: u.branch?.name ?? null,
-        rate_cent: u.hourly_rate_cent,
+        // Falls back to the current rate only for somebody with no RateChange
+        // history at all, which is an account that has never been paid.
+        rate_cent: rateAtMonthEnd.get(u.id) ?? u.hourly_rate_cent,
         // Reference only — what the owner expects to pay this person. Deliberately
         // excluded from `totals` below: it must never be summed or compared, only
         // displayed next to what they actually earned.
