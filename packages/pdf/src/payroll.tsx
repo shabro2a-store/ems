@@ -14,6 +14,11 @@ export interface PayrollRow {
   blocked_credit_cent?: number;
   adjustments_cent: number;
   penalties_cent: number;
+  // Overtime the owner revoked. A real deduction inside net_cent, so it needs a
+  // column of its own: without one the printed row does not add up, and the
+  // only way to see the difference is to reconcile against a screen. Optional
+  // so a caller that predates the column still renders.
+  overtime_deduction_cent?: number;
   advances_cent: number;
   net_cent: number;
 }
@@ -62,9 +67,12 @@ const styles = StyleSheet.create({
   name: { fontFamily: 'Helvetica-Bold' },
   role: { fontSize: 7.5, color: C.faint },
 
-  cName: { width: '20%' },
-  cBranch: { width: '14%' },
-  cNum: { width: '11%', textAlign: 'right' },
+  // Seven numeric columns now that revoked overtime has its own. The widths
+  // have to total 100 or react-pdf silently wraps the last one onto its own
+  // line, which reads as a blank row rather than as an error.
+  cName: { width: '18%' },
+  cBranch: { width: '12%' },
+  cNum: { width: '10%', textAlign: 'right' },
 
   totals: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 8, backgroundColor: C.band, borderBottomLeftRadius: 6, borderBottomRightRadius: 6, marginTop: 0 },
   totalLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.4 },
@@ -92,8 +100,8 @@ function genLabel(d: Date): string {
 
 export function PayrollDocument({ month, generatedAt, rows, branchName }: PayrollPdfProps): React.ReactElement {
   const totals = rows.reduce(
-    (a, r) => ({ gross: a.gross + r.gross_cent, credit: a.credit + (r.blocked_credit_cent ?? 0), adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
-    { gross: 0, credit: 0, adj: 0, pen: 0, adv: 0, net: 0, hours: 0 },
+    (a, r) => ({ gross: a.gross + r.gross_cent, credit: a.credit + (r.blocked_credit_cent ?? 0), adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, ot: a.ot + (r.overtime_deduction_cent ?? 0), adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
+    { gross: 0, credit: 0, adj: 0, pen: 0, ot: 0, adv: 0, net: 0, hours: 0 },
   );
 
   return (
@@ -134,6 +142,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           <Text style={[styles.th, styles.cNum]}>Gross</Text>
           <Text style={[styles.th, styles.cNum]}>Adjust.</Text>
           <Text style={[styles.th, styles.cNum]}>Penalty</Text>
+          <Text style={[styles.th, styles.cNum]}>OT revoked</Text>
           <Text style={[styles.th, styles.cNum]}>Advances</Text>
           <Text style={[styles.th, styles.cNum]}>Net</Text>
         </View>
@@ -152,6 +161,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
               <Text style={[styles.td, styles.cNum]}>{usd(r.gross_cent)}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.adjustments_cent > 0 ? C.success : r.adjustments_cent < 0 ? C.danger : C.faint }]}>{signedUsd(r.adjustments_cent)}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.penalties_cent > 0 ? C.danger : C.faint }]}>{r.penalties_cent > 0 ? `−${usd(r.penalties_cent)}` : '—'}</Text>
+              <Text style={[styles.td, styles.cNum, { color: (r.overtime_deduction_cent ?? 0) > 0 ? C.danger : C.faint }]}>{(r.overtime_deduction_cent ?? 0) > 0 ? `−${usd(r.overtime_deduction_cent!)}` : '—'}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.advances_cent > 0 ? C.danger : C.faint }]}>{r.advances_cent > 0 ? `−${usd(r.advances_cent)}` : '—'}</Text>
               <Text style={[styles.td, styles.cNum, styles.name]}>{usd(r.net_cent)}</Text>
             </View>
@@ -165,6 +175,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           <Text style={[styles.totalNum, styles.cNum]}>{usd(totals.gross)}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{signedUsd(totals.adj)}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{totals.pen > 0 ? `−${usd(totals.pen)}` : '—'}</Text>
+          <Text style={[styles.totalNum, styles.cNum]}>{totals.ot > 0 ? `−${usd(totals.ot)}` : '—'}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{totals.adv > 0 ? `−${usd(totals.adv)}` : '—'}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{usd(totals.net)}</Text>
         </View>

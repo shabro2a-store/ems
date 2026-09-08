@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
-import { payoutForUser, payrollRoster } from '@/lib/services/payout';
+import { payoutForUser, payrollRoster, monthRangeBeirut } from '@/lib/services/payout';
 import { PayrollDocument } from 'pdf/payroll';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
@@ -45,9 +45,16 @@ export async function GET(req: Request) {
   const rows = await Promise.all(
     users.map(async (u) => {
       const payout = await payoutForUser(u.id, month, prisma);
-      // Pull the most recent rate for the "rate" column.
+      // The rate in force during the month being PRINTED, not today's. A
+      // payslip is a record of a month that has been paid; reprinting August in
+      // December with December's rate makes the hours and the gross stop
+      // multiplying out, and the number is right there next to them.
+      //
+      // It is still one number for a month that can hold several - gross is
+      // priced per interval - so this is the rate the month ENDED on, which is
+      // what its later work was paid at.
       const latestRate = await prisma.rateChange.findFirst({
-        where: { user_id: u.id, effective_from: { lte: new Date() } },
+        where: { user_id: u.id, effective_from: { lt: monthRangeBeirut(month).end } },
         orderBy: { effective_from: 'desc' },
         select: { rate_cent: true },
       });
@@ -63,6 +70,7 @@ export async function GET(req: Request) {
         blocked_credit_cent: payout.blockedCreditCent,
         adjustments_cent: payout.adjustmentsCent,
         penalties_cent: payout.penaltiesCent,
+        overtime_deduction_cent: payout.overtimeDeductionCent,
         advances_cent: payout.advancesCent,
         net_cent: payout.netCent,
       };
