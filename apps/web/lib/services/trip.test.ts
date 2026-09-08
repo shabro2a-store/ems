@@ -42,6 +42,7 @@ const store: {
   trips: TripRow[];
   overrides: Array<{ user_id: string; date: Date; kind: 'DAY_OFF' | 'HOURS_CHANGE' }>;
   calls: Array<{ id: string; driver_id: string; trip_id: string | null; created_at: Date }>;
+  punches: Array<{ user_id: string; kind: 'IN' | 'OUT'; at: Date; branch_id: string }>;
   tripSeq: number;
 } = {
   users: new Map(),
@@ -49,11 +50,13 @@ const store: {
   trips: [],
   overrides: [],
   calls: [],
+  punches: [],
   tripSeq: 0,
 };
 
 const mocks = vi.hoisted(() => ({
   user: { findUnique: vi.fn() },
+  punch: { findFirst: vi.fn() },
   scheduleOverride: { findUnique: vi.fn() },
   trip: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
   driverCall: { findFirst: vi.fn(), updateMany: vi.fn() },
@@ -72,6 +75,7 @@ function resetStore() {
   store.trips.length = 0;
   store.overrides.length = 0;
   store.calls.length = 0;
+  store.punches.length = 0;
   store.tripSeq = 0;
 }
 
@@ -105,6 +109,9 @@ function makeDriver(id: string, branch: ReturnType<typeof makeBranch>) {
     created_at: new Date(),
   };
   store.users.set(id, u);
+  // On shift. A trip is work, so startTrip and ringDriver both refuse a driver
+  // who is not clocked in; the tests that care about that clear this.
+  store.punches.push({ user_id: id, kind: 'IN', at: new Date('2020-01-01T00:00:00Z'), branch_id: branch.id });
   // Every driver is dispatched by default (the caller rang them) so existing
   // start-trip tests reflect the normal flow. Tests can clear store.calls to
   // simulate an undispatched driver.
@@ -162,6 +169,18 @@ beforeEach(() => {
     Object.assign(t, data);
     return t;
   });
+
+  // openCheckInBranchId: the latest IN, then any OUT after it.
+  mocks.punch.findFirst.mockImplementation(
+    async ({ where, orderBy }: { where: { user_id: string; kind: 'IN' | 'OUT'; at?: { gt: Date } }; orderBy?: unknown }) => {
+      const rows = store.punches
+        .filter((p) => p.user_id === where.user_id && p.kind === where.kind)
+        .filter((p) => (where.at?.gt ? p.at > where.at.gt : true))
+        .sort((a, b) => a.at.getTime() - b.at.getTime());
+      void orderBy;
+      return where.kind === 'IN' ? rows[rows.length - 1] ?? null : rows[0] ?? null;
+    },
+  );
 
   mocks.driverCall.findFirst.mockImplementation(async ({ where }: { where: { driver_id: string; trip_id: null; created_at?: { gte: Date } } }) => {
     const cutoff = where.created_at?.gte;
@@ -307,5 +326,60 @@ describe('currentTrip', () => {
     const r = await currentTrip(driver.id);
     expect(r.open).toBe(true);
     expect(r.since_min).toBeGreaterThanOrEqual(14);
+  });
+});
+describe('a driver who is not on shift', () => {
+  // A delivery is work. Without this a driver could go out before clocking in -
+  // and the open trip then blocks their own next clock-in until the six-hour
+  // sweep closes it, so they lock themselves out of the shift they were about
+  // to start. The driver's app already hid the button and the caller's list
+  // already excluded them; only the service was missing it.
+  function offShiftDriver() {
+    const b = makeBranch();
+    const driver = makeDriver('d1', b);
+    store.punches.length = 0; // never clocked in
+    return { b, driver };
+  }
+
+  it('cannot start a trip, even holding a valid ring', async () => {
+    const { b, driver } = offShiftDriver();
+    store.calls.push({ id: 'c1', driver_id: driver.id, trip_id: null, created_at: new Date() });
+
+    const r = await startTrip({ userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10 });
+
+    expect('code' in r && r.code).toBe('NOT_CLOCKED_IN');
+    expect(store.trips).toHaveLength(0);
+    // The ring is not consumed, so it still works once they clock in.
+    expect(store.calls[0]!.trip_id).toBeNull();
+  });
+
+  it('is refused after clocking OUT inside the dispatch window', async () => {
+    // The ring is valid for thirty minutes and they can leave in that time,
+    // which is why the check is on the trip as well as on the ring.
+    const { b, driver } = offShiftDriver();
+    store.punches.push(
+      { user_id: driver.id, kind: 'IN', at: new Date('2026-09-14T05:00:00Z'), branch_id: b.id },
+      { user_id: driver.id, kind: 'OUT', at: new Date('2026-09-14T13:00:00Z'), branch_id: b.id },
+    );
+    store.calls.push({ id: 'c1', driver_id: driver.id, trip_id: null, created_at: new Date() });
+
+    const r = await startTrip({
+      userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10, now: new Date('2026-09-14T13:10:00Z'),
+    });
+
+    expect('code' in r && r.code).toBe('NOT_CLOCKED_IN');
+  });
+
+  it('is told about an open trip first, which it can actually fix', async () => {
+    // Both are wrong, and only one has a button behind it.
+    const { b, driver } = offShiftDriver();
+    store.trips.push({
+      id: 't1', driver_id: driver.id, branch_id: b.id, out_at: new Date(), back_at: null,
+      out_lat: b.lat, out_lng: b.lng, back_lat: null, back_lng: null, system_generated: false,
+    } as never);
+
+    const r = await startTrip({ userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10 });
+
+    expect('code' in r && r.code).toBe('OPEN_TRIP_EXISTS');
   });
 });

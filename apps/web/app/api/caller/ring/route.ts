@@ -31,7 +31,12 @@ export async function POST(req: Request) {
 
   const result = await ringDriver({ callerId, driverId: body.driverId, branchId: caller.branch_id, db: prisma });
   if (!result.ok) {
-    if (result.code === 'WRONG_BRANCH') return jsonError('WRONG_BRANCH', 'That driver is not in your branch', 403);
+    if (result.code === 'WRONG_BRANCH') return jsonError('WRONG_BRANCH', 'That driver is clocked in at another branch', 403);
+    // Its own message: falling through to "Driver not found" sent the caller
+    // looking for a missing account when the driver is simply off shift.
+    if (result.code === 'NOT_CLOCKED_IN') {
+      return jsonError('NOT_CLOCKED_IN', 'That driver is not clocked in yet', 409);
+    }
     return jsonError('NOT_FOUND', 'Driver not found', 404);
   }
   return NextResponse.json({ ok: true, data: { rang: true } });

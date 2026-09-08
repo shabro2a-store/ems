@@ -24,6 +24,10 @@ const ERROR_MAP: Record<string, { code: string; status: number }> = {
   NOT_DRIVER: { code: 'FORBIDDEN', status: 403 },
   NOT_DISPATCHED: { code: 'NOT_DISPATCHED', status: 409 },
   OPEN_TRIP_EXISTS: { code: 'OPEN_TRIP_EXISTS', status: 409 },
+  // Mapped explicitly rather than left to the fallback, which is a 500: this is
+  // a refusal the driver can act on in one tap, not a server fault, and a 500
+  // would also skip the idempotent store below and retry forever.
+  NOT_CLOCKED_IN: { code: 'NOT_CLOCKED_IN', status: 409 },
   OUT_OF_GEOFENCE: { code: 'OUT_OF_GEOFENCE', status: 422 },
   LOW_GPS_ACCURACY: { code: 'LOW_GPS_ACCURACY', status: 422 },
 };
@@ -65,6 +69,7 @@ export async function POST(req: Request) {
     const mapped = ERROR_MAP[result.code] ?? { code: result.code, status: 500 };
     const friendly: Record<string, string> = {
       NOT_DISPATCHED: 'Wait for the counter to call you before going out on an order.',
+      NOT_CLOCKED_IN: 'Clock in before going out on an order.',
     };
     const response = { ok: false, error: { code: mapped.code, message: friendly[result.code] ?? `Trip rejected: ${result.code}` } };
     if (mapped.status >= 400 && mapped.status < 500) {

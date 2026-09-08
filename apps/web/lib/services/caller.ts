@@ -151,18 +151,26 @@ export async function ringDriver(
   const db = args.db ?? defaultPrisma;
   const driver = await db.user.findUnique({
     where: { id: args.driverId },
-    select: { role: true, branch_id: true, is_active: true, can_roam_branches: true },
+    select: { role: true, is_active: true },
   });
   if (!driver || driver.role !== 'DRIVER' || !driver.is_active) return { ok: false, code: 'NOT_FOUND' };
-  if (driver.branch_id !== args.branchId) {
-    // A driver from another branch may be rung only while they are actually
-    // clocked in here. Roaming alone is not enough: it would let any branch ring
-    // a driver standing in another one, and the ring is what authorises the
-    // trip - startTrip geofences against the branch that rang.
-    const here =
-      driver.can_roam_branches && (await openCheckInBranchId(db, args.driverId)) === args.branchId;
-    if (!here) return { ok: false, code: 'WRONG_BRANCH' };
-  }
+
+  // Where they are ON SHIFT, which is the only thing that makes a ring valid.
+  //
+  // It used to be "their branch is this one, OR they roam and are clocked in
+  // here" - so a driver at their own branch could be rung while off shift, and
+  // the ring is what authorises a trip. A trip taken off shift then blocks that
+  // driver's own clock-in until the six-hour sweep closes it: they lock
+  // themselves out of the shift they were about to start. The driver's app
+  // already hides the button when off shift and the caller's availability list
+  // already excludes them; only the service was missing it.
+  //
+  // Asking where they are clocked in answers both questions at once, and the
+  // roaming case stops being special: a roaming driver clocked in here is here,
+  // and anybody clocked in somewhere else is not - whatever branch owns them.
+  const clockedInAt = await openCheckInBranchId(db, args.driverId);
+  if (clockedInAt === null) return { ok: false, code: 'NOT_CLOCKED_IN' };
+  if (clockedInAt !== args.branchId) return { ok: false, code: 'WRONG_BRANCH' };
 
   const call = await db.driverCall.create({
     data: { driver_id: args.driverId, caller_id: args.callerId, branch_id: args.branchId },

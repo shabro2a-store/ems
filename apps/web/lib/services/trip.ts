@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
 import { abandonedTripClose } from './tripClose';
-import { GEO_BRANCH_SELECT, type GeoBranch } from './branchScope';
+import { GEO_BRANCH_SELECT, openCheckInBranchId, type GeoBranch } from './branchScope';
 
 export type TripErrorCode =
   | 'USER_NOT_FOUND'
@@ -10,6 +10,7 @@ export type TripErrorCode =
   | 'NOT_DRIVER'
   | 'NOT_DISPATCHED'
   | 'OPEN_TRIP_EXISTS'
+  | 'NOT_CLOCKED_IN'
   | 'NO_OPEN_TRIP'
   | 'OUT_OF_GEOFENCE'
   | 'LOW_GPS_ACCURACY';
@@ -51,6 +52,21 @@ export async function startTrip(
     select: { id: true },
   });
   if (open) return { ok: false, code: 'OPEN_TRIP_EXISTS' };
+
+  // A delivery is work, so the driver has to be on shift to go out on one.
+  //
+  // Checked here as well as at the ring because the two are half an hour apart:
+  // DISPATCH_WINDOW_MS lets a ring authorise a trip for thirty minutes, and a
+  // driver can clock out inside that window. Without it they go out off shift,
+  // and the open trip then blocks their own next clock-in until the six-hour
+  // sweep closes it - they lock themselves out of the shift they were about to
+  // start, which is the failure this whole guard exists to prevent.
+  //
+  // After OPEN_TRIP_EXISTS on purpose: a driver with a trip still open has a
+  // more specific problem and a button that fixes it.
+  if ((await openCheckInBranchId(db, user.id)) === null) {
+    return { ok: false, code: 'NOT_CLOCKED_IN' };
+  }
 
   // Must have been dispatched (rung) by the caller, and that ring must not have
   // already been used for another trip.
