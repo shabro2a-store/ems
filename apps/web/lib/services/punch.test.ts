@@ -1580,6 +1580,52 @@ describe('a check-in that opens a second working day on one date', () => {
     expect(sent.filter((p) => p.template === 'punch.second_working_day')).toHaveLength(0);
   });
 
+  it('warns the other way too, when a return pulls October hours into September', async () => {
+    // Out 22:00 on the 30th, back at 01:00 - three hours, so he never went home
+    // and this continues 30 September. He clocks in in October and is paid in
+    // September, which is the surprising half and the one worth saying.
+    const { branch, user } = seed();
+    seedClosedShift(user.id, branch.id, new Date('2026-09-30T11:00:00Z'), new Date('2026-09-30T19:00:00Z'));
+    const sent: Array<{ template: string; context: Record<string, unknown> }> = [];
+
+    await clockIn(new Date('2026-09-30T22:00:00Z'), sent); // 01:00 Beirut, 1 Oct
+    const warn = sent.find((p) => p.template === 'punch.day_continues');
+    expect(warn).toBeDefined();
+    expect(warn!.context.clocked_in_on).toBe('2026-10-01');
+    expect(warn!.context.filed_under).toBe('2026-09-30');
+    expect(warn!.context.moves_month).toBe(true);
+    const msg = String(warn!.context.message);
+    expect(msg).toContain('did not go home');
+    expect(msg).toContain('paid in 2026-09, not 2026-10');
+    // Not the other message: the date was never taken, so nothing was pushed.
+    expect(msg).not.toContain('second working day');
+  });
+
+  it('stays quiet for an ordinary split shift finishing after midnight', () => {
+    // Same shape, mid-month. Routine, and saying it every time would bury the
+    // ones that matter.
+    const { branch, user } = seed();
+    seedClosedShift(user.id, branch.id, new Date('2026-09-15T11:00:00Z'), new Date('2026-09-15T19:00:00Z'));
+    const sent: Array<{ template: string }> = [];
+    return clockIn(new Date('2026-09-15T22:00:00Z'), sent).then(() => {
+      expect(sent.filter((p) => p.template.startsWith('punch.'))).toHaveLength(0);
+    });
+  });
+
+  it('says the month on a second working day that crosses one', async () => {
+    // The case the owner asked about: two shifts on the 30th, rest between, so
+    // the second is a new working day and 30 September is taken.
+    const { branch, user } = seed();
+    seedClosedShift(user.id, branch.id, new Date('2026-09-30T05:00:00Z'), new Date('2026-09-30T13:00:00Z'));
+    const sent: Array<{ template: string; context: Record<string, unknown> }> = [];
+
+    await clockIn(new Date('2026-09-30T18:00:00Z'), sent); // 21:00 Beirut, 5h later
+    const warn = sent.find((p) => p.template === 'punch.second_working_day')!;
+    expect(warn.context.filed_under).toBe('2026-10-01');
+    expect(warn.context.moves_month).toBe(true);
+    expect(String(warn.context.message)).toContain('paid in 2026-10, not 2026-09');
+  });
+
   it('writes the punch even if the warning throws', async () => {
     const { branch, user } = seed();
     seedClosedShift(user.id, branch.id, new Date('2026-09-11T13:02:00Z'), new Date('2026-09-11T15:21:00Z'));

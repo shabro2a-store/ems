@@ -11,7 +11,7 @@ import {
 } from './autoClose';
 import { abandonedTripClose, writeSystemTripClose, MAX_OPEN_TRIP_MIN } from './tripClose';
 import { punchableBranches } from './branchScope';
-import { inBeirut } from 'time';
+import { inBeirut, SHIFT_GAP_MIN } from 'time';
 import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
@@ -654,30 +654,59 @@ async function warnIfSecondWorkingDay(
     const { date: clockedInOn, hhmm } = inBeirut(at);
     if (label === null || label === clockedInOn) return; // the ordinary case
 
-    // Which shift took the date first, so the message names both.
-    const firstIdx = around.findIndex((p, k) => p.kind === 'IN' && labels[k] === clockedInOn);
-    const firstAt = firstIdx >= 0 ? inBeirut(around[firstIdx]!.at).hhmm : null;
+    const movesMonth = label.slice(0, 7) !== clockedInOn.slice(0, 7);
+    // Which way the label moved, because they are opposite situations and a
+    // message written for one is wrong about the other.
+    //
+    // FORWARD: the date they clocked in on was already taken, so this is a
+    // second working day. Always worth saying - it is the shape that put 25h14m
+    // on one day, and it happens about twice a month across the shop.
+    //
+    // BACKWARD: they came back inside the rest window, so this continues a day
+    // that started earlier. Only worth saying when it crosses a MONTH, which is
+    // the surprising half: hours worked in October, paid in September, because
+    // he never went home in between. Mid-month it is an ordinary split shift
+    // finishing after midnight and saying so every time would bury the rest.
+    const aSecondDay = label > clockedInOn;
+    if (!aSecondDay && !movesMonth) return;
+
+    const monthLine = movesMonth
+      ? ` It is paid in ${label.slice(0, 7)}, not ${clockedInOn.slice(0, 7)}.`
+      : '';
+
+    let message: string;
+    if (aSecondDay) {
+      // Which shift took the date first, so the message names both.
+      const firstIdx = around.findIndex((q, k) => q.kind === 'IN' && labels[k] === clockedInOn);
+      const firstAt = firstIdx >= 0 ? inBeirut(around[firstIdx]!.at).hhmm : null;
+      message =
+        `${user.username} clocked in at ${hhmm} on ${clockedInOn}` +
+        (firstAt ? `, having already worked a shift that started at ${firstAt} the same date` : '') +
+        `. That date is taken, so this shift is a second working day and is filed on ` +
+        `${label} - and judged against that day's scheduled hours.` +
+        monthLine +
+        ` If that is not what happened, correct one of the check-ins.`;
+    } else {
+      message =
+        `${user.username} clocked in at ${hhmm} on ${clockedInOn}, less than ` +
+        `${Math.floor(SHIFT_GAP_MIN / 60)}h${SHIFT_GAP_MIN % 60} after their last checkout - so they did ` +
+        `not go home, and this continues the working day of ${label} rather than starting a new one.` +
+        monthLine +
+        ` If they did go home, correct the checkout that came before this.`;
+    }
 
     await notify.send({
       channel: 'telegram',
       recipient: 'admin',
-      template: 'punch.second_working_day',
+      template: aSecondDay ? 'punch.second_working_day' : 'punch.day_continues',
       context: {
         user: { id: user.id, username: user.username },
         branch: { id: branch.id, name: branch.name ?? null },
         at: at.toISOString(),
         clocked_in_on: clockedInOn,
         filed_under: label,
-        moves_month: label.slice(0, 7) !== clockedInOn.slice(0, 7),
-        message:
-          `${user.username} clocked in at ${hhmm} on ${clockedInOn}` +
-          (firstAt ? `, having already worked a shift that started at ${firstAt} the same date` : '') +
-          `. That date is taken, so this shift is a second working day and is filed on ` +
-          `${label} - and judged against that day's scheduled hours.` +
-          (label.slice(0, 7) !== clockedInOn.slice(0, 7)
-            ? ` It is also paid in ${label.slice(0, 7)}, not ${clockedInOn.slice(0, 7)}.`
-            : '') +
-          ` If that is not what happened, correct one of the check-ins.`,
+        moves_month: movesMonth,
+        message,
       },
     });
   } catch (e) {
