@@ -4,11 +4,8 @@ import { scheduledToUtc } from 'time';
 import { currentPayMonth, isMonthOpen, MONTH_CLOSE_GRACE_MIN } from './periodLock';
 
 /*
- * The month has to end where the working DAY ends, not at calendar midnight.
- *
- * Beirut is UTC+3 in September. A 04:00 boundary means 30 September runs until
- * 04:00 on 1 October, so somebody who clocks in at 00:30 on the 1st is starting
- * September's last shift, and must be paid in September.
+ * The seam between two months, decided by rest like every other day boundary.
+ * Beirut is UTC+3 through all of these dates.
  */
 const RATE = [{ rate_cent: 226, effective_from: new Date('2020-01-01T00:00:00Z') }];
 const p = (kind: 'IN' | 'OUT', iso: string) => ({ kind, at: new Date(iso) });
@@ -126,5 +123,76 @@ describe('the month stays open until its last working day can be over', () => {
     expect(currentPayMonth(midMonth)).toBe('2026-09');
     expect(isMonthOpen('2026-08', midMonth)).toBe(false);
     expect(isMonthOpen('2026-10', midMonth)).toBe(true);
+  });
+});
+
+/*
+ * Two shifts on the last day of the month.
+ *
+ * Nothing here is a special case: it is the ordinary rule landing on the ordinary
+ * seam. A second shift separated by rest opens a new working day, which takes
+ * the next free date - and on the 30th the next free date is in October. A
+ * second shift inside the rest window continues the day already open, which is
+ * September's, whatever the clock says about it.
+ */
+const b = (kind: 'IN' | 'OUT', wallClock: string) => ({ kind, at: new Date(wallClock + '+03:00') });
+
+describe('a second shift on the last day of the month', () => {
+  it('goes to October when they went home first', () => {
+    // Out 16:00, back 21:00 - five hours, so a new working day. 30 September is
+    // taken by the first shift, so this one is 1 October and October pays it.
+    const punches = [
+      b('IN', '2026-09-30T08:00'), b('OUT', '2026-09-30T16:00'),
+      b('IN', '2026-09-30T21:00'), b('OUT', '2026-10-01T05:00'),
+    ];
+    expect(pay('2026-09', punches, 0).hours).toBe(8);
+    expect(pay('2026-10', punches, 0).hours).toBe(8);
+  });
+
+  it('stays in September when they did not', () => {
+    // Out 16:00, back 19:00 - three hours is a break, not rest. One working day,
+    // still the 30th, and every minute of it is September's even though half of
+    // it happens in October.
+    const punches = [
+      b('IN', '2026-09-30T08:00'), b('OUT', '2026-09-30T16:00'),
+      b('IN', '2026-09-30T19:00'), b('OUT', '2026-10-01T03:00'),
+    ];
+    expect(pay('2026-09', punches, 0).hours).toBe(16);
+    expect(pay('2026-10', punches, 0).hours).toBe(0);
+  });
+
+  it('answers the same when the second shift starts after midnight', () => {
+    // The clock is not consulted at any point, so a 03:00 start on the 1st is
+    // decided by the five hours before it exactly like a 21:00 start would be.
+    const punches = [
+      b('IN', '2026-09-30T14:00'), b('OUT', '2026-09-30T22:00'),
+      b('IN', '2026-10-01T03:00'), b('OUT', '2026-10-01T11:00'),
+    ];
+    expect(pay('2026-09', punches, 0).hours).toBe(8);
+    expect(pay('2026-10', punches, 0).hours).toBe(8);
+  });
+
+  it('and counts a 01:00 return in September, because it is the same day', () => {
+    // Out 22:00, back 01:00 - three hours. He never went home, so this is still
+    // 30 September's shift and September pays all sixteen hours of it.
+    const punches = [
+      b('IN', '2026-09-30T14:00'), b('OUT', '2026-09-30T22:00'),
+      b('IN', '2026-10-01T01:00'), b('OUT', '2026-10-01T09:00'),
+    ];
+    expect(pay('2026-09', punches, 0).hours).toBe(16);
+    expect(pay('2026-10', punches, 0).hours).toBe(0);
+  });
+
+  it('holds to the minute on the seam', () => {
+    const secondShift = (gapMin: number) => {
+      const out = new Date('2026-09-30T16:00+03:00');
+      return [
+        b('IN', '2026-09-30T08:00'), b('OUT', '2026-09-30T16:00'),
+        { kind: 'IN' as const, at: new Date(out.getTime() + gapMin * 60_000) },
+        { kind: 'OUT' as const, at: new Date(out.getTime() + (gapMin + 480) * 60_000) },
+      ];
+    };
+    expect(pay('2026-10', secondShift(254), 0).hours).toBe(0); // 4h14m: September
+    expect(pay('2026-10', secondShift(255), 0).hours).toBe(8); // 4h15m: October
   });
 });
