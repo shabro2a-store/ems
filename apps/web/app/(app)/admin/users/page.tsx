@@ -152,7 +152,7 @@ export default function AdminEmployeesPage() {
         actions={
           <>
             {inactiveCount > 0 && (
-              <Button size="sm" variant="secondary" onClick={() => setShowInactive((v) => !v)}>
+              <Button variant="secondary" onClick={() => setShowInactive((v) => !v)}>
                 {showInactive ? 'Hide removed' : `Show removed (${inactiveCount})`}
               </Button>
             )}

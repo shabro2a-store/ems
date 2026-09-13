@@ -120,7 +120,7 @@ export default function AdminPayrollPage() {
     <>
       <PageHeader
         title="Payroll"
-        subtitle="Hours, pay, adjustments and advances for the month"
+        subtitle="Net = wages (hours + trips) + bonuses − deductions − advances − penalties − revoked overtime"
         actions={
           <>
             <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-auto" />
@@ -153,7 +153,7 @@ export default function AdminPayrollPage() {
 
       {totals && (
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="wages + bonuses − deductions − advances − penalties − revoked OT" />
+          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint={`${rows.length} staff`} />
           <StatTile
             label="Gross wages"
             value={centsToUsd(totals.gross_cent)}
@@ -184,7 +184,7 @@ export default function AdminPayrollPage() {
       ) : (
         <Card>
           <div className="overflow-x-auto">
-            <table className="data-table">
+            <table className="data-table data-table--dense">
               <thead>
                 <tr>
                   <th className="text-left">Employee</th>
@@ -238,7 +238,7 @@ export default function AdminPayrollPage() {
                           {r.role === 'DRIVER' ? (
                             <button
                               onClick={() => setTripsFor(r)}
-                              className="tabular border-b border-dashed border-primary/40 font-medium hover:text-primary"
+                              className="tabular whitespace-nowrap border-b border-dashed border-primary/40 font-medium hover:text-primary"
                               title="Completed deliveries this month, by working day. Already inside Gross."
                             >
                               {r.trips_count === 0 ? '—' : `${r.trips_count} · ${centsToUsd(r.trips_cent, false)}`}
@@ -310,7 +310,7 @@ export default function AdminPayrollPage() {
                     <td className="tabular text-right">{totals.hours.toFixed(1)}</td>
                     <td></td>
                     <td className="tabular text-right">{centsToUsd(totals.gross_cent)}</td>
-                    <td className="tabular text-right">{totals.trips_count === 0 ? '—' : `${totals.trips_count} · ${centsToUsd(totals.trips_cent, false)}`}</td>
+                    <td className="tabular whitespace-nowrap text-right">{totals.trips_count === 0 ? '—' : `${totals.trips_count} · ${centsToUsd(totals.trips_cent, false)}`}</td>
                     <td className="tabular text-right">{totals.adjustments_cent >= 0 ? '+' : '−'}{centsToUsd(Math.abs(totals.adjustments_cent), false)}</td>
                     <td className="tabular text-right text-danger">{totals.penalties_cent === 0 ? '—' : `−${centsToUsd(totals.penalties_cent, false)}`}</td>
                     <td className="tabular text-right text-danger">{totals.overtime_deduction_cent === 0 ? '—' : `−${centsToUsd(totals.overtime_deduction_cent, false)}`}</td>
@@ -358,7 +358,10 @@ export default function AdminPayrollPage() {
 function GroupBody({ group, show, children }: { group: string; show: boolean; children: React.ReactNode }) {
   return (
     <>
-      {show && <tr className="group-row"><td colSpan={12}>{group}</td></tr>}
+      {/* The label is sticky on its own so it stays in view while a phone
+          scrolls the columns sideways - the cell is the whole row's width and
+          cannot move. */}
+      {show && <tr className="group-row"><td colSpan={12}><span className="sticky left-2.5">{group}</span></td></tr>}
       {children}
     </>
   );

@@ -100,7 +100,7 @@ export default function AdminBranchesPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             {branches.some((b) => !b.is_active && !b.deleted_at) && (
-              <Button size="sm" variant="secondary" onClick={() => setShowArchived((v) => !v)}>
+              <Button variant="secondary" onClick={() => setShowArchived((v) => !v)}>
                 {showArchived
                   ? 'Hide archived'
                   : `Show archived (${branches.filter((b) => !b.is_active && !b.deleted_at).length})`}

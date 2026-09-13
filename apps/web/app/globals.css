@@ -118,11 +118,41 @@
     padding: 0.625rem 1rem;
     vertical-align: middle;
   }
-  .data-table tbody tr:hover {
-    background-color: rgb(var(--surface-muted) / 0.7);
+  .data-table tbody tr:hover,
+  .data-table tbody tr:hover td:first-child {
+    background-color: rgb(var(--surface-muted));
   }
   .data-table tfoot td {
     padding: 0.75rem 1rem;
+  }
+  /* Payroll: twelve columns that have to fit a laptop without a sideways
+     scroll. Tighter cells, headers allowed a second line (bottom-aligned so
+     the row still reads as one), the name column kept whole and pinned so a
+     phone scrolling sideways still knows whose row it is on. */
+  .data-table--dense thead th,
+  .data-table--dense tbody td,
+  .data-table--dense tfoot td {
+    padding-left: 0.625rem;
+    padding-right: 0.625rem;
+  }
+  .data-table--dense thead th {
+    white-space: normal;
+    vertical-align: bottom;
+    line-height: 1.2;
+    letter-spacing: 0.04em;
+  }
+  .data-table--dense th:first-child,
+  .data-table--dense td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    white-space: nowrap;
+    background-color: rgb(var(--surface));
+  }
+  .data-table--dense thead th:first-child,
+  .data-table--dense tfoot td:first-child,
+  .data-table--dense .group-row td:first-child {
+    background-color: rgb(var(--surface-muted));
   }
   .data-table .group-row td {
     padding: 0.375rem 1rem;

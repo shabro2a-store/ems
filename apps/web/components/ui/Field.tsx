@@ -1,9 +1,17 @@
 import React from 'react';
 
 const controlClass =
-  'w-full rounded-lg border border-border bg-surface px-3 text-content placeholder:text-muted ' +
+  'rounded-lg border border-border bg-surface px-3 text-content placeholder:text-muted ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--ring))] focus-visible:border-primary ' +
   'disabled:opacity-60';
+
+// Full width unless the caller sized it. A toolbar passes `w-auto` and used to
+// get `w-full` anyway - two width utilities on one element, and the sheet
+// decides, not the attribute - which is how a month picker and a branch
+// filter came to stack one per line above the payroll table.
+function widthClass(className: string): string {
+  return /(^|\s)(sm:|md:|lg:)?w-/.test(className) ? '' : 'w-full';
+}
 
 export function Label({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
   return (
@@ -35,20 +43,20 @@ export function Field({
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className = '', ...rest }, ref) {
-    return <input ref={ref} className={`${controlClass} h-11 ${className}`} {...rest} />;
+    return <input ref={ref} className={`${controlClass} ${widthClass(className)} h-11 ${className}`} {...rest} />;
   },
 );
 
 export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   function Textarea({ className = '', ...rest }, ref) {
-    return <textarea ref={ref} className={`${controlClass} py-2 ${className}`} {...rest} />;
+    return <textarea ref={ref} className={`${controlClass} ${widthClass(className)} py-2 ${className}`} {...rest} />;
   },
 );
 
 export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
   function Select({ className = '', children, ...rest }, ref) {
     return (
-      <select ref={ref} className={`${controlClass} h-11 pr-8 ${className}`} {...rest}>
+      <select ref={ref} className={`${controlClass} ${widthClass(className)} h-11 pr-8 ${className}`} {...rest}>
         {children}
       </select>
     );

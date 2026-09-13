@@ -10,7 +10,9 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    // Title left, controls right, on one line; on a phone the controls drop
+    // under the title and wrap as they need to.
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
         {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
