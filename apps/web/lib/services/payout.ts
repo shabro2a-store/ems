@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { shiftDateOf, scheduledToUtc, inBeirut } from 'time';
+import { shiftDateOf, scheduledToUtc, inBeirut, SHIFT_GAP_MIN } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
@@ -20,10 +20,11 @@ export interface PayoutForUserResult {
   penaltiesCent: number;
   overtimeDeductionCent: number;
   // Drivers only. Completed trips this month and what they paid, each priced at
-  // the per-trip rate in force when it went out. An ADDEND to net alongside
-  // gross, never folded into it: gross has to stay hours x rate so the payslip
-  // multiplies out, and a driver's trips are a second thing they earned, not a
-  // correction to the first. Zero for everyone who is not a driver.
+  // the per-trip rate in force when it went out. INSIDE grossCent, the same way
+  // blocked credit is: gross is what the month earned, and for a driver that is
+  // the hours and the trips together. A memo line, not an addend - the payslip
+  // shows it beside gross so a figure that includes deliveries says so, and
+  // adding it again would pay every trip twice. Zero for everyone else.
   tripsCount: number;
   tripsCent: number;
   netCent: number;
@@ -183,34 +184,83 @@ export interface TripRow {
 }
 
 /**
+ * Which working day a trip belongs to: the one of the SHIFT it happened in.
+ *
+ * Not the calendar date it went out on. The same rest rule that files the
+ * punches files the trip, so a driver's hours and deliveries can never land on
+ * different days - or in different months. A trip at 00:30 during a shift that
+ * started the night before is that shift's trip; a trip during the break
+ * between two chunks of one working day is still that day's. That is the
+ * whole reason the rule exists, and the reason it was wrong to have trips
+ * follow a different one from the hours beside them.
+ *
+ * Concretely: the label of the most recent arrival at or before the trip,
+ * while that working day is still in progress - the session is open, or the
+ * last checkout was inside the rest window. Past the rest window the driver
+ * has gone home, and a trip with no shift around it (which the trip guard now
+ * refuses, but history holds a few) falls back to the day it happened on.
+ */
+export function workingDayOfTrip(
+  outAt: Date,
+  sortedPunches: PunchLite[],
+  labels: Array<string | null>,
+): string {
+  let lastLabel: string | null = null;
+  let lastOutAt: Date | null = null;
+  let open = false;
+  for (let i = 0; i < sortedPunches.length; i++) {
+    const p = sortedPunches[i]!;
+    if (p.at > outAt) break;
+    if (p.kind === 'IN') {
+      if (labels[i] !== null) lastLabel = labels[i];
+      open = true;
+    } else {
+      open = false;
+      lastOutAt = p.at;
+    }
+  }
+  if (lastLabel === null) return inBeirut(outAt).date;
+  if (open) return lastLabel;
+  if (lastOutAt !== null && (outAt.getTime() - lastOutAt.getTime()) / 60_000 < SHIFT_GAP_MIN) return lastLabel;
+  return inBeirut(outAt).date;
+}
+
+/**
  * How many trips a driver completed in `month`, and what they earned for them.
  *
  * A trip counts when it has a BACK - a driver still out has not finished the
  * delivery, and the trip-close sweep writes a BACK for one who forgot, so an
- * abandoned trip still pays once it is closed. It belongs to the Beirut date it
- * went OUT on. Trips are events rather than spans, so the month is simply the
- * day it happened; a trip at 00:30 on the 1st during a shift that started the
- * night before is the 1st's trip, and one trip's pay moving across a seam is
- * the entire cost of keeping the rule this simple.
+ * abandoned trip still pays once it is closed.
  *
  * Each trip is priced at the rate in force when it went out, the way an hour is
  * priced at the rate in force when it was clocked out, so a mid-month change
- * to the per-trip rate reprices nothing that already happened.
+ * to the per-trip rate reprices nothing that already happened. Which month it
+ * belongs to is `dayOf`, which callers build from the punches so it agrees
+ * with the hours; the default is the day it happened on, for a caller with no
+ * punches in hand.
  */
 export function tripPay(
   trips: TripRow[],
   tripRateChanges: { rate_cent: number; effective_from: Date }[],
   month?: string,
+  dayOf: (outAt: Date) => string = (outAt) => inBeirut(outAt).date,
 ): { count: number; cent: number } {
   let count = 0;
   let cent = 0;
   for (const t of trips) {
     if (t.back_at === null) continue;
-    if (month !== undefined && inBeirut(t.out_at).date.slice(0, 7) !== month) continue;
+    if (month !== undefined && dayOf(t.out_at).slice(0, 7) !== month) continue;
     count += 1;
     cent += rateAt(tripRateChanges, t.out_at);
   }
   return { count, cent };
+}
+
+/** The `dayOf` a caller with the punches in hand should pass to tripPay. */
+export function tripDayResolver(punches: PunchLite[], dayStartHour: number): (outAt: Date) => string {
+  const sorted = [...punches].sort((a, b) => a.at.getTime() - b.at.getTime());
+  const labels = workingDaysOf(sorted, dayStartHour);
+  return (outAt) => workingDayOfTrip(outAt, sorted, labels);
 }
 
 /**
@@ -280,12 +330,18 @@ export function computePayoutFromRows(args: {
     args.month,
     args.dayStartHour,
   );
-  const trips = tripPay(args.trips ?? [], args.tripRateChanges ?? [], args.month);
-  const netCent =
-    grossCent + trips.cent + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
+  const trips = tripPay(
+    args.trips ?? [],
+    args.tripRateChanges ?? [],
+    args.month,
+    tripDayResolver(args.punches as PunchLite[], args.dayStartHour ?? 0),
+  );
+  // Trips are earnings, so they are gross. Net does not add them again.
+  const grossWithTrips = grossCent + trips.cent;
+  const netCent = grossWithTrips + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
   return {
     hours,
-    grossCent,
+    grossCent: grossWithTrips,
     blockedCreditCent: sumIntervalsCent(credited),
     blockedCreditMin: sumIntervalMinutes(credited),
     adjustmentsCent,
@@ -338,14 +394,16 @@ export async function payoutForUser(
       select: { day_start_hour: true, role: true },
     }),
   ]);
-  // Trips are a driver's second earnings line. Loaded on the Beirut month
-  // bounds because out_at is a real instant, and only for drivers - the query
-  // is not free and everybody else's answer is zero by definition.
+  // A driver's trips, read on the same widened window as the punches and then
+  // filed by the shift they happened in - a trip at 00:30 on the 1st during a
+  // shift that started the night before is the previous month's, and a query
+  // on the calendar month would never see it. Only for drivers: the query is
+  // not free and everybody else's answer is zero by definition.
   const isDriver = user?.role === 'DRIVER';
   const [trips, tripRateChanges] = isDriver
     ? await Promise.all([
         db.trip.findMany({
-          where: { driver_id: userId, out_at: { gte: beirutStart, lt: beirutEnd } },
+          where: { driver_id: userId, out_at: { gte: pairFrom, lt: pairTo } },
           select: { out_at: true, back_at: true },
         }),
         db.tripRateChange.findMany({
@@ -410,10 +468,9 @@ export async function accruedEarningsThisMonth(
   // the cap has to be the month payroll is about to pay, or it lends against
   // less than they are owed.
   if (user?.role !== 'DRIVER') return earned;
-  const { start: bStart, end: bEnd } = monthRangeBeirut(month);
   const [trips, tripRates] = await Promise.all([
     db.trip.findMany({
-      where: { driver_id: userId, out_at: { gte: bStart, lt: bEnd } },
+      where: { driver_id: userId, out_at: { gte: pairFrom, lt: pairTo } },
       select: { out_at: true, back_at: true },
     }),
     db.tripRateChange.findMany({
@@ -422,7 +479,13 @@ export async function accruedEarningsThisMonth(
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),
   ]);
-  return { hours: earned.hours, grossCent: earned.grossCent + tripPay(trips, tripRates as RateChangeRow[], month).cent };
+  const tripsCent = tripPay(
+    trips,
+    tripRates,
+    month,
+    tripDayResolver(punches as PunchLite[], dayStartHourFor(user)),
+  ).cent;
+  return { hours: earned.hours, grossCent: earned.grossCent + tripsCent };
 }
 
 export interface RosterUser {

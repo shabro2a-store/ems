@@ -19,8 +19,8 @@ export interface PayrollRow {
   // only way to see the difference is to reconcile against a screen. Optional
   // so a caller that predates the column still renders.
   overtime_deduction_cent?: number;
-  // Drivers only. A second earnings line beside gross, never inside it, so
-  // hours x rate still multiplies out to gross on the same row.
+  // Drivers only. Inside gross_cent, the way blocked credit is - shown so a
+  // gross that includes deliveries says so, never added to it again.
   trips_count?: number;
   trips_cent?: number;
   advances_cent: number;

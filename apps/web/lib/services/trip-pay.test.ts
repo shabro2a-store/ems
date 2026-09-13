@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { tripPay, computePayoutFromRows, type TripRow } from './payout';
+import { tripPay, computePayoutFromRows, workingDayOfTrip, tripDayResolver, type TripRow } from './payout';
+import type { PunchLite } from './coverage';
 
 /*
  * A driver's second earnings line: per completed trip, on top of the hour.
@@ -26,9 +27,9 @@ describe('tripPay', () => {
     expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 1, cent: 150 });
   });
 
-  it('files a trip in the month it went OUT, by Beirut date', () => {
-    // 00:30 on 1 October is October's trip, whatever shift it happened inside.
-    // Trips are events, not spans; the day it happened is the day it belongs to.
+  it('falls back to the day it went out on, when handed no punches', () => {
+    // The default resolver, for a caller with nothing else in hand. Payroll
+    // never uses it - see below - but it has to answer something sane.
     const trips = [trip('2026-09-30T23:30', '2026-10-01T00:10'), trip('2026-10-01T00:30', '2026-10-01T01:00')];
     expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 1, cent: 150 });
     expect(tripPay(trips, RATE_150, '2026-10')).toEqual({ count: 1, cent: 150 });
@@ -68,18 +69,18 @@ describe('inside the payout', () => {
     month: '2026-09',
   };
 
-  it('sits beside gross, not inside it', () => {
+  it('is inside gross, and is not added to net a second time', () => {
+    // Gross is what the month earned; for a driver that is the hours and the
+    // trips together, the same way blocked credit already lives inside it.
     const r = computePayoutFromRows({
       ...base,
       trips: [trip('2026-09-14T10:00', '2026-09-14T10:40'), trip('2026-09-14T13:00', '2026-09-14T13:25')],
       tripRateChanges: [{ rate_cent: 150, effective_from: new Date('2020-01-01T00:00:00Z') }],
     });
-    // Eight hours at $3.00 is gross, untouched by the trips.
-    expect(r.grossCent).toBe(2400);
     expect(r.tripsCount).toBe(2);
-    expect(r.tripsCent).toBe(300);
-    // And the net carries both.
-    expect(r.netCent).toBe(2400 + 300);
+    expect(r.tripsCent).toBe(300); // the memo
+    expect(r.grossCent).toBe(2400 + 300); // eight hours at $3.00, plus the trips
+    expect(r.netCent).toBe(2700); // gross, once
   });
 
   it('is zero for anyone who is not a driver, and changes nothing else', () => {
@@ -99,5 +100,88 @@ describe('inside the payout', () => {
       tripRateChanges: [{ rate_cent: 150, effective_from: new Date('2020-01-01T00:00:00Z') }],
     });
     expect(r.netCent).toBe(150);
+  });
+});
+
+/*
+ * A trip belongs to the working day of the SHIFT it happened in - the same
+ * rest rule that files the punches - so a driver's hours and deliveries can
+ * never land on different days, or in different months. This is the reason
+ * trips do not simply take the date they went out on.
+ */
+describe('which working day a trip belongs to', () => {
+  const punch = (kind: 'IN' | 'OUT', iso: string): PunchLite => ({ kind, at: b(iso) });
+  const rate = [{ rate_cent: 150, effective_from: new Date('2020-01-01T00:00:00Z') }];
+
+  it('follows the shift across midnight, into the previous month', () => {
+    // Night shift 30 Sep 22:00 -> 1 Oct 06:00. A trip at 00:30 happened inside
+    // it, so it is 30 September's - and September's money.
+    const punches = [punch('IN', '2026-09-30T22:00'), punch('OUT', '2026-10-01T06:00')];
+    const dayOf = tripDayResolver(punches, 0);
+    expect(dayOf(b('2026-10-01T00:30'))).toBe('2026-09-30');
+
+    const trips = [trip('2026-10-01T00:30', '2026-10-01T01:00')];
+    expect(tripPay(trips, rate, '2026-09', dayOf)).toEqual({ count: 1, cent: 150 });
+    expect(tripPay(trips, rate, '2026-10', dayOf)).toEqual({ count: 0, cent: 0 });
+  });
+
+  it('stays with the day through a break between two chunks', () => {
+    // 08:00-12:00, out for two hours, 14:00-18:00: one working day. A trip at
+    // 13:00, in the gap, is still that day's - the driver had not gone home.
+    const punches = [
+      punch('IN', '2026-09-14T08:00'), punch('OUT', '2026-09-14T12:00'),
+      punch('IN', '2026-09-14T14:00'), punch('OUT', '2026-09-14T18:00'),
+    ];
+    const dayOf = tripDayResolver(punches, 0);
+    expect(dayOf(b('2026-09-14T13:00'))).toBe('2026-09-14');
+    expect(dayOf(b('2026-09-14T15:00'))).toBe('2026-09-14');
+  });
+
+  it('takes the label the collision rule gave the shift, not the calendar', () => {
+    // Two working days both starting on the 14th; the second was pushed to the
+    // 15th. A trip inside the second shift goes with it.
+    const punches = [
+      punch('IN', '2026-09-14T08:00'), punch('OUT', '2026-09-14T12:00'),
+      punch('IN', '2026-09-14T20:00'), punch('OUT', '2026-09-15T02:00'), // 8h rest: a new day
+    ];
+    const dayOf = tripDayResolver(punches, 0);
+    expect(dayOf(b('2026-09-14T09:00'))).toBe('2026-09-14');
+    expect(dayOf(b('2026-09-14T22:00'))).toBe('2026-09-15');
+  });
+
+  it('falls back to the calendar once the driver has gone home', () => {
+    // Clocked out at 12:00 and not back for six hours. A trip at 15:00 has no
+    // shift around it - the guard refuses this now, but history holds a few -
+    // so it takes the day it happened on rather than a shift that had ended.
+    const punches = [punch('IN', '2026-09-14T08:00'), punch('OUT', '2026-09-14T12:00')];
+    const labels = ['2026-09-14', '2026-09-14'];
+    expect(workingDayOfTrip(b('2026-09-14T15:00'), punches, labels)).toBe('2026-09-14');
+    expect(workingDayOfTrip(b('2026-09-15T15:00'), punches, labels)).toBe('2026-09-15');
+  });
+
+  it('keeps hours and trips in the same month inside the payout', () => {
+    // The whole point, end to end: the night shift is September's hours, so
+    // its 00:30 trip is September's trip, and October sees neither.
+    const punches = [
+      { id: 'p1', user_id: 'd', kind: 'IN' as const, at: b('2026-09-30T22:00') },
+      { id: 'p2', user_id: 'd', kind: 'OUT' as const, at: b('2026-10-01T06:00') },
+    ];
+    const args = {
+      userId: 'd',
+      punches,
+      rateChanges: [{ user_id: 'd', rate_cent: 300, effective_from: new Date('2020-01-01T00:00:00Z') }],
+      adjustments: [],
+      approvedAdvances: [],
+      trips: [trip('2026-10-01T00:30', '2026-10-01T01:00')],
+      tripRateChanges: rate,
+    };
+    const sep = computePayoutFromRows({ ...args, month: '2026-09' });
+    const oct = computePayoutFromRows({ ...args, month: '2026-10' });
+    expect(sep.hours).toBe(8);
+    expect(sep.tripsCount).toBe(1);
+    expect(sep.grossCent).toBe(2400 + 150);
+    expect(oct.hours).toBe(0);
+    expect(oct.tripsCount).toBe(0);
+    expect(oct.grossCent).toBe(0);
   });
 });

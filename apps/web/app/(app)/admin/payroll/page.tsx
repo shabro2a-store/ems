@@ -22,7 +22,7 @@ interface Row {
   advances_cent: number;
   penalties_cent: number;
   overtime_deduction_cent: number;
-  // Drivers only; an addend beside gross, never inside it.
+  // Drivers only. Inside gross_cent, like blocked credit - a memo, never added again.
   trips_count: number;
   trips_cent: number;
   net_cent: number;
@@ -36,7 +36,7 @@ interface Totals {
   advances_cent: number;
   penalties_cent: number;
   overtime_deduction_cent: number;
-  // Drivers only; an addend beside gross, never inside it.
+  // Drivers only. Inside gross_cent, like blocked credit - a memo, never added again.
   trips_count: number;
   trips_cent: number;
   net_cent: number;
@@ -148,7 +148,7 @@ export default function AdminPayrollPage() {
 
       {totals && (
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + trips + bonuses − deductions − advances − penalties − revoked overtime" />
+          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages (hours + trips) + bonuses − deductions − advances − penalties − revoked overtime" />
           <StatTile
             label="Gross wages"
             value={centsToUsd(totals.gross_cent)}
@@ -234,7 +234,7 @@ export default function AdminPayrollPage() {
                             <button
                               onClick={() => setTripsFor(r)}
                               className="tabular border-b border-dashed border-primary/40 font-medium hover:text-primary"
-                              title="Completed deliveries this month, by day"
+                              title="Completed deliveries this month, by working day. Already inside Gross."
                             >
                               {r.trips_count === 0 ? '—' : `${r.trips_count} · ${centsToUsd(r.trips_cent, false)}`}
                             </button>
@@ -436,8 +436,9 @@ function TripsModal({ row, month, onClose }: { row: Row; month: string; onClose:
   return (
     <Modal title={`Trips · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
       <p className="mb-3 text-sm text-muted">
-        Every completed delivery on {month}, by day, each priced at the per-trip rate in force when it went out.
-        A trip closed by the system is one the driver never pressed BACK on.
+        Every completed delivery on {month}, filed under the working day of the shift it happened in and
+        priced at the per-trip rate in force when it went out. This total is already inside Gross. A trip
+        closed by the system is one the driver never pressed BACK on.
       </p>
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
       {days === null ? (

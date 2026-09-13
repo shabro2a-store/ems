@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
-import { inBeirut } from 'time';
 import { prisma } from '@/lib/db/prisma';
-import { monthRangeBeirut, monthRangeUtc, rateAt } from '@/lib/services/payout';
+import { monthRangeUtc, rateAt, tripDayResolver, PAIR_LOOKAROUND_MS } from '@/lib/services/payout';
+import { dayStartHourFor, type PunchLite } from '@/lib/services/coverage';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
 /**
- * One driver's completed trips in one month, grouped by the Beirut day they
- * went out, each priced at the per-trip rate in force at that moment.
+ * One driver's completed trips in one month, grouped by the working day of the
+ * SHIFT each happened in, each priced at the per-trip rate in force at that
+ * moment.
  *
  * The same rule tripPay uses to reach the payroll figure, applied trip by trip
  * so the total here and the Trips column cannot disagree: this list IS that
@@ -28,11 +29,16 @@ export async function GET(req: Request) {
     return jsonError('INVALID_INPUT', 'userId and month (YYYY-MM) are required', 400);
   }
 
-  const { start: bStart, end: bEnd } = monthRangeBeirut(month);
-  const { end } = monthRangeUtc(month);
-  const [trips, rates] = await Promise.all([
+  // The same widened window payroll reads, and the same shift resolver, so a
+  // trip lands on the same day here as in the Trips column - the list IS that
+  // figure, itemised. A trip at 00:30 on the 1st during a shift that started
+  // the night before is the previous month's, and only the punches know that.
+  const { start, end } = monthRangeUtc(month);
+  const from = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
+  const to = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
+  const [trips, rates, punches, user] = await Promise.all([
     prisma.trip.findMany({
-      where: { driver_id: userId, out_at: { gte: bStart, lt: bEnd }, back_at: { not: null } },
+      where: { driver_id: userId, out_at: { gte: from, lt: to }, back_at: { not: null } },
       orderBy: { out_at: 'asc' },
       select: {
         id: true,
@@ -47,7 +53,14 @@ export async function GET(req: Request) {
       orderBy: { effective_from: 'asc' },
       select: { rate_cent: true, effective_from: true },
     }),
+    prisma.punch.findMany({
+      where: { user_id: userId, at: { gte: from, lt: to } },
+      orderBy: { at: 'asc' },
+      select: { kind: true, at: true },
+    }),
+    prisma.user.findUnique({ where: { id: userId }, select: { day_start_hour: true } }),
   ]);
+  const dayOf = tripDayResolver(punches as PunchLite[], dayStartHourFor(user));
 
   const byDay = new Map<
     string,
@@ -59,7 +72,8 @@ export async function GET(req: Request) {
     }
   >();
   for (const t of trips) {
-    const date = inBeirut(t.out_at).date;
+    const date = dayOf(t.out_at);
+    if (date.slice(0, 7) !== month) continue; // the window is wider than the month on purpose
     const rate = rateAt(rates, t.out_at);
     const day = byDay.get(date) ?? { date, count: 0, cent: 0, trips: [] };
     day.count += 1;

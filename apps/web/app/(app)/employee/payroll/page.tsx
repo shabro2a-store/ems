@@ -68,8 +68,10 @@ export default function EmployeePayrollPage() {
                     v={centsToUsd(data.blocked_credit_cent)}
                   />
                 )}
+                {/* Inside gross pay above, never added to it - the same shape as
+                    blocked time. Shown so a gross that includes deliveries says so. */}
                 {data.trips_count > 0 && (
-                  <Line k={`Deliveries (${data.trips_count} trip${data.trips_count === 1 ? '' : 's'})`} v={`+${centsToUsd(data.trips_cent, false)}`} tone="success" />
+                  <Line k={`of which deliveries (${data.trips_count} trip${data.trips_count === 1 ? '' : 's'})`} v={centsToUsd(data.trips_cent)} />
                 )}
                 <Line k="Bonuses / deductions" v={`${data.adjustments_cent >= 0 ? '+' : '−'}${centsToUsd(Math.abs(data.adjustments_cent), false)}`} tone={data.adjustments_cent > 0 ? 'success' : data.adjustments_cent < 0 ? 'danger' : undefined} />
                 {/* Each one with the reason it was given. The total alone is a
