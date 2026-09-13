@@ -256,3 +256,59 @@ describe('trips on the working day the driver is on', () => {
     expect(count(punches, trips, '2026-09-14T09:30')).toBe(1);
   });
 });
+
+/*
+ * History. Scrolling payroll back to an earlier month has to show that month's
+ * trips as they stood - and setting a per-trip rate TODAY must not reach back
+ * and inflate a month that was already paid without one.
+ */
+describe('viewing an earlier month', () => {
+  const punch = (kind: 'IN' | 'OUT', iso: string): PunchLite => ({ kind, at: b(iso) });
+  // The owner sets $1.50 per trip on 10 September. Nothing before that date
+  // has a rate.
+  const RATE_FROM_SEP_10 = [{ rate_cent: 150, effective_from: b('2026-09-10T00:00') }];
+
+  it('shows August trips as counted but unpaid - August was settled without them', () => {
+    const punches = [punch('IN', '2026-08-20T08:00'), punch('OUT', '2026-08-20T16:00')];
+    const trips = [trip('2026-08-20T09:00', '2026-08-20T09:30'), trip('2026-08-20T11:00', '2026-08-20T11:30')];
+    const aug = tripPay(trips, RATE_FROM_SEP_10, '2026-08', tripDayResolver(punches, 4));
+    expect(aug).toEqual({ count: 2, cent: 0 }); // visible, worth nothing then
+  });
+
+  it('prices only the trips taken after the rate existed, inside one month', () => {
+    const punches = [
+      punch('IN', '2026-09-08T08:00'), punch('OUT', '2026-09-08T16:00'),
+      punch('IN', '2026-09-12T08:00'), punch('OUT', '2026-09-12T16:00'),
+    ];
+    const trips = [trip('2026-09-08T09:00', '2026-09-08T09:30'), trip('2026-09-12T09:00', '2026-09-12T09:30')];
+    const sep = tripPay(trips, RATE_FROM_SEP_10, '2026-09', tripDayResolver(punches, 0));
+    expect(sep).toEqual({ count: 2, cent: 150 }); // both counted, one paid
+  });
+
+  it('files August trips by the rule August was paid under', () => {
+    // Before the cutover the working day came from the clock boundary. A trip
+    // at 00:30 on 21 August, inside a shift that started 20 August at 22:00, is
+    // 20 August's under either rule - but the point is that history is read
+    // with the rule that was in force, not re-filed by today's.
+    const punches = [punch('IN', '2026-08-20T22:00'), punch('OUT', '2026-08-21T06:00')];
+    const dayOf = tripDayResolver(punches, 4);
+    expect(dayOf(b('2026-08-21T00:30'))).toBe('2026-08-20');
+  });
+
+  it('answers each month independently and never double counts across them', () => {
+    const punches = [
+      punch('IN', '2026-09-30T22:00'), punch('OUT', '2026-10-01T06:00'),
+      punch('IN', '2026-10-01T22:00'), punch('OUT', '2026-10-02T06:00'),
+    ];
+    const trips = [
+      trip('2026-10-01T00:30', '2026-10-01T01:00'), // September's shift
+      trip('2026-10-02T00:30', '2026-10-02T01:00'), // October's shift
+    ];
+    const dayOf = tripDayResolver(punches, 0);
+    const sep = tripPay(trips, RATE_FROM_SEP_10, '2026-09', dayOf);
+    const oct = tripPay(trips, RATE_FROM_SEP_10, '2026-10', dayOf);
+    expect(sep).toEqual({ count: 1, cent: 150 });
+    expect(oct).toEqual({ count: 1, cent: 150 });
+    expect(sep.count + oct.count).toBe(trips.length);
+  });
+});
