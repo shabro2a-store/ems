@@ -6,6 +6,7 @@ import { pendingPenaltyNotices } from '@/lib/services/penalty';
 import { pendingOvertimeNotices } from '@/lib/services/overtime';
 import { grantedCreditMinutesByDate, pendingBlockedCreditNotices } from '@/lib/services/blockedCredit';
 import { requiredMinFor, currentShiftDayMinutes, type PunchLite } from '@/lib/services/coverage';
+import { tripsOnCurrentWorkingDay } from '@/lib/services/payout';
 import { lookbackMonths, mergeNotices } from '@/lib/services/noticeWindow';
 import { isMonthOpen } from '@/lib/services/periodLock';
 import { dayStartHourFor } from '@/lib/services/coverage';
@@ -139,14 +140,21 @@ export async function GET(req: Request) {
         orderBy: { created_at: 'asc' },
         include: { user: { select: { username: true, branch_id: true } } },
       }),
-      prisma.trip.groupBy({
-        by: ['driver_id'],
-        where: { out_at: { gte: startUtc, lt: endUtc } },
-        _count: { _all: true },
+      // Three days back, then filed onto the working day each driver is ON by
+      // the same rule payroll uses - not the calendar day, which is a different
+      // day from the one hours_today on the same row is measured against.
+      prisma.trip.findMany({
+        where: { out_at: { gte: new Date(nowDate.getTime() - 3 * 86_400_000) } },
+        select: { driver_id: true, out_at: true, back_at: true },
       }),
     ]);
 
-  const tripsTodayByDriver = new Map(tripsTodayAgg.map((t) => [t.driver_id, t._count._all]));
+  const tripsByDriver = new Map<string, Array<{ out_at: Date; back_at: Date | null }>>();
+  for (const t of tripsTodayAgg) {
+    const list = tripsByDriver.get(t.driver_id) ?? [];
+    list.push({ out_at: t.out_at, back_at: t.back_at });
+    tripsByDriver.set(t.driver_id, list);
+  }
 
   // Accepted blocked-time credit counts as hours worked, and payroll already
   // pays it - so the hours and labour KPIs have to see it or they report a
@@ -219,7 +227,15 @@ export async function GET(req: Request) {
         since_min: sinceMin,
         over,
         hours_today: Math.round((minutes / 60) * 10) / 10,
-        trips_today: u.role === 'DRIVER' ? tripsTodayByDriver.get(u.id) ?? 0 : null,
+        trips_today:
+          u.role === 'DRIVER'
+            ? tripsOnCurrentWorkingDay({
+                punches: punchesByUser.get(u.id) ?? [],
+                trips: tripsByDriver.get(u.id) ?? [],
+                now: nowDate,
+                dayStartHour: dayStartHourFor(u),
+              }).count
+            : null,
       };
     });
 

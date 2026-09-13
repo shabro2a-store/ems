@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tripPay, computePayoutFromRows, workingDayOfTrip, tripDayResolver, type TripRow } from './payout';
+import { tripPay, computePayoutFromRows, workingDayOfTrip, tripDayResolver, tripsOnCurrentWorkingDay, type TripRow } from './payout';
 import type { PunchLite } from './coverage';
 
 /*
@@ -183,5 +183,76 @@ describe('which working day a trip belongs to', () => {
     expect(oct.hours).toBe(0);
     expect(oct.tripsCount).toBe(0);
     expect(oct.grossCent).toBe(0);
+  });
+});
+
+/*
+ * "Trips today" on the caller's board and the admin dashboard.
+ *
+ * Where the shift belongs, its trips belong. If a driver's return continued the
+ * same working day the count keeps going; if it opened a new day the count
+ * starts again and everything before it was the previous day's. One rule, the
+ * same one payroll files trips by - there used to be three.
+ */
+describe('trips on the working day the driver is on', () => {
+  const punch = (kind: 'IN' | 'OUT', iso: string): PunchLite => ({ kind, at: b(iso) });
+  const count = (punches: PunchLite[], trips: TripRow[], now: string) =>
+    tripsOnCurrentWorkingDay({ punches, trips, now: b(now) }).count;
+
+  it('keeps counting when a break was not rest', () => {
+    // 08:00-12:00 with two trips, home two hours, back at 14:00 and out again.
+    // Old rule reset this to zero at 14:00 - "trips since this clock-in". Same
+    // working day, so the third trip makes three.
+    const punches = [
+      punch('IN', '2026-09-14T08:00'), punch('OUT', '2026-09-14T12:00'),
+      punch('IN', '2026-09-14T14:00'),
+    ];
+    const trips = [
+      trip('2026-09-14T09:00', '2026-09-14T09:30'),
+      trip('2026-09-14T10:30', '2026-09-14T11:00'),
+      trip('2026-09-14T15:00', '2026-09-14T15:30'),
+    ];
+    expect(count(punches, trips, '2026-09-14T16:00')).toBe(3);
+  });
+
+  it('starts again when the return opened a new working day', () => {
+    // Same two morning trips, home SIX hours, back at 18:00. That is rest, so
+    // 18:00 opens a new day - and it is pushed to the 15th because the 14th is
+    // taken. The morning's trips are the previous day's; today's count is one.
+    const punches = [
+      punch('IN', '2026-09-14T08:00'), punch('OUT', '2026-09-14T12:00'),
+      punch('IN', '2026-09-14T18:00'),
+    ];
+    const trips = [
+      trip('2026-09-14T09:00', '2026-09-14T09:30'),
+      trip('2026-09-14T10:30', '2026-09-14T11:00'),
+      trip('2026-09-14T19:00', '2026-09-14T19:30'),
+    ];
+    expect(count(punches, trips, '2026-09-14T20:00')).toBe(1);
+  });
+
+  it('does not cut a night shift in half at midnight', () => {
+    // 22:00 to 06:00 with a trip either side of midnight. The calendar rule gave
+    // two "todays" of one trip each; it is one working day of two.
+    const punches = [punch('IN', '2026-09-30T22:00')];
+    const trips = [trip('2026-09-30T23:00', '2026-09-30T23:30'), trip('2026-10-01T01:00', '2026-10-01T01:30')];
+    expect(count(punches, trips, '2026-10-01T02:00')).toBe(2);
+  });
+
+  it('is zero once they have gone home', () => {
+    // No day in progress five hours after clocking out, so nothing is "today".
+    const punches = [punch('IN', '2026-09-14T08:00'), punch('OUT', '2026-09-14T12:00')];
+    const trips = [trip('2026-09-14T09:00', '2026-09-14T09:30')];
+    expect(count(punches, trips, '2026-09-14T17:00')).toBe(0);
+    // But inside the rest window the day is still theirs and so are its trips.
+    expect(count(punches, trips, '2026-09-14T13:00')).toBe(1);
+  });
+
+  it('counts a trip still out, once it has gone out', () => {
+    // The board wants to know they went - it shows them as unavailable. Payroll
+    // waits for the BACK; this does not.
+    const punches = [punch('IN', '2026-09-14T08:00')];
+    const trips = [trip('2026-09-14T09:00', null)];
+    expect(count(punches, trips, '2026-09-14T09:30')).toBe(1);
   });
 });

@@ -1,8 +1,9 @@
 import type { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
-import { todayInBeirut, todayInBeirutDateRange } from 'time';
 import { sendPushToUser } from './push';
 import { openCheckInBranchId } from './branchScope';
+import { tripsOnCurrentWorkingDay } from './payout';
+import { dayStartHourFor, type PunchLite } from './coverage';
 
 export interface DriverStatus {
   id: string;
@@ -45,11 +46,12 @@ export async function branchDriverStatuses(
       is_active: true,
       OR: [{ branch_id: branchId }, { can_roam_branches: true }],
     },
-    select: { id: true, username: true, name: true, branch_id: true, can_roam_branches: true },
+    select: { id: true, username: true, name: true, branch_id: true, can_roam_branches: true, day_start_hour: true },
     orderBy: { username: 'asc' },
   });
 
-  const ringCutoff = new Date(Date.now() - RING_WINDOW_MS);
+  const now = new Date();
+  const ringCutoff = new Date(now.getTime() - RING_WINDOW_MS);
 
   const statuses = await Promise.all(
     drivers.map(async (d) => {
@@ -78,9 +80,28 @@ export async function branchDriverStatuses(
         select: { out_at: true },
       });
 
-      const tripsToday = clockInAt
-        ? await db.trip.count({ where: { driver_id: d.id, out_at: { gte: clockInAt } } })
-        : 0;
+      // Trips on the WORKING day they are on, by the same rule payroll files
+      // them - not "since this clock-in", which reset to zero every time a
+      // chunk worker came back from a two-hour break. Three days of punches
+      // and trips is the same lookback every consumer of the day rule uses.
+      const since = new Date(now.getTime() - 3 * 86_400_000);
+      const [recentPunches, recentTrips] = await Promise.all([
+        db.punch.findMany({
+          where: { user_id: d.id, at: { gte: since } },
+          orderBy: { at: 'asc' },
+          select: { kind: true, at: true },
+        }),
+        db.trip.findMany({
+          where: { driver_id: d.id, out_at: { gte: since } },
+          select: { out_at: true, back_at: true },
+        }),
+      ]);
+      const tripsToday = tripsOnCurrentWorkingDay({
+        punches: recentPunches as PunchLite[],
+        trips: recentTrips,
+        now,
+        dayStartHour: dayStartHourFor(d),
+      }).count;
 
       const pendingRing = await db.driverCall.findFirst({
         where: { driver_id: d.id, acknowledged_at: null, created_at: { gte: ringCutoff } },
@@ -204,6 +225,15 @@ export async function driverTripsToday(
   driverId: string,
   db: PrismaClient = defaultPrisma,
 ): Promise<number> {
-  const { startUtc, endUtc } = todayInBeirutDateRange(todayInBeirut());
-  return db.trip.count({ where: { driver_id: driverId, out_at: { gte: startUtc, lt: endUtc } } });
+  // The working day they are on, not the calendar day - a night shift that
+  // runs 22:00 to 06:00 is one day's trips, not two halves either side of
+  // midnight.
+  const now = new Date();
+  const since = new Date(now.getTime() - 3 * 86_400_000);
+  const [user, punches, trips] = await Promise.all([
+    db.user.findUnique({ where: { id: driverId }, select: { day_start_hour: true } }),
+    db.punch.findMany({ where: { user_id: driverId, at: { gte: since } }, orderBy: { at: 'asc' }, select: { kind: true, at: true } }),
+    db.trip.findMany({ where: { driver_id: driverId, out_at: { gte: since } }, select: { out_at: true, back_at: true } }),
+  ]);
+  return tripsOnCurrentWorkingDay({ punches: punches as PunchLite[], trips, now, dayStartHour: dayStartHourFor(user) }).count;
 }

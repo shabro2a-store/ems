@@ -3,7 +3,7 @@ import { shiftDateOf, scheduledToUtc, inBeirut, SHIFT_GAP_MIN } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
-import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval, type PunchLite, dayStartHourFor, workingDaysOf } from './coverage';
+import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval, type PunchLite, dayStartHourFor, workingDaysOf, currentShiftDayMinutes } from './coverage';
 
 export interface PayoutForUserResult {
   hours: number;
@@ -261,6 +261,40 @@ export function tripDayResolver(punches: PunchLite[], dayStartHour: number): (ou
   const sorted = [...punches].sort((a, b) => a.at.getTime() - b.at.getTime());
   const labels = workingDaysOf(sorted, dayStartHour);
   return (outAt) => workingDayOfTrip(outAt, sorted, labels);
+}
+
+/**
+ * How many trips a driver has made on the working day they are ON right now.
+ *
+ * The same day currentShiftDayMinutes reports hours for, and the same rule
+ * that files a trip for payroll - so the caller's board, the admin dashboard
+ * and the payslip all agree about which trips are "today's". There used to be
+ * three different answers: trips since the current clock-in (which reset every
+ * time a chunk worker came back from a break), and trips inside the calendar
+ * day (which cut a night shift in half at midnight), beside an hours figure on
+ * the same row that already followed the working day.
+ *
+ * Where the shift belongs, its trips belong. If the driver's return continued
+ * the same working day, the count continues; if it opened a new one, the count
+ * starts again and everything before it is the previous day's. A driver who
+ * has gone home has no day in progress and no trips today.
+ */
+export function tripsOnCurrentWorkingDay(args: {
+  punches: PunchLite[];
+  trips: TripRow[];
+  now: Date;
+  dayStartHour?: number;
+}): { date: string; count: number } {
+  const dayStart = args.dayStartHour ?? 0;
+  const { date } = currentShiftDayMinutes({ punches: args.punches, now: args.now, dayStartHour: dayStart });
+  if (date === '') return { date, count: 0 };
+  const dayOf = tripDayResolver(args.punches, dayStart);
+  let count = 0;
+  for (const t of args.trips) {
+    if (t.out_at > args.now) continue;
+    if (dayOf(t.out_at) === date) count += 1;
+  }
+  return { date, count };
 }
 
 /**
