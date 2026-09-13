@@ -42,7 +42,7 @@ export default function EmployeeLeavePage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Leave &amp; day off</h1>
+      <h1 className="text-xl font-semibold tracking-tight">Leave &amp; day off</h1>
 
       <StatTile label="Pending requests" value={summary?.pending ?? '—'} tone={summary && summary.pending > 0 ? 'warning' : 'neutral'} />
 

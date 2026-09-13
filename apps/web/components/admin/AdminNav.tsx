@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { apiSend } from '@/lib/api';
 import { ChangePasswordModal } from '@/components/ChangePasswordModal';
+import { BrandMark } from '@/components/BrandMark';
 
 export interface NavItem {
   href: string;
@@ -36,39 +37,34 @@ export default function AdminNav({ username }: AdminNavProps) {
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2.5 sm:px-6">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-white">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 3h2l.4 2M7 13h10l3-8H5.4M7 13 5.4 5M7 13l-1.6 4h12" strokeLinecap="round" strokeLinejoin="round" />
-              <circle cx="9" cy="20" r="1.5" />
-              <circle cx="17" cy="20" r="1.5" />
-            </svg>
-          </span>
-          <div className="leading-tight">
-            <div className="text-sm font-semibold">Shabro2a</div>
-            <div className="text-xs text-muted">{username}</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
+        <BrandMark subtitle={username} />
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => setPwOpen(true)}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-muted"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface-muted hover:text-content"
           >
-            Password
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <rect x="3" y="11" width="18" height="10" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" strokeLinecap="round" />
+            </svg>
+            <span className="hidden sm:inline">Password</span>
           </button>
           <button
             type="button"
             onClick={logout}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm text-content hover:bg-surface-muted"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface-muted hover:text-content"
           >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M10 17l5-5-5-5M15 12H3M21 3v18" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
             Logout
           </button>
         </div>
       </div>
       {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
-      <nav className="mx-auto max-w-6xl overflow-x-auto px-2 sm:px-4">
+      <nav className="mx-auto max-w-6xl overflow-x-auto px-2 sm:px-4" aria-label="Admin sections">
         <ul className="flex gap-1 py-1.5 text-sm">
           {NAV_ITEMS.map((item) => {
             const active = item.match(pathname);
@@ -76,6 +72,7 @@ export default function AdminNav({ username }: AdminNavProps) {
               <li key={item.href}>
                 <Link
                   href={item.href}
+                  aria-current={active ? 'page' : undefined}
                   className={`block whitespace-nowrap rounded-lg px-3 py-1.5 font-medium transition-colors ${
                     active ? 'bg-primary text-white' : 'text-muted hover:bg-surface-muted hover:text-content'
                   }`}

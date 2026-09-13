@@ -275,6 +275,7 @@ export default function AdminTripsReviewPage() {
 function PhotoModal({ trip, driver, onClose, onDeny }: { trip: Trip; driver: DriverDay; onClose: () => void; onDeny?: () => void }) {
   return (
     <Modal
+      size="lg"
       title={`${driver.username} · ${formatBeirut(trip.out_at, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`}
       onClose={onClose}
       footer={

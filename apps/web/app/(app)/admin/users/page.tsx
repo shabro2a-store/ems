@@ -182,14 +182,14 @@ export default function AdminEmployeesPage() {
       ) : (
         <Card>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="data-table">
               <thead>
-                <tr className="bg-surface-muted text-left text-xs font-semibold uppercase tracking-wide text-muted">
-                  <th className="px-4 py-2.5">Name</th>
-                  <th className="px-4 py-2.5">Role</th>
-                  <th className="px-4 py-2.5">Rate/h</th>
-                  <th className="px-4 py-2.5">Status</th>
-                  <th className="px-4 py-2.5 text-right">Actions</th>
+                <tr className="text-left">
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Rate/h</th>
+                  <th>Status</th>
+                  <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -198,8 +198,8 @@ export default function AdminEmployeesPage() {
                     {rows.map((u) => {
                       const st = statusMap[u.id];
                       return (
-                        <tr key={u.id} className="hover:bg-surface-muted">
-                          <td className="px-4 py-2.5">
+                        <tr key={u.id}>
+                          <td>
                             <div className="flex items-center gap-2.5">
                               <span className="grid h-8 w-8 place-items-center rounded-lg bg-surface-muted text-xs font-semibold text-muted">
                                 {(u.name || u.username).slice(0, 2).toUpperCase()}
@@ -212,17 +212,17 @@ export default function AdminEmployeesPage() {
                               {u.can_roam_branches && <Badge tone="warning">any branch</Badge>}
                             </div>
                           </td>
-                          <td className="px-4 py-2.5"><Badge tone={ROLE_TONE[u.role]}>{u.role.toLowerCase()}</Badge></td>
-                          <td className="tabular px-4 py-2.5">
+                          <td><Badge tone={ROLE_TONE[u.role]}>{u.role.toLowerCase()}</Badge></td>
+                          <td className="tabular">
                             {PAID_ROLES.has(u.role) ? centsToUsd(u.hourly_rate_cent) : '—'}
                             {u.role === 'DRIVER' && u.trip_rate_cent > 0 && (
                               <span className="ml-1 text-xs text-muted">+ {centsToUsd(u.trip_rate_cent)}/trip</span>
                             )}
                           </td>
-                          <td className="px-4 py-2.5">
+                          <td>
                             {st ? <StatusChip st={st} /> : <span className="text-xs text-muted">—</span>}
                           </td>
-                          <td className="px-4 py-2.5">
+                          <td>
                             {/* Two buttons, then a menu. Six across a row wrapped
                                 on anything narrower than a desktop and pushed the
                                 table into a horizontal scroll, which is what made
@@ -322,7 +322,7 @@ function FragmentGroup({ group, show, children }: { group: string; show: boolean
   return (
     <>
       {show && (
-        <tr><td colSpan={5} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>
+        <tr className="group-row"><td colSpan={5}>{group}</td></tr>
       )}
       {children}
     </>

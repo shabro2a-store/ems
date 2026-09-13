@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiSend, errorMessage } from '@/lib/api';
 import { Button, Field, Input, Alert } from '@/components/ui';
+import { BrandMark } from '@/components/BrandMark';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,23 +33,11 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-surface-muted p-6">
+    <main className="grid min-h-screen place-items-center bg-bg p-6">
       <div className="w-full max-w-sm">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <div className="mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-primary text-white shadow-sm">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path
-                d="M3 3h2l.4 2M7 13h10l3-8H5.4M7 13 5.4 5M7 13l-1.6 4h12"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <circle cx="9" cy="20" r="1.5" />
-              <circle cx="17" cy="20" r="1.5" />
-            </svg>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Shabro2a</h1>
-          <p className="mt-1 text-sm text-muted">Employee Management</p>
-        </div>
+        <h1 className="mb-8">
+          <BrandMark size="lg" subtitle="Employee Management" />
+        </h1>
 
         <form
           onSubmit={onSubmit}
@@ -79,10 +68,6 @@ export default function LoginPage() {
             {loading ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
-
-        <p className="mt-6 text-center text-xs text-muted">
-          Shabro2a Employee Management System
-        </p>
       </div>
     </main>
   );

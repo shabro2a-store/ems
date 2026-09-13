@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiGet, apiSend, centsToUsd, errorMessage } from '@/lib/api';
+import { apiGet, apiSend, centsToUsd, errorMessage, formatBeirut } from '@/lib/api';
 import { Card, CardBody, CardHeader, StatTile, Field, Input, Textarea, Button, Badge, Alert, EmptyState } from '@/components/ui';
 
 interface Summary { pending: number; approved_balance_cent: number }
@@ -43,7 +43,7 @@ export default function EmployeeAdvancesPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Advances</h1>
+      <h1 className="text-xl font-semibold tracking-tight">Advances</h1>
 
       <div className="grid grid-cols-2 gap-3">
         <StatTile label="Pending" value={summary?.pending ?? '—'} tone={summary && summary.pending > 0 ? 'warning' : 'neutral'} />
@@ -71,10 +71,13 @@ export default function EmployeeAdvancesPage() {
           <Card>
             <ul className="divide-y divide-border">
               {list.map((a) => (
-                <li key={a.id} className="flex items-center justify-between px-4 py-3">
-                  <div>
+                <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
                     <div className="font-medium tabular">{centsToUsd(a.amount_cent)}</div>
-                    {a.reason && <div className="text-xs text-muted">{a.reason}</div>}
+                    <div className="truncate text-xs text-muted">
+                      {formatBeirut(a.created_at, { day: 'numeric', month: 'short' })}
+                      {a.reason && <> · {a.reason}</>}
+                    </div>
                   </div>
                   <Badge tone={STATUS_TONE[a.status]}>{a.status.toLowerCase()}</Badge>
                 </li>

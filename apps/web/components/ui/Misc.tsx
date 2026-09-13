@@ -10,12 +10,12 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-      <div>
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div className="min-w-0">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-muted">{subtitle}</p>}
+        {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
@@ -41,11 +41,14 @@ export function StatTile({
   tone?: Tone;
   hint?: React.ReactNode;
 }) {
+  // h-full: tiles in one grid row stand the same height whatever their hint
+  // says, and the hint sits at the bottom of every tile rather than wherever
+  // the figure above it happened to end.
   return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
-      <div className={`mt-0.5 text-2xl font-semibold tabular ${tileTone[tone]}`}>{value}</div>
-      {hint && <div className="mt-0.5 text-xs text-muted">{hint}</div>}
+    <div className="flex h-full flex-col rounded-xl border border-border bg-surface px-3.5 py-3 shadow-card">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
+      <div className={`mt-1 text-2xl font-semibold leading-none tabular ${tileTone[tone]}`}>{value}</div>
+      {hint && <div className="mt-auto pt-1.5 text-xs leading-snug text-muted">{hint}</div>}
     </div>
   );
 }
@@ -60,7 +63,7 @@ export function EmptyState({
   icon?: React.ReactNode;
 }) {
   return (
-    <div className="grid place-items-center rounded-xl border border-dashed border-border bg-surface px-6 py-12 text-center">
+    <div className="grid place-items-center rounded-xl border border-dashed border-border bg-surface px-6 py-10 text-center">
       {icon && <div className="mb-3 text-muted">{icon}</div>}
       <p className="font-medium text-content">{title}</p>
       {hint && <p className="mt-1 text-sm text-muted">{hint}</p>}

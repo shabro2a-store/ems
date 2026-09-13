@@ -128,7 +128,12 @@ export default function AdminPayrollPage() {
               <option value="all">All branches</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </Select>
-            <Button onClick={downloadPdf} loading={downloading}>📄 PDF</Button>
+            <Button onClick={downloadPdf} loading={downloading}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              PDF
+            </Button>
           </>
         }
       />
@@ -148,7 +153,7 @@ export default function AdminPayrollPage() {
 
       {totals && (
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages (hours + trips) + bonuses − deductions − advances − penalties − revoked overtime" />
+          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="wages + bonuses − deductions − advances − penalties − revoked OT" />
           <StatTile
             label="Gross wages"
             value={centsToUsd(totals.gross_cent)}
@@ -179,34 +184,34 @@ export default function AdminPayrollPage() {
       ) : (
         <Card>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="data-table">
               <thead>
-                <tr className="bg-surface-muted text-xs font-semibold uppercase tracking-wide text-muted">
-                  <th className="px-4 py-2.5 text-left">Employee</th>
-                  <th className="px-4 py-2.5 text-right">Hours</th>
-                  <th className="px-4 py-2.5 text-right">Rate</th>
-                  <th className="px-4 py-2.5 text-right">Gross</th>
-                  <th className="px-4 py-2.5 text-right">Trips</th>
-                  <th className="px-4 py-2.5 text-right">Adjust.</th>
-                  <th className="px-4 py-2.5 text-right">Penalty</th>
-                  <th className="px-4 py-2.5 text-right">OT revoked</th>
-                  <th className="px-4 py-2.5 text-right">Advances</th>
-                  <th className="px-4 py-2.5 text-right">Net</th>
-                  <th className="px-4 py-2.5 text-right">Expected</th>
-                  <th className="px-4 py-2.5 text-right"></th>
+                <tr>
+                  <th className="text-left">Employee</th>
+                  <th className="text-right">Hours</th>
+                  <th className="text-right">Rate</th>
+                  <th className="text-right">Gross</th>
+                  <th className="text-right">Trips</th>
+                  <th className="text-right">Adjust.</th>
+                  <th className="text-right">Penalty</th>
+                  <th className="text-right">OT revoked</th>
+                  <th className="text-right">Advances</th>
+                  <th className="text-right">Net</th>
+                  <th className="text-right">Expected</th>
+                  <th className="text-right"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {grouped.map(([group, grows]) => (
                   <GroupBody key={group} group={group} show={branchId === 'all'}>
                     {grows.map((r) => (
-                      <tr key={r.user_id} className="hover:bg-surface-muted">
-                        <td className="px-4 py-2.5">
+                      <tr key={r.user_id}>
+                        <td>
                           <div className="font-medium">{r.username}</div>
                           <div className="text-xs text-muted">{r.role.toLowerCase()}</div>
                         </td>
-                        <td className="tabular px-4 py-2.5 text-right">{r.hours.toFixed(1)}</td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="tabular text-right">{r.hours.toFixed(1)}</td>
+                        <td className="text-right">
                           <button
                             onClick={() => setRateFor(r)}
                             className="tabular border-b border-dashed border-primary/50 font-medium hover:text-primary"
@@ -215,7 +220,7 @@ export default function AdminPayrollPage() {
                             {centsToUsd(r.rate_cent)}
                           </button>
                         </td>
-                        <td className="tabular px-4 py-2.5 text-right">
+                        <td className="tabular text-right">
                           {centsToUsd(r.gross_cent)}
                           {/* Always offered, not only when something is credited:
                               the whole point of this surface is reaching a day
@@ -229,7 +234,7 @@ export default function AdminPayrollPage() {
                             {r.blocked_credit_cent > 0 ? `incl. ${centsToUsd(r.blocked_credit_cent)} blocked` : 'blocked time'}
                           </button>
                         </td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="text-right">
                           {r.role === 'DRIVER' ? (
                             <button
                               onClick={() => setTripsFor(r)}
@@ -242,7 +247,7 @@ export default function AdminPayrollPage() {
                             <span className="text-muted">—</span>
                           )}
                         </td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="text-right">
                           <button
                             onClick={() => setAdjustmentsFor(r)}
                             className={`tabular border-b border-dashed font-medium ${r.adjustments_cent > 0 ? 'border-success/40 text-success hover:text-success' : r.adjustments_cent < 0 ? 'border-danger/40 text-danger hover:text-danger' : 'border-border text-muted hover:text-content'}`}
@@ -251,7 +256,7 @@ export default function AdminPayrollPage() {
                             {r.adjustments_cent === 0 ? '—' : `${r.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(r.adjustments_cent), false)}`}
                           </button>
                         </td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="text-right">
                           <button
                             onClick={() => setPenaltiesFor(r)}
                             className={`tabular border-b border-dashed border-danger/40 font-medium hover:text-danger ${r.penalties_cent > 0 ? 'text-danger' : 'text-muted'}`}
@@ -260,7 +265,7 @@ export default function AdminPayrollPage() {
                             {r.penalties_cent === 0 ? '—' : `−${centsToUsd(r.penalties_cent, false)}`}
                           </button>
                         </td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="text-right">
                           <button
                             onClick={() => setOvertimeFor(r)}
                             className={`tabular border-b border-dashed border-warning/40 font-medium hover:text-warning ${r.overtime_deduction_cent > 0 ? 'text-danger' : 'text-muted'}`}
@@ -269,11 +274,11 @@ export default function AdminPayrollPage() {
                             {r.overtime_deduction_cent === 0 ? '—' : `−${centsToUsd(r.overtime_deduction_cent, false)}`}
                           </button>
                         </td>
-                        <td className="tabular px-4 py-2.5 text-right text-danger">
+                        <td className="tabular text-right text-danger">
                           {r.advances_cent === 0 ? <span className="text-muted">—</span> : `−${centsToUsd(r.advances_cent, false)}`}
                         </td>
-                        <td className="tabular px-4 py-2.5 text-right font-semibold">{centsToUsd(r.net_cent)}</td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="tabular text-right font-semibold">{centsToUsd(r.net_cent)}</td>
+                        <td className="text-right">
                           <button
                             onClick={() => setSalaryFor(r)}
                             className="tabular border-b border-dashed border-border font-medium hover:text-primary"
@@ -282,7 +287,7 @@ export default function AdminPayrollPage() {
                             {r.expected_salary_cent == null ? <span className="text-muted">—</span> : centsToUsd(r.expected_salary_cent)}
                           </button>
                         </td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="text-right">
                           <Button
                             size="sm"
                             variant="ghost"
@@ -301,16 +306,16 @@ export default function AdminPayrollPage() {
               {totals && (
                 <tfoot>
                   <tr className="border-t-2 border-border bg-surface-muted font-semibold">
-                    <td className="px-4 py-3 text-left text-xs uppercase tracking-wide text-muted">Total · {rows.length} staff</td>
-                    <td className="tabular px-4 py-3 text-right">{totals.hours.toFixed(1)}</td>
+                    <td className="text-left text-xs uppercase tracking-wide text-muted">Total · {rows.length} staff</td>
+                    <td className="tabular text-right">{totals.hours.toFixed(1)}</td>
                     <td></td>
-                    <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.gross_cent)}</td>
-                    <td className="tabular px-4 py-3 text-right">{totals.trips_count === 0 ? '—' : `${totals.trips_count} · ${centsToUsd(totals.trips_cent, false)}`}</td>
-                    <td className="tabular px-4 py-3 text-right">{totals.adjustments_cent >= 0 ? '+' : '−'}{centsToUsd(Math.abs(totals.adjustments_cent), false)}</td>
-                    <td className="tabular px-4 py-3 text-right text-danger">{totals.penalties_cent === 0 ? '—' : `−${centsToUsd(totals.penalties_cent, false)}`}</td>
-                    <td className="tabular px-4 py-3 text-right text-danger">{totals.overtime_deduction_cent === 0 ? '—' : `−${centsToUsd(totals.overtime_deduction_cent, false)}`}</td>
-                    <td className="tabular px-4 py-3 text-right">−{centsToUsd(totals.advances_cent, false)}</td>
-                    <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.net_cent)}</td>
+                    <td className="tabular text-right">{centsToUsd(totals.gross_cent)}</td>
+                    <td className="tabular text-right">{totals.trips_count === 0 ? '—' : `${totals.trips_count} · ${centsToUsd(totals.trips_cent, false)}`}</td>
+                    <td className="tabular text-right">{totals.adjustments_cent >= 0 ? '+' : '−'}{centsToUsd(Math.abs(totals.adjustments_cent), false)}</td>
+                    <td className="tabular text-right text-danger">{totals.penalties_cent === 0 ? '—' : `−${centsToUsd(totals.penalties_cent, false)}`}</td>
+                    <td className="tabular text-right text-danger">{totals.overtime_deduction_cent === 0 ? '—' : `−${centsToUsd(totals.overtime_deduction_cent, false)}`}</td>
+                    <td className="tabular text-right">−{centsToUsd(totals.advances_cent, false)}</td>
+                    <td className="tabular text-right">{centsToUsd(totals.net_cent)}</td>
                     {/* Reference-only figures are never summed — left blank rather than implying a total. */}
                     <td></td>
                     <td></td>
@@ -353,7 +358,7 @@ export default function AdminPayrollPage() {
 function GroupBody({ group, show, children }: { group: string; show: boolean; children: React.ReactNode }) {
   return (
     <>
-      {show && <tr><td colSpan={11} className="bg-surface-muted px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-muted">{group}</td></tr>}
+      {show && <tr className="group-row"><td colSpan={12}>{group}</td></tr>}
       {children}
     </>
   );
@@ -445,7 +450,7 @@ function TripsModal({ row, month, onClose }: { row: Row; month: string; onClose:
   const total = (days ?? []).reduce((a, d) => ({ count: a.count + d.count, cent: a.cent + d.cent }), { count: 0, cent: 0 });
 
   return (
-    <Modal title={`Trips · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+    <Modal size="lg" title={`Trips · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
       <p className="mb-3 text-sm text-muted">
         Every completed delivery on {month}, filed under the working day of the shift it happened in and
         priced at the per-trip rate in force when it went out. This total is already inside Gross. A trip
@@ -526,7 +531,7 @@ function AdjustmentsModal({ row, month, onClose }: { row: Row; month: string; on
   const net = (items ?? []).reduce((s, a) => s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent), 0);
 
   return (
-    <Modal title={`Adjustments · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+    <Modal size="lg" title={`Adjustments · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
       <p className="mb-3 text-sm text-muted">
         Every manual bonus and deduction on {month}, with the reason it was given. The employee
         sees this same list on their own payslip.
@@ -603,7 +608,7 @@ function PenaltiesModal({ row, month, closed, onClose, onChanged }: { row: Row; 
   }
 
   return (
-    <Modal title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+    <Modal size="lg" title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
       {closed && (
         <div className="mb-3">
           <Alert tone="warning">
@@ -731,7 +736,7 @@ function OvertimeModal({ row, month, closed, onClose, onChanged }: { row: Row; m
   }
 
   return (
-    <Modal title={`Overtime · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+    <Modal size="lg" title={`Overtime · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
       {closed && (
         <div className="mb-3">
           <Alert tone="warning">
@@ -842,7 +847,7 @@ function BlockedCreditModal({ row, month, closed, onClose, onChanged }: { row: R
   }
 
   return (
-    <Modal title={`Blocked time · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+    <Modal size="lg" title={`Blocked time · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
       {closed && (
         <div className="mb-3">
           <Alert tone="warning">

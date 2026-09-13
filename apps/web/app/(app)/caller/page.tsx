@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
+import { EmptyState, Spinner } from '@/components/ui';
+import { BrandMark } from '@/components/BrandMark';
 
 interface Driver {
   id: string;
@@ -82,22 +84,28 @@ export default function CallerBoard() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-4">
-      <header className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Drivers</h1>
-          <p className="text-sm text-muted">{branch ?? 'Your branch'} · tap a driver to ring their phone</p>
-        </div>
-        <button onClick={logout} className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-surface">
+      <header className="mb-5 flex items-center justify-between gap-3">
+        <BrandMark subtitle={branch ?? 'Your branch'} />
+        <button
+          type="button"
+          onClick={logout}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface-muted hover:text-content"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M10 17l5-5-5-5M15 12H3M21 3v18" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
           Logout
         </button>
       </header>
+      <div className="mb-4">
+        <h1 className="text-xl font-semibold tracking-tight">Drivers</h1>
+        <p className="text-sm text-muted">Tap a driver to ring their phone. Green is free to take an order.</p>
+      </div>
 
       {loading ? (
-        <p className="py-16 text-center text-muted">Loading…</p>
+        <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
       ) : drivers.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border bg-surface px-6 py-12 text-center text-muted">
-          No drivers in this branch yet.
-        </p>
+        <EmptyState title="No drivers on this board" hint="This branch's drivers are always listed. One who can work at any branch appears once they clock in here." />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {sorted.map((d) => {
@@ -113,12 +121,12 @@ export default function CallerBoard() {
                 key={d.id}
                 onClick={() => ring(d)}
                 disabled={!d.available}
-                className={`relative flex min-h-[112px] flex-col justify-between rounded-2xl border p-4 text-left transition ${tone} ${
+                className={`relative flex min-h-[120px] flex-col justify-between rounded-2xl border p-4 text-left transition ${tone} ${
                   d.available ? 'shadow-card hover:-translate-y-0.5 hover:shadow-pop active:translate-y-0' : 'cursor-not-allowed'
-                } ${ringing ? 'ring-4 ring-primary/50 animate-pulse' : ''}`}
+                } ${ringing ? 'animate-pulse ring-4 ring-primary/50' : ''}`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <span className="text-lg font-bold leading-tight">{d.name}</span>
+                  <span className="text-lg font-semibold leading-tight">{d.name}</span>
                   <span className={`mt-1 h-2.5 w-2.5 flex-none rounded-full ${d.available ? 'bg-success' : out ? 'bg-warning' : 'bg-slate-300'}`} />
                 </div>
                 <div>

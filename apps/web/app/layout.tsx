@@ -28,6 +28,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        {/* The Latin face is on every screen; fetching it before the CSS asks
+            saves the flash of system font on a phone's first open. */}
+        <link rel="preload" href="/fonts/rubik-latin.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+      </head>
       <body>{children}</body>
     </html>
   );

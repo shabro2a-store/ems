@@ -187,33 +187,28 @@ export default function AdminPunchesPage() {
                 : `${punches.length} shown`
             }
           />
-          {hasMore && (
-            <div className="border-b border-border px-4 py-2.5">
-              <Alert tone="warning">
-                Only the newest {limit} punches are listed. Pick one employee above to see the rest
-                of theirs.
-              </Alert>
-            </div>
-          )}
+          {/* The card subtitle already says the list is cut and how to see
+              more; a second banner saying it again was noise. `limit` is what
+              the subtitle counts. */}
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="data-table">
               <thead>
-                <tr className="bg-surface-muted text-left text-xs font-semibold uppercase tracking-wide text-muted">
-                  <th className="px-4 py-2.5">Employee</th>
-                  <th className="px-4 py-2.5">Branch</th>
-                  <th className="px-4 py-2.5">Kind</th>
-                  <th className="px-4 py-2.5">Time (Beirut)</th>
-                  <th className="px-4 py-2.5">Location</th>
-                  <th className="px-4 py-2.5">Accuracy</th>
-                  <th className="px-4 py-2.5 text-right">Action</th>
+                <tr className="text-left">
+                  <th>Employee</th>
+                  <th>Branch</th>
+                  <th>Kind</th>
+                  <th>Time (Beirut)</th>
+                  <th>Location</th>
+                  <th>Accuracy</th>
+                  <th className="text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {punches.map((p) => (
-                  <tr key={p.id} className="hover:bg-surface-muted">
-                    <td className="px-4 py-2.5 font-medium">{p.user.username}</td>
-                    <td className="px-4 py-2.5">{p.branch.name}</td>
-                    <td className="px-4 py-2.5">
+                  <tr key={p.id}>
+                    <td className="font-medium">{p.user.username}</td>
+                    <td>{p.branch.name}</td>
+                    <td>
                       <Badge tone={p.kind === 'IN' ? 'success' : 'neutral'}>{p.kind}</Badge>
                       {p.corrected && <span className="ml-1"><Badge tone="warning">corrected</Badge></span>}
                       {p.system_generated && (
@@ -222,12 +217,12 @@ export default function AdminPunchesPage() {
                         </span>
                       )}
                     </td>
-                    <td className="tabular px-4 py-2.5 text-xs">{formatBeirut(p.at)}</td>
-                    <td className="tabular px-4 py-2.5 text-xs text-muted">
+                    <td className="tabular text-xs">{formatBeirut(p.at)}</td>
+                    <td className="tabular text-xs text-muted">
                       {p.system_generated ? 'no GPS - system punch' : `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`}
                     </td>
-                    <td className="tabular px-4 py-2.5 text-xs">{p.accuracy_m}m</td>
-                    <td className="px-4 py-2.5 text-right">
+                    <td className="tabular text-xs">{p.accuracy_m}m</td>
+                    <td className="text-right">
                       <div className="flex justify-end gap-2">
                         {p.system_generated && p.kind === 'OUT' && (
                           <Button size="sm" variant="secondary" onClick={() => openRevoke(p)}>Revoke</Button>

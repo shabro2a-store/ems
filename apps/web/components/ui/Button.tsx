@@ -3,13 +3,17 @@ import React from 'react';
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success';
 type Size = 'sm' | 'md' | 'lg';
 
+// whitespace-nowrap: a button label never wraps. "+ Adjust" folding onto two
+// lines in a narrow table cell, or "Show removed (2)" onto three in a toolbar,
+// is a broken control, not a responsive one - the layout around it should
+// give, and it does (the tables scroll sideways, the toolbars wrap).
 const base =
-  'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors ' +
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium transition-colors ' +
   'focus-visible:outline-none disabled:opacity-50 disabled:pointer-events-none select-none';
 
 const variants: Record<Variant, string> = {
   primary: 'bg-primary text-white hover:bg-primary-hover shadow-sm',
-  secondary: 'bg-surface text-content border border-border hover:bg-surface-muted',
+  secondary: 'bg-surface text-content border border-border shadow-card hover:bg-surface-muted',
   ghost: 'bg-transparent text-content hover:bg-surface-muted',
   danger: 'bg-danger text-white hover:brightness-95 shadow-sm',
   success: 'bg-success text-white hover:brightness-95 shadow-sm',

@@ -108,7 +108,7 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Hi {username} 👋</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Hi {username} 👋</h1>
         <p className="text-sm text-muted">{branch.name}</p>
       </div>
 
@@ -158,11 +158,15 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
           </div>
           {status.kind === 'error' && <Alert tone="danger">{status.message}</Alert>}
           <button
+            type="button"
             onClick={locate}
             disabled={status.kind === 'locating'}
-            className="h-12 w-full rounded-lg border border-border bg-surface font-medium text-content hover:bg-surface-muted disabled:opacity-50"
+            className={`inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg border font-medium transition-colors disabled:opacity-50 ${
+              ready ? 'border-success/30 bg-success-subtle text-success' : 'border-border bg-surface text-content hover:bg-surface-muted'
+            }`}
           >
-            {status.kind === 'locating' ? 'Getting GPS…' : ready ? '✓ GPS ready — refresh' : 'Get GPS'}
+            {status.kind === 'locating' && <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent opacity-70" aria-hidden />}
+            {status.kind === 'locating' ? 'Getting GPS…' : ready ? 'GPS ready · tap to refresh' : 'Get GPS'}
           </button>
         </CardBody>
       </Card>

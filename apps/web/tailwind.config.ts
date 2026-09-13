@@ -42,6 +42,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: [
+          'Rubik',
           'ui-sans-serif',
           'system-ui',
           '-apple-system',

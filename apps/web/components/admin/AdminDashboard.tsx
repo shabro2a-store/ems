@@ -157,12 +157,12 @@ export default function AdminDashboard() {
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Dashboard</h1>
-          <p className="mt-1 text-sm text-muted">Live operations across your branches</p>
+          <p className="mt-1 text-sm text-muted">Who is in, who is out, and what needs a decision</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-muted">
             <span className="h-1.5 w-1.5 rounded-full bg-success" />
-            {updated ? `Updated ${updated.toLocaleTimeString()}` : 'Live'}
+            {updated ? `Updated ${formatBeirutTime(updated.toISOString())}` : 'Live'}
           </span>
           <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-auto">
             <option value="all">All branches</option>
@@ -212,7 +212,9 @@ export default function AdminDashboard() {
                       </div>
                       <Badge tone={p.status === 'ON_TRIP' && p.over ? 'warning' : s.tone}>{s.label(p)}</Badge>
                       {p.trips_today !== null && (
-                        <span className="tabular w-12 text-right text-xs text-muted" title="trips today">🚚 {p.trips_today}</span>
+                        <span className="tabular w-14 whitespace-nowrap text-right text-xs text-muted" title="trips today">
+                          {p.trips_today} trip{p.trips_today === 1 ? '' : 's'}
+                        </span>
                       )}
                       <span className="tabular w-14 text-right text-xs text-muted">
                         {p.hours_today > 0 ? `${p.hours_today}h` : '—'}

@@ -42,7 +42,7 @@ export default function EmployeePayrollPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">My pay</h1>
+        <h1 className="text-xl font-semibold tracking-tight">My pay</h1>
         <Field htmlFor="m"><Input id="m" type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-auto" /></Field>
       </div>
 
