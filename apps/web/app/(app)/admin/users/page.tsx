@@ -5,6 +5,7 @@ import { apiGet, apiSend, centsToUsd, errorMessage } from '@/lib/api';
 import {
   PageHeader, Card, CardHeader, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile,
 } from '@/components/ui';
+import { EmployeeCards } from '@/components/admin/EmployeeCards';
 
 type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER';
 interface User {
@@ -180,7 +181,23 @@ export default function AdminEmployeesPage() {
       ) : filtered.length === 0 ? (
         <EmptyState title="No staff yet" hint="Add your first employee to get started." />
       ) : (
-        <Card>
+        <>
+        {/* A phone gets one card per person; the table is for md and up. */}
+        <div className="md:hidden">
+          <EmployeeCards
+            groups={grouped}
+            showGroups={branchId === 'all'}
+            paid={(u) => PAID_ROLES.has(u.role)}
+            roleTone={(u) => ROLE_TONE[u.role]}
+            status={(u) => { const st = statusMap[u.id]; return st ? <StatusChip st={st} /> : null; }}
+            on={{
+              edit: (u) => { setErr(null); setEditUser(u); },
+              schedule: setSchedUser,
+              more: setManage,
+            }}
+          />
+        </div>
+        <Card className="hidden md:block">
           <div className="overflow-x-auto">
             <table className="data-table">
               <thead>
@@ -249,6 +266,7 @@ export default function AdminEmployeesPage() {
             </table>
           </div>
         </Card>
+        </>
       )}
 
       {createOpen && (

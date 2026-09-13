@@ -98,7 +98,7 @@ export default function AdminBranchesPage() {
         title="Branches"
         subtitle="Create branches, set the geofence, and record each location on-site"
         actions={
-          <div className="flex flex-wrap gap-2">
+          <>
             {branches.some((b) => !b.is_active && !b.deleted_at) && (
               <Button variant="secondary" onClick={() => setShowArchived((v) => !v)}>
                 {showArchived
@@ -107,7 +107,7 @@ export default function AdminBranchesPage() {
               </Button>
             )}
             <Button onClick={() => setAdding(true)}>＋ Add branch</Button>
-          </div>
+          </>
         }
       />
 

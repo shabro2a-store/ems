@@ -10,14 +10,22 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    // Title left, controls right, on one line; on a phone the controls drop
-    // under the title and wrap as they need to.
+    // Title left, controls right, on one line. On a phone the controls drop
+    // under the title into a two-column grid that stretches each one - a
+    // month picker, a branch filter and a button in one full-width row each
+    // is how a phone lays these out, not three sizes of pill wrapped at
+    // random. An odd last control takes the whole row. Pass the controls as
+    // siblings (a fragment), not inside a wrapper, or the grid sees one child.
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
         {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && (
+        <div className="grid w-full grid-cols-2 gap-2 [&>*:last-child:nth-child(odd)]:col-span-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

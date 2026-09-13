@@ -5,6 +5,7 @@ import { apiGet, apiSend, errorMessage, formatBeirut } from '@/lib/api';
 import {
   PageHeader, Card, CardHeader, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner,
 } from '@/components/ui';
+import { PunchCards } from '@/components/admin/PunchCards';
 
 interface Punch {
   id: string;
@@ -143,7 +144,7 @@ export default function AdminPunchesPage() {
         title="Punches"
         subtitle="Attendance log with GPS evidence"
         actions={
-          <div className="flex flex-wrap gap-2">
+          <>
             <Select
               value={branchId}
               onChange={(e) => { setBranchId(e.target.value); setUserId('all'); }}
@@ -167,7 +168,7 @@ export default function AdminPunchesPage() {
                 </option>
               ))}
             </Select>
-          </div>
+          </>
         }
       />
 
@@ -178,7 +179,17 @@ export default function AdminPunchesPage() {
       ) : punches.length === 0 ? (
         <EmptyState title="No punches" hint="Check-ins and check-outs will appear here." />
       ) : (
-        <Card>
+        <>
+        {/* A phone gets one card per punch; the table is for md and up. */}
+        <div className="md:hidden">
+          <p className="mb-2 px-1 text-xs text-muted">
+            {hasMore
+              ? `Newest ${punches.length} shown — pick one employee above to see further back.`
+              : `${punches.length} shown`}
+          </p>
+          <PunchCards punches={punches} on={{ correct: openCorrect, revoke: openRevoke }} />
+        </div>
+        <Card className="hidden md:block">
           <CardHeader
             title="Recent punches"
             subtitle={
@@ -236,6 +247,7 @@ export default function AdminPunchesPage() {
             </table>
           </div>
         </Card>
+        </>
       )}
 
       {revokeTarget && (

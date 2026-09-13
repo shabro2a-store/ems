@@ -202,23 +202,24 @@ export default function AdminDashboard() {
                 {ov.people.map((p) => {
                   const s = STATUS[p.status];
                   return (
+                    // Name and status on the line; branch, hours and trips
+                    // under the name. Two trailing columns of tiny numbers
+                    // left a phone with no room for the name at all.
                     <li key={p.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                       <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-surface-muted text-xs font-semibold text-muted">
                         {initials(p.username)}
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{p.username}</div>
-                        <div className="text-xs text-muted">{p.branch_name ?? '—'}</div>
+                        <div className="truncate text-xs text-muted">
+                          {p.branch_name ?? '—'}
+                          {p.hours_today > 0 && <> · <span className="tabular">{p.hours_today}h</span> today</>}
+                          {p.trips_today !== null && p.trips_today > 0 && (
+                            <> · <span className="tabular">{p.trips_today}</span> trip{p.trips_today === 1 ? '' : 's'}</>
+                          )}
+                        </div>
                       </div>
-                      <Badge tone={p.status === 'ON_TRIP' && p.over ? 'warning' : s.tone}>{s.label(p)}</Badge>
-                      {p.trips_today !== null && (
-                        <span className="tabular w-14 whitespace-nowrap text-right text-xs text-muted" title="trips today">
-                          {p.trips_today} trip{p.trips_today === 1 ? '' : 's'}
-                        </span>
-                      )}
-                      <span className="tabular w-14 text-right text-xs text-muted">
-                        {p.hours_today > 0 ? `${p.hours_today}h` : '—'}
-                      </span>
+                      <Badge tone={p.status === 'ON_TRIP' && p.over ? 'warning' : s.tone} className="flex-none whitespace-nowrap">{s.label(p)}</Badge>
                     </li>
                   );
                 })}

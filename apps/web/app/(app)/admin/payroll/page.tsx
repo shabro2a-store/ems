@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiGet, apiSend, centsToUsd, csrfFromCookie, errorMessage, formatBeirutTime } from '@/lib/api';
 import { PageHeader, Card, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile } from '@/components/ui';
+import { PayrollCards } from '@/components/admin/PayrollCards';
 
 interface Row {
   user_id: string;
@@ -182,7 +183,27 @@ export default function AdminPayrollPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="No payroll data" hint="No active staff for this month/branch." />
       ) : (
-        <Card>
+        <>
+        {/* A phone gets one card per person; the table is for md and up. */}
+        <div className="md:hidden">
+          <PayrollCards
+            groups={grouped}
+            showGroups={branchId === 'all'}
+            closed={closed}
+            month={month}
+            on={{
+              rate: setRateFor,
+              blockedCredit: setBlockedCreditFor,
+              trips: setTripsFor,
+              adjustments: setAdjustmentsFor,
+              penalties: setPenaltiesFor,
+              overtime: setOvertimeFor,
+              salary: setSalaryFor,
+              adjust: setAdjust,
+            }}
+          />
+        </div>
+        <Card className="hidden md:block">
           <div className="overflow-x-auto">
             <table className="data-table data-table--dense">
               <thead>
@@ -325,6 +346,7 @@ export default function AdminPayrollPage() {
             </table>
           </div>
         </Card>
+        </>
       )}
 
       {adjust && (
