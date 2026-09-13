@@ -20,11 +20,28 @@ export async function GET(req: Request) {
     return jsonError('INVALID_INPUT', 'month query param must be YYYY-MM', 400);
   }
 
+  // The month's manual adjustments, each with its reason. A single summed
+  // figure is a number the employee cannot argue with or understand; the reason
+  // it was given is what makes a deduction explainable rather than arbitrary.
+  const [y, m] = month.split('-').map(Number);
+  const adjustments = await prisma.adjustment.findMany({
+    where: { user_id: userId, period: new Date(Date.UTC(y!, m! - 1, 1)) },
+    orderBy: { created_at: 'asc' },
+    select: { id: true, kind: true, amount_cent: true, reason: true, created_at: true },
+  });
+
   const result = await payoutForUser(userId, month, prisma);
   return NextResponse.json({
     ok: true,
     data: {
       hours: result.hours,
+      adjustments: adjustments.map((a) => ({
+        id: a.id,
+        kind: a.kind,
+        amount_cent: a.amount_cent,
+        reason: a.reason,
+        created_at: a.created_at.toISOString(),
+      })),
       gross_cent: result.grossCent,
       // Part of gross_cent and of hours, so it needs a line of its own too -
       // otherwise the payslip credits them for hours they know they did not

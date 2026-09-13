@@ -23,6 +23,60 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
+/**
+ * Every manual adjustment for one employee in one month, with the reason each
+ * was made for.
+ *
+ * The reason has been required on every adjustment since the feature existed,
+ * and this is the first thing that reads it back. Until now the only trace was
+ * the audit log: the payroll screen showed a single summed figure, and clicking
+ * it did nothing, so a month's deductions could not be explained to the
+ * employee they were taken from without opening the database.
+ */
+export async function GET(req: Request) {
+  const h = headers();
+  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+
+  const url = new URL(req.url);
+  const userId = url.searchParams.get('userId') ?? '';
+  const month = url.searchParams.get('month') ?? '';
+  if (!userId || !/^\d{4}-\d{2}$/.test(month)) {
+    return jsonError('INVALID_INPUT', 'userId and month (YYYY-MM) are required', 400);
+  }
+
+  const [y, m] = month.split('-').map(Number);
+  const period = new Date(Date.UTC(y!, m! - 1, 1));
+  const rows = await prisma.adjustment.findMany({
+    where: { user_id: userId, period },
+    orderBy: { created_at: 'asc' },
+    select: { id: true, kind: true, amount_cent: true, reason: true, created_at: true, created_by: true },
+  });
+
+  // Who made each one, by name. created_by is an id with no relation, so it is
+  // resolved here rather than shown raw - "cms0nwjxu0003" is not an author.
+  const authorIds = [...new Set(rows.map((r) => r.created_by))];
+  const authors = new Map(
+    (await prisma.user.findMany({
+      where: { id: { in: authorIds } },
+      select: { id: true, name: true, username: true },
+    })).map((u) => [u.id, u.name ?? u.username]),
+  );
+
+  return NextResponse.json({
+    ok: true,
+    data: {
+      adjustments: rows.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        amount_cent: r.amount_cent,
+        reason: r.reason,
+        created_at: r.created_at.toISOString(),
+        created_by: authors.get(r.created_by) ?? r.created_by,
+      })),
+    },
+  });
+}
+
 export async function POST(req: Request) {
   const h = headers();
   const role = h.get('x-user-role');

@@ -10,6 +10,7 @@ interface PayoutData {
   blocked_credit_cent: number;
   blocked_credit_min: number;
   adjustments_cent: number;
+  adjustments: Array<{ id: string; kind: 'BONUS' | 'DEDUCTION'; amount_cent: number; reason: string; created_at: string }>;
   advances_cent: number;
   penalties_cent: number;
   overtime_deduction_cent: number;
@@ -66,6 +67,21 @@ export default function EmployeePayrollPage() {
                   />
                 )}
                 <Line k="Bonuses / deductions" v={`${data.adjustments_cent >= 0 ? '+' : '−'}${centsToUsd(Math.abs(data.adjustments_cent), false)}`} tone={data.adjustments_cent > 0 ? 'success' : data.adjustments_cent < 0 ? 'danger' : undefined} />
+                {/* Each one with the reason it was given. The total alone is a
+                    number nobody can question; the reason is what makes it a
+                    decision rather than a deduction that simply appeared. */}
+                {data.adjustments.length > 0 && (
+                  <ul className="space-y-1.5 py-2 pl-3 text-xs">
+                    {data.adjustments.map((a) => (
+                      <li key={a.id} className="flex items-start justify-between gap-3">
+                        <span className="min-w-0 text-muted">{a.reason}</span>
+                        <span className={`tabular shrink-0 ${a.kind === 'BONUS' ? 'text-success' : 'text-danger'}`}>
+                          {a.kind === 'BONUS' ? '+' : '−'}{centsToUsd(a.amount_cent, false)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <Line k="Hours-short penalties" v={data.penalties_cent ? `−${centsToUsd(data.penalties_cent, false)}` : '—'} tone={data.penalties_cent ? 'danger' : undefined} />
                 <Line k="Overtime not approved" v={data.overtime_deduction_cent ? `−${centsToUsd(data.overtime_deduction_cent, false)}` : '—'} tone={data.overtime_deduction_cent ? 'danger' : undefined} />
                 <Line k="Advances taken" v={data.advances_cent ? `−${centsToUsd(data.advances_cent, false)}` : '—'} tone={data.advances_cent ? 'danger' : undefined} />

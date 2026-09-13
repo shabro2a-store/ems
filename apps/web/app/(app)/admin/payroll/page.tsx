@@ -61,6 +61,7 @@ export default function AdminPayrollPage() {
   const [rateFor, setRateFor] = useState<Row | null>(null);
   const [penaltiesFor, setPenaltiesFor] = useState<Row | null>(null);
   const [overtimeFor, setOvertimeFor] = useState<Row | null>(null);
+  const [adjustmentsFor, setAdjustmentsFor] = useState<Row | null>(null);
   const [blockedCreditFor, setBlockedCreditFor] = useState<Row | null>(null);
   const [salaryFor, setSalaryFor] = useState<Row | null>(null);
 
@@ -220,8 +221,14 @@ export default function AdminPayrollPage() {
                             {r.blocked_credit_cent > 0 ? `incl. ${centsToUsd(r.blocked_credit_cent)} blocked` : 'blocked time'}
                           </button>
                         </td>
-                        <td className={`tabular px-4 py-2.5 text-right font-medium ${r.adjustments_cent > 0 ? 'text-success' : r.adjustments_cent < 0 ? 'text-danger' : 'text-muted'}`}>
-                          {r.adjustments_cent === 0 ? '—' : `${r.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(r.adjustments_cent), false)}`}
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            onClick={() => setAdjustmentsFor(r)}
+                            className={`tabular border-b border-dashed font-medium ${r.adjustments_cent > 0 ? 'border-success/40 text-success hover:text-success' : r.adjustments_cent < 0 ? 'border-danger/40 text-danger hover:text-danger' : 'border-border text-muted hover:text-content'}`}
+                            title="View every bonus and deduction this month, with the reason each was given"
+                          >
+                            {r.adjustments_cent === 0 ? '—' : `${r.adjustments_cent > 0 ? '+' : '−'}${centsToUsd(Math.abs(r.adjustments_cent), false)}`}
+                          </button>
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <button
@@ -299,6 +306,9 @@ export default function AdminPayrollPage() {
       {rateFor && (
         <RateModal row={rateFor} onClose={() => setRateFor(null)} onSaved={() => { setRateFor(null); setMsg('Rate updated (applies from now on).'); load(); }} />
       )}
+      {adjustmentsFor && (
+        <AdjustmentsModal row={adjustmentsFor} month={month} onClose={() => setAdjustmentsFor(null)} />
+      )}
       {penaltiesFor && (
         <PenaltiesModal row={penaltiesFor} closed={closed} month={month} onClose={() => setPenaltiesFor(null)} onChanged={() => { setMsg('Penalty updated.'); load(); }} />
       )}
@@ -370,6 +380,72 @@ interface PenaltyItem {
   amount_cent: number;
   waived: boolean;
   waiverStale: boolean;
+}
+
+interface AdjustmentItem {
+  id: string;
+  kind: 'BONUS' | 'DEDUCTION';
+  amount_cent: number;
+  reason: string;
+  created_at: string;
+  created_by: string;
+}
+
+// Read-only on purpose. An adjustment is a decision with a reason attached, and
+// the reason is the whole point of this list; editing one in place would let the
+// figure drift away from the sentence that justified it. To change one, add
+// another with its own reason - the history then says what happened and why.
+function AdjustmentsModal({ row, month, onClose }: { row: Row; month: string; onClose: () => void }) {
+  const [items, setItems] = useState<AdjustmentItem[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiGet<{ adjustments: AdjustmentItem[] }>(`/api/admin/adjustments?userId=${row.user_id}&month=${month}`).then((r) => {
+      if (r.ok) setItems(r.data.adjustments);
+      else setErr(errorMessage(r));
+    });
+  }, [row.user_id, month]);
+
+  const net = (items ?? []).reduce((s, a) => s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent), 0);
+
+  return (
+    <Modal title={`Adjustments · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      <p className="mb-3 text-sm text-muted">
+        Every manual bonus and deduction on {month}, with the reason it was given. The employee
+        sees this same list on their own payslip.
+      </p>
+      {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
+      {items === null ? (
+        <div className="grid place-items-center py-8 text-muted"><Spinner /></div>
+      ) : items.length === 0 ? (
+        <EmptyState title="No adjustments" hint="Nothing has been added or deducted by hand this month." />
+      ) : (
+        <>
+          <ul className="divide-y divide-border">
+            {items.map((a) => (
+              <li key={a.id} className="flex items-start justify-between gap-4 py-3">
+                <div className="min-w-0">
+                  <div className="text-sm">{a.reason}</div>
+                  <div className="mt-0.5 text-xs text-muted">
+                    {formatBeirutTime(a.created_at)} · by {a.created_by}
+                  </div>
+                </div>
+                <div className={`tabular shrink-0 font-medium ${a.kind === 'BONUS' ? 'text-success' : 'text-danger'}`}>
+                  {a.kind === 'BONUS' ? '+' : '−'}{centsToUsd(a.amount_cent)}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex justify-between border-t border-border pt-3 text-sm">
+            <span className="text-muted">Net this month</span>
+            <span className={`tabular font-semibold ${net > 0 ? 'text-success' : net < 0 ? 'text-danger' : ''}`}>
+              {net >= 0 ? '+' : '−'}{centsToUsd(Math.abs(net))}
+            </span>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
 }
 
 function PenaltiesModal({ row, month, closed, onClose, onChanged }: { row: Row; month: string; closed: boolean; onClose: () => void; onChanged: () => void }) {
