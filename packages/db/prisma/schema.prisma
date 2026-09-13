@@ -354,11 +354,40 @@ model Trip {
   // attendance lockout; this marks the close that ends it, and keeps the
   // activity feed from reporting a return nobody made.
   system_generated     Boolean   @default(false)
+  // The receipt photo taken when the trip went out - see tripReview.ts. Set
+  // on every trip since receipts began; null on the history before them. The
+  // bytes live in TripReceipt and are wiped a week on, this stays as the
+  // record that there was one.
+  receipt_taken_at     DateTime?
+  receipt              TripReceipt?
+  // The owner's review. denied = he looked at the photo and said no: the trip
+  // pays nothing. reviewed = he confirmed the day this trip was in, and it can
+  // no longer change. Both by admin id.
+  denied_at            DateTime?
+  denied_by            String?
+  denied_reason        String?
+  reviewed_at          DateTime?
+  reviewed_by          String?
   // Raw SQL in migration:
   //   CREATE UNIQUE INDEX trip_one_open ON "Trip"(driver_id) WHERE back_at IS NULL;
   //   CREATE INDEX trip_open_by_branch ON "Trip"(branch_id) WHERE back_at IS NULL;  -- supports /api/admin/now
 
   @@index([driver_id, out_at])
+}
+
+// The photo itself, one row per trip, apart from Trip so listing trips never
+// drags the bytes along. Deleted by the worker a week after the trip - its use
+// is over once the owner has confirmed the day - while the trip keeps
+// receipt_taken_at as the record that there was one.
+model TripReceipt {
+  trip_id    String   @id
+  trip       Trip     @relation(fields: [trip_id], references: [id], onDelete: Cascade)
+  mime       String
+  bytes      Bytes
+  size       Int
+  width      Int
+  height     Int
+  created_at DateTime @default(now())
 }
 
 model Advance {

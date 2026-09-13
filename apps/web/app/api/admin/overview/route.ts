@@ -145,14 +145,14 @@ export async function GET(req: Request) {
       // day from the one hours_today on the same row is measured against.
       prisma.trip.findMany({
         where: { out_at: { gte: new Date(nowDate.getTime() - 3 * 86_400_000) } },
-        select: { driver_id: true, out_at: true, back_at: true },
+        select: { driver_id: true, out_at: true, back_at: true, denied_at: true },
       }),
     ]);
 
-  const tripsByDriver = new Map<string, Array<{ out_at: Date; back_at: Date | null }>>();
+  const tripsByDriver = new Map<string, Array<{ out_at: Date; back_at: Date | null; denied_at: Date | null }>>();
   for (const t of tripsTodayAgg) {
     const list = tripsByDriver.get(t.driver_id) ?? [];
-    list.push({ out_at: t.out_at, back_at: t.back_at });
+    list.push({ out_at: t.out_at, back_at: t.back_at, denied_at: t.denied_at });
     tripsByDriver.set(t.driver_id, list);
   }
 

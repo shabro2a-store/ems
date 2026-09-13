@@ -17,22 +17,22 @@ describe('tripPay', () => {
       trip('2026-09-14T13:00', '2026-09-14T13:25'),
       trip('2026-09-15T09:00', '2026-09-15T09:50'),
     ];
-    expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 3, cent: 450 });
+    expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 3, cent: 450, denied: 0 });
   });
 
   it('does not pay a trip still out', () => {
     // No BACK yet: the delivery is not finished and nothing is owed for it. The
     // trip-close sweep writes a BACK for a forgotten one, and it pays then.
     const trips = [trip('2026-09-14T10:00', '2026-09-14T10:40'), trip('2026-09-14T18:00', null)];
-    expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 1, cent: 150 });
+    expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 1, cent: 150, denied: 0 });
   });
 
   it('falls back to the day it went out on, when handed no punches', () => {
     // The default resolver, for a caller with nothing else in hand. Payroll
     // never uses it - see below - but it has to answer something sane.
     const trips = [trip('2026-09-30T23:30', '2026-10-01T00:10'), trip('2026-10-01T00:30', '2026-10-01T01:00')];
-    expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 1, cent: 150 });
-    expect(tripPay(trips, RATE_150, '2026-10')).toEqual({ count: 1, cent: 150 });
+    expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 1, cent: 150, denied: 0 });
+    expect(tripPay(trips, RATE_150, '2026-10')).toEqual({ count: 1, cent: 150, denied: 0 });
   });
 
   it('prices each trip at the rate in force when it went out', () => {
@@ -44,13 +44,32 @@ describe('tripPay', () => {
       { rate_cent: 200, effective_from: b('2026-09-15T00:00') },
     ];
     const trips = [trip('2026-09-14T10:00', '2026-09-14T10:40'), trip('2026-09-16T10:00', '2026-09-16T10:40')];
-    expect(tripPay(trips, rates, '2026-09')).toEqual({ count: 2, cent: 350 });
+    expect(tripPay(trips, rates, '2026-09')).toEqual({ count: 2, cent: 350, denied: 0 });
   });
 
   it('pays nothing with no rate history, whatever was driven', () => {
     // A driver the owner has not set a per-trip rate for. The trips are counted
     // - the owner can see them - but they are worth zero until he prices them.
-    expect(tripPay([trip('2026-09-14T10:00', '2026-09-14T10:40')], [], '2026-09')).toEqual({ count: 1, cent: 0 });
+    expect(tripPay([trip('2026-09-14T10:00', '2026-09-14T10:40')], [], '2026-09')).toEqual({ count: 1, cent: 0, denied: 0 });
+  });
+});
+
+describe('a denied trip', () => {
+  // The owner looked at the receipt photo and said no. A denied trip is not a
+  // trip anywhere money or counts are concerned - it pays nothing and is not
+  // one of the day's deliveries - and the payslip says how many were denied,
+  // so a driver paid for eleven of twelve knows why.
+  const denied = (outAt: string, backAt: string): TripRow => ({ ...trip(outAt, backAt), denied_at: b('2026-09-14T20:00') });
+
+  it('is not paid, and is reported as denied', () => {
+    const trips = [trip('2026-09-14T10:00', '2026-09-14T10:40'), denied('2026-09-14T13:00', '2026-09-14T13:25')];
+    expect(tripPay(trips, RATE_150, '2026-09')).toEqual({ count: 1, cent: 150, denied: 1 });
+  });
+
+  it("is not one of today's trips on the board", () => {
+    const punches: PunchLite[] = [{ kind: 'IN', at: b('2026-09-14T08:00') }];
+    const trips = [trip('2026-09-14T09:00', '2026-09-14T09:30'), denied('2026-09-14T10:30', '2026-09-14T11:00')];
+    expect(tripsOnCurrentWorkingDay({ punches, trips, now: b('2026-09-14T12:00') }).count).toBe(1);
   });
 });
 
@@ -121,8 +140,8 @@ describe('which working day a trip belongs to', () => {
     expect(dayOf(b('2026-10-01T00:30'))).toBe('2026-09-30');
 
     const trips = [trip('2026-10-01T00:30', '2026-10-01T01:00')];
-    expect(tripPay(trips, rate, '2026-09', dayOf)).toEqual({ count: 1, cent: 150 });
-    expect(tripPay(trips, rate, '2026-10', dayOf)).toEqual({ count: 0, cent: 0 });
+    expect(tripPay(trips, rate, '2026-09', dayOf)).toEqual({ count: 1, cent: 150, denied: 0 });
+    expect(tripPay(trips, rate, '2026-10', dayOf)).toEqual({ count: 0, cent: 0, denied: 0 });
   });
 
   it('stays with the day through a break between two chunks', () => {
@@ -272,7 +291,7 @@ describe('viewing an earlier month', () => {
     const punches = [punch('IN', '2026-08-20T08:00'), punch('OUT', '2026-08-20T16:00')];
     const trips = [trip('2026-08-20T09:00', '2026-08-20T09:30'), trip('2026-08-20T11:00', '2026-08-20T11:30')];
     const aug = tripPay(trips, RATE_FROM_SEP_10, '2026-08', tripDayResolver(punches, 4));
-    expect(aug).toEqual({ count: 2, cent: 0 }); // visible, worth nothing then
+    expect(aug).toEqual({ count: 2, cent: 0, denied: 0 }); // visible, worth nothing then
   });
 
   it('prices only the trips taken after the rate existed, inside one month', () => {
@@ -282,7 +301,7 @@ describe('viewing an earlier month', () => {
     ];
     const trips = [trip('2026-09-08T09:00', '2026-09-08T09:30'), trip('2026-09-12T09:00', '2026-09-12T09:30')];
     const sep = tripPay(trips, RATE_FROM_SEP_10, '2026-09', tripDayResolver(punches, 0));
-    expect(sep).toEqual({ count: 2, cent: 150 }); // both counted, one paid
+    expect(sep).toEqual({ count: 2, cent: 150, denied: 0 }); // both counted, one paid
   });
 
   it('files August trips by the rule August was paid under', () => {
@@ -307,8 +326,8 @@ describe('viewing an earlier month', () => {
     const dayOf = tripDayResolver(punches, 0);
     const sep = tripPay(trips, RATE_FROM_SEP_10, '2026-09', dayOf);
     const oct = tripPay(trips, RATE_FROM_SEP_10, '2026-10', dayOf);
-    expect(sep).toEqual({ count: 1, cent: 150 });
-    expect(oct).toEqual({ count: 1, cent: 150 });
+    expect(sep).toEqual({ count: 1, cent: 150, denied: 0 });
+    expect(oct).toEqual({ count: 1, cent: 150, denied: 0 });
     expect(sep.count + oct.count).toBe(trips.length);
   });
 });

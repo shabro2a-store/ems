@@ -57,6 +57,7 @@ export async function GET(req: Request) {
       // A driver's second earnings line; zero for everybody else.
       trips_count: result.tripsCount,
       trips_cent: result.tripsCent,
+      trips_denied: result.tripsDenied,
       net_cent: result.netCent,
     },
   });

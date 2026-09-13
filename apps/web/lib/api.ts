@@ -68,6 +68,26 @@ export async function apiSend<T = unknown>(url: string, opts: SendOpts = {}): Pr
   }
 }
 
+interface SendFormOpts {
+  form: FormData;
+  idempotent?: boolean;
+  idemPrefix?: string;
+}
+
+// The same envelope as apiSend, for a request that carries a file. No
+// Content-Type header: the browser writes the multipart boundary itself.
+export async function apiSendForm<T = unknown>(url: string, opts: SendFormOpts): Promise<ApiResult<T>> {
+  const { form, idempotent = false, idemPrefix = 'web' } = opts;
+  const headers: Record<string, string> = { 'X-CSRF-Token': csrfFromCookie() };
+  if (idempotent) headers['Idempotency-Key'] = idemKey(idemPrefix);
+  try {
+    const res = await fetch(url, { method: 'POST', credentials: 'include', headers, body: form });
+    return (await res.json()) as ApiResult<T>;
+  } catch {
+    return { ok: false, error: { code: 'NETWORK', message: 'Network error — check your connection.' } };
+  }
+}
+
 // ---- formatting ----
 
 export function centsToUsd(cents: number, withSymbol = true): string {

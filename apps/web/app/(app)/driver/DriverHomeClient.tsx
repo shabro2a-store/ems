@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { apiGet, apiSend, errorMessage, formatBeirutTime } from '@/lib/api';
+import { apiGet, apiSend, apiSendForm, errorMessage, formatBeirutTime } from '@/lib/api';
 import { Card, CardBody, StatTile, Alert } from '@/components/ui';
 import DriverAlarm from '@/components/field/DriverAlarm';
 import EnableAlerts from '@/components/field/EnableAlerts';
+import ReceiptCamera from '@/components/field/ReceiptCamera';
 
 interface TodayPayload {
   in_at: string | null;
@@ -48,6 +49,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+  const [camera, setCamera] = useState(false);
 
   const refresh = useCallback(async () => {
     const [t, tr, calls] = await Promise.all([
@@ -116,16 +118,35 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     else setBanner({ tone: 'danger', text: errorMessage(r) });
   }, [status, refresh]);
 
-  const tripSubmit = useCallback(async (endpoint: '/api/me/trip/start' | '/api/me/trip/end') => {
+  // Going out: the receipt photo travels with the request, so a trip cannot
+  // start without one - the camera opens first (see the OUT button) and this
+  // runs with what it captured.
+  const tripStart = useCallback(async (photo: Blob) => {
     if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
     setBusy(true); setBanner(null);
-    const r = await apiSend<{ duration_min?: number }>(endpoint, {
+    const form = new FormData();
+    form.set('lat', String(status.lat));
+    form.set('lng', String(status.lng));
+    form.set('accuracy', String(status.accuracy));
+    form.set('photo', photo, 'receipt.jpg');
+    const r = await apiSendForm('/api/me/trip/start', { form, idempotent: true, idemPrefix: 'trip' });
+    setBusy(false);
+    if (r.ok) {
+      setBanner({ tone: 'success', text: 'Out on an order. Drive safe!' });
+      await refresh();
+    } else setBanner({ tone: 'danger', text: errorMessage(r) });
+  }, [status, refresh]);
+
+  const tripEnd = useCallback(async () => {
+    if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
+    setBusy(true); setBanner(null);
+    const r = await apiSend<{ duration_min?: number }>('/api/me/trip/end', {
       idempotent: true, idemPrefix: 'trip',
       body: { lat: status.lat, lng: status.lng, accuracy: status.accuracy },
     });
     setBusy(false);
     if (r.ok) {
-      setBanner({ tone: 'success', text: endpoint.endsWith('start') ? 'Out on an order. Drive safe!' : `Back! Trip lasted ${dur(r.data.duration_min ?? 0)}.` });
+      setBanner({ tone: 'success', text: `Back! Trip lasted ${dur(r.data.duration_min ?? 0)}.` });
       await refresh();
     } else setBanner({ tone: 'danger', text: errorMessage(r) });
   }, [status, refresh]);
@@ -262,14 +283,16 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         )}
       </div>
 
-      {/* Trip button — going out requires the counter to have rung you first */}
+      {/* Trip button — going out requires the counter to have rung you first,
+          and a photo of the order receipt: OUT opens the camera, and the trip
+          starts when the photo is taken. */}
       <div>
         <button
-          onClick={() => tripSubmit(open ? '/api/me/trip/end' : '/api/me/trip/start')}
+          onClick={() => (open ? tripEnd() : setCamera(true))}
           disabled={busy || !ready || (!open && (!isIn || !canGoOut))}
           className={`h-28 w-full rounded-2xl text-2xl font-bold text-white shadow-sm transition-colors disabled:opacity-40 ${open ? 'bg-primary hover:bg-primary-hover' : 'bg-warning hover:brightness-95'}`}
         >
-          {busy ? 'Please wait…' : open ? 'BACK' : 'OUT ON ORDER'}
+          {busy ? 'Please wait…' : open ? 'BACK' : '📷 OUT ON ORDER'}
         </button>
         <p className="mt-1.5 text-center text-xs text-muted">
           {open
@@ -278,9 +301,16 @@ export default function DriverHomeClient({ username, branch }: { username: strin
               ? 'Clock in first to go out on orders.'
               : !canGoOut
                 ? '⏳ Waiting for the counter to call you — you can go out once they ring.'
-                : `📞 You've been called. Head out, then tap BACK when you return.`}
+                : `📞 You've been called. Tap OUT, photograph the receipt, then tap BACK when you return.`}
         </p>
       </div>
+
+      {camera && (
+        <ReceiptCamera
+          onCancel={() => setCamera(false)}
+          onCapture={(photo) => { setCamera(false); void tripStart(photo); }}
+        />
+      )}
 
       {process.env.NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS === 'true' && (
         <div className="rounded-xl border border-dashed border-warning/40 bg-warning-subtle p-3">

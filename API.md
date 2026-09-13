@@ -134,10 +134,16 @@ Summary `{ pending, upcoming: [...] }`; request body
 → `200 { id, status: "PENDING" }`. Error: `PAST_DATE` 400.
 
 ### Driver trips (role DRIVER)
-- **POST /api/me/trip/start** *(CSRF, Idempotent, rate-limited)* `{ lat, lng, accuracy }`
-  Requires the driver to have been **rung by the caller** in the last 30 min (an unconsumed
-  `DriverCall`); starting the trip consumes that ring. → `200 { trip_id, out_at }`. Errors:
+- **POST /api/me/trip/start** *(CSRF, Idempotent, rate-limited)* — **multipart/form-data**
+  `lat, lng, accuracy` fields + `photo` (JPEG). The photo is the order's receipt, captured
+  live by the driver's screen: a trip cannot start without one, and it is stored with the
+  trip in the same write (`TripReceipt`, `Trip.receipt_taken_at`). The server accepts a JPEG
+  of at most 4 MB with a short side of at least 480px (`receiptImage.ts`). A JSON body — the
+  screen from before receipts — is refused. → `200 { trip_id, out_at }`. Errors:
+  `RECEIPT_REQUIRED` 400 (no photo / JSON body), `BAD_PHOTO` 400 (not a readable JPEG),
   `NOT_DISPATCHED` 409 (no ring), `OPEN_TRIP_EXISTS` 409, geofence 422, `NOT_DRIVER` 403.
+  Requires the driver to have been **rung by the caller** in the last 30 min (an unconsumed
+  `DriverCall`); starting the trip consumes that ring.
   The geofence is checked against **the branch that rang**, and the trip is filed there.
   Identical to the driver's own branch for anyone who cannot roam (`ringDriver` refuses a
   ring from elsewhere); for a driver covering at another branch it is what stops them
@@ -304,6 +310,30 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **POST /api/admin/punches/correct** *(CSRF, Idempotent)* `{ punchId, newAt?,
   newBranchId?, reason }` — **persists** the correction (sets `corrected`,
   `corrected_by`, `correction_reason`) and audits before/after. GPS evidence is kept.
+
+### Trips review (receipts)
+The owner reviews a driver's deliveries one **working day** at a time, beside the cash count
+for that shift (`tripReview.ts`). Every trip since receipts began carries a photo; a photo of
+something that is not that day's receipt is **denied** and the trip pays nothing. Everything
+not denied is paid. A day locks when the owner **confirms** it, or on its own **48 hours
+after its last trip**, or when the month closes — after that nothing on it can change.
+Photos are wiped by the worker a week after the trip (`Trip.receipt_taken_at` stays).
+- **GET /api/admin/trips/review?date=YYYY-MM-DD** (default today) → `{ date, today,
+  drivers: [{ driver_id, username, name, branch, date, state, deadline, count, denied,
+  trips: [{ id, out_at, back_at, branch, system_closed, receipt: 'available'|'wiped'|'none',
+  denied_at, denied_reason, reviewed_at, locked }] }], pending: [{ date, drivers }] }`.
+  `state` ∈ `open | confirmed | expired | month_closed`; `pending` lists the last four
+  working days that still have a driver-day open for review.
+- **GET /api/admin/trips/:id/receipt** → the JPEG (`image/jpeg`, private), 404 once wiped.
+- **POST /api/admin/trips/review/deny** *(CSRF)* `{ tripId, deny: boolean, reason? }` —
+  deny or restore one trip. `REVIEW_LOCKED` 409 once the day is confirmed or its 48 hours
+  are over; `MONTH_CLOSED` 409. Audit `trip.deny` / `trip.restore`.
+- **POST /api/admin/trips/review/confirm** *(CSRF)* `{ driverId, date }` — marks every
+  unreviewed trip of that driver-day reviewed and locks the day. Idempotent (a second call
+  confirms nothing). Audit `trip.review_confirm`.
+- **GET /api/admin/trips?userId&month=YYYY-MM** (payroll's Trips column, itemised) now lists
+  denied trips too, flagged `denied` and priced at 0 and left out of `count`/`cent`, and
+  says per trip whether its `receipt` is `available | wiped | none`.
 
 ### Pay & approvals
 - **GET /api/admin/payroll?month=YYYY-MM&branchId=** → `{ rows[], totals, month,

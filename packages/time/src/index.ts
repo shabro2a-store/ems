@@ -42,6 +42,11 @@ export function previousBeirutDate(date: string): string {
   return shiftCalendarDate(date, -1);
 }
 
+/** The Beirut calendar date after this one; see previousBeirutDate for why it is the calendar's call. */
+export function nextBeirutDate(date: string): string {
+  return shiftCalendarDate(date, 1);
+}
+
 /**
  * The first instant belonging to the given Beirut calendar date.
  *

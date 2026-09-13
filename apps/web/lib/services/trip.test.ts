@@ -11,6 +11,8 @@ type TripRow = {
   back_lat: number | null;
   back_lng: number | null;
   threshold_alerted_at: Date | null;
+  receipt_taken_at?: Date | null;
+  receipt?: { mime: string; bytes: Buffer; size: number; width: number; height: number } | null;
 };
 
 const store: {
@@ -119,6 +121,11 @@ function makeDriver(id: string, branch: ReturnType<typeof makeBranch>) {
   return u;
 }
 
+// A receipt photo, as the route hands it over after inspecting the bytes.
+// Every trip starts with one now; the test that cares about its absence
+// leaves it out.
+const RECEIPT = { bytes: Buffer.from('jpeg-bytes'), mime: 'image/jpeg', width: 1080, height: 1920 };
+
 beforeEach(() => {
   vi.clearAllMocks();
   resetStore();
@@ -145,7 +152,7 @@ beforeEach(() => {
     }) ?? null;
   });
 
-  mocks.trip.create.mockImplementation(async ({ data }: { data: { driver_id: string; branch_id: string; out_at: Date; out_lat: number; out_lng: number } }) => {
+  mocks.trip.create.mockImplementation(async ({ data }: { data: { driver_id: string; branch_id: string; out_at: Date; out_lat: number; out_lng: number; receipt_taken_at?: Date; receipt?: { create: { mime: string; bytes: Buffer; size: number; width: number; height: number } } } }) => {
     store.tripSeq += 1;
     const t = {
       id: `t${store.tripSeq}`,
@@ -158,6 +165,8 @@ beforeEach(() => {
       back_lat: null,
       back_lng: null,
       threshold_alerted_at: null,
+      receipt_taken_at: data.receipt_taken_at ?? null,
+      receipt: data.receipt?.create ?? null,
     };
     store.trips.push(t);
     return t;
@@ -208,7 +217,7 @@ describe('startTrip', () => {
     const b = makeBranch({ gps_radius_m: 200 });
     store.branches.set(b.id, b);
     const driver = makeDriver('d1', b);
-    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     expect('trip_id' in r).toBe(true);
     if ('trip_id' in r) {
       expect(r.trip_id).toBe('t1');
@@ -216,12 +225,36 @@ describe('startTrip', () => {
     }
   });
 
+  it('refuses to start a trip without a receipt photo - no photo, no trip', async () => {
+    const b = makeBranch({ gps_radius_m: 200 });
+    store.branches.set(b.id, b);
+    const driver = makeDriver('d1', b);
+    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    expect('code' in r && r.code).toBe('RECEIPT_REQUIRED');
+    expect(store.trips.length).toBe(0);
+    expect(store.calls[0]!.trip_id).toBeNull(); // the ring is still good for a proper attempt
+  });
+
+  it('stores the receipt with the trip, in the one write', async () => {
+    // Same row, same transaction: a trip cannot exist without its photo, and a
+    // photo cannot be left behind by a start that failed.
+    const b = makeBranch({ gps_radius_m: 200 });
+    store.branches.set(b.id, b);
+    const driver = makeDriver('d1', b);
+    const now = new Date(); // inside the ring's dispatch window
+    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT, now });
+    expect('trip_id' in r).toBe(true);
+    const t = store.trips[0]!;
+    expect(t.receipt_taken_at).toEqual(now);
+    expect(t.receipt).toEqual({ mime: 'image/jpeg', bytes: RECEIPT.bytes, size: RECEIPT.bytes.length, width: 1080, height: 1920 });
+  });
+
   it('rejects an undispatched driver with NOT_DISPATCHED (caller must ring first)', async () => {
     const b = makeBranch({ gps_radius_m: 200 });
     store.branches.set(b.id, b);
     const driver = makeDriver('d1', b);
     store.calls.length = 0; // no ring from the caller
-    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     expect('code' in r && r.code).toBe('NOT_DISPATCHED');
     expect(store.trips.length).toBe(0);
   });
@@ -230,7 +263,7 @@ describe('startTrip', () => {
     const b = makeBranch({ gps_radius_m: 200 });
     store.branches.set(b.id, b);
     const driver = makeDriver('d1', b);
-    const r1 = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    const r1 = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     expect('trip_id' in r1).toBe(true);
     expect(store.calls[0]!.trip_id).toBe('t1'); // call linked to the trip
   });
@@ -243,22 +276,22 @@ describe('startTrip', () => {
       telegram_chat_id: null, notify_daily_summary: true, notify_routine_pings: true, created_at: new Date(),
     };
     store.users.set(u.id, u);
-    const r = await startTrip({ userId: 'e1', lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    const r = await startTrip({ userId: 'e1', lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     expect('code' in r && r.code).toBe('NOT_DRIVER');
   });
 
   it('rejects 2nd open trip with OPEN_TRIP_EXISTS', async () => {
     const b = makeBranch({ gps_radius_m: 200 });
     const driver = makeDriver('d1', b);
-    await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
-    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
+    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     expect('code' in r && r.code).toBe('OPEN_TRIP_EXISTS');
   });
 
   it('rejects outside geofence with OUT_OF_GEOFENCE', async () => {
     const b = makeBranch({ gps_radius_m: 50 });
     const driver = makeDriver('d1', b);
-    const r = await startTrip({ userId: driver.id, lat: 33.91, lng: 35.5, accuracy: 10 });
+    const r = await startTrip({ userId: driver.id, lat: 33.91, lng: 35.5, accuracy: 10, receipt: RECEIPT });
     expect('code' in r && r.code).toBe('OUT_OF_GEOFENCE');
   });
 });
@@ -267,7 +300,7 @@ describe('endTrip', () => {
   it('ends an open trip', async () => {
     const b = makeBranch({ gps_radius_m: 200 });
     const driver = makeDriver('d1', b);
-    await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     const outAt = store.trips[0]!.out_at;
     const r = await endTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, now: new Date(outAt.getTime() + 30 * 60_000) });
     expect('trip_id' in r && r.trip_id).toBe('t1');
@@ -285,7 +318,7 @@ describe('endTrip', () => {
   it('rejects end outside geofence with OUT_OF_GEOFENCE', async () => {
     const b = makeBranch({ gps_radius_m: 50 });
     const driver = makeDriver('d1', b);
-    await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     const r = await endTrip({ userId: driver.id, lat: 33.91, lng: 35.5, accuracy: 10 });
     expect('code' in r && r.code).toBe('OUT_OF_GEOFENCE');
   });
@@ -322,7 +355,7 @@ describe('currentTrip', () => {
       store.trips.push(t);
       return t;
     });
-    await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10 });
+    await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     const r = await currentTrip(driver.id);
     expect(r.open).toBe(true);
     expect(r.since_min).toBeGreaterThanOrEqual(14);
@@ -345,7 +378,7 @@ describe('a driver who is not on shift', () => {
     const { b, driver } = offShiftDriver();
     store.calls.push({ id: 'c1', driver_id: driver.id, trip_id: null, created_at: new Date() });
 
-    const r = await startTrip({ userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10 });
+    const r = await startTrip({ userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10, receipt: RECEIPT });
 
     expect('code' in r && r.code).toBe('NOT_CLOCKED_IN');
     expect(store.trips).toHaveLength(0);
@@ -364,7 +397,7 @@ describe('a driver who is not on shift', () => {
     store.calls.push({ id: 'c1', driver_id: driver.id, trip_id: null, created_at: new Date() });
 
     const r = await startTrip({
-      userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10, now: new Date('2026-09-14T13:10:00Z'),
+      userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10, receipt: RECEIPT, now: new Date('2026-09-14T13:10:00Z'),
     });
 
     expect('code' in r && r.code).toBe('NOT_CLOCKED_IN');
@@ -378,7 +411,7 @@ describe('a driver who is not on shift', () => {
       out_lat: b.lat, out_lng: b.lng, back_lat: null, back_lng: null, system_generated: false,
     } as never);
 
-    const r = await startTrip({ userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10 });
+    const r = await startTrip({ userId: driver.id, lat: b.lat, lng: b.lng, accuracy: 10, receipt: RECEIPT });
 
     expect('code' in r && r.code).toBe('OPEN_TRIP_EXISTS');
   });

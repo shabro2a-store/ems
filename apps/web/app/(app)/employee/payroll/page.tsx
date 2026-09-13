@@ -12,6 +12,7 @@ interface PayoutData {
   adjustments_cent: number;
   trips_count: number;
   trips_cent: number;
+  trips_denied: number;
   adjustments: Array<{ id: string; kind: 'BONUS' | 'DEDUCTION'; amount_cent: number; reason: string; created_at: string }>;
   advances_cent: number;
   penalties_cent: number;
@@ -70,8 +71,13 @@ export default function EmployeePayrollPage() {
                 )}
                 {/* Inside gross pay above, never added to it - the same shape as
                     blocked time. Shown so a gross that includes deliveries says so. */}
-                {data.trips_count > 0 && (
-                  <Line k={`of which deliveries (${data.trips_count} trip${data.trips_count === 1 ? '' : 's'})`} v={centsToUsd(data.trips_cent)} />
+                {(data.trips_count > 0 || data.trips_denied > 0) && (
+                  <Line
+                    k={`of which deliveries (${data.trips_count} trip${data.trips_count === 1 ? '' : 's'}${
+                      data.trips_denied > 0 ? `, ${data.trips_denied} denied` : ''
+                    })`}
+                    v={centsToUsd(data.trips_cent)}
+                  />
                 )}
                 <Line k="Bonuses / deductions" v={`${data.adjustments_cent >= 0 ? '+' : '−'}${centsToUsd(Math.abs(data.adjustments_cent), false)}`} tone={data.adjustments_cent > 0 ? 'success' : data.adjustments_cent < 0 ? 'danger' : undefined} />
                 {/* Each one with the reason it was given. The total alone is a

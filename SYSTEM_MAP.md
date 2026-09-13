@@ -445,6 +445,7 @@ Full request/response detail is in [API.md](API.md). Summary:
 | every 30 min | driverStale | Trip open ≥ 4h → notify |
 | 23:30 daily | endOfDayWatcher | Unresolved WATCHED flags → notify + close |
 | 23:00 daily | dailySummary | Attendance roll-up (all + per branch) → notify |
+| 03:20 daily | wipeReceipts | Deletes `TripReceipt` rows (the receipt photos) of trips older than **7 days** (`RECEIPT_KEEP_DAYS`). Their job is done once the owner has confirmed the day, which happens on its own 48h after the day's last trip at the latest; `Trip.receipt_taken_at` stays as the record that there was one |
 
 Notifications go to Telegram when `TELEGRAM_BOT_TOKEN` is set (admin binds via `/start`);
 otherwise a console notifier. Telegram messages are **informational only** (a smart summary +

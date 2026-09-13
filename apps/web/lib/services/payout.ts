@@ -27,6 +27,9 @@ export interface PayoutForUserResult {
   // adding it again would pay every trip twice. Zero for everyone else.
   tripsCount: number;
   tripsCent: number;
+  // Trips the owner denied at review this month: unpaid, and shown so the
+  // driver knows why the count is short.
+  tripsDenied: number;
   netCent: number;
 }
 
@@ -181,6 +184,11 @@ function pairHours(
 export interface TripRow {
   out_at: Date;
   back_at: Date | null;
+  // Set when the owner looked at the receipt photo and said no (tripReview.ts).
+  // A denied trip is not a trip anywhere money or counts are concerned.
+  // Optional so a caller with older rows in hand still compiles; absent means
+  // not denied.
+  denied_at?: Date | null;
 }
 
 /**
@@ -244,16 +252,23 @@ export function tripPay(
   tripRateChanges: { rate_cent: number; effective_from: Date }[],
   month?: string,
   dayOf: (outAt: Date) => string = (outAt) => inBeirut(outAt).date,
-): { count: number; cent: number } {
+): { count: number; cent: number; denied: number } {
   let count = 0;
   let cent = 0;
+  let denied = 0;
   for (const t of trips) {
     if (t.back_at === null) continue;
     if (month !== undefined && dayOf(t.out_at).slice(0, 7) !== month) continue;
+    // Denied by the owner at review: pays nothing, and the payslip says so -
+    // a driver paid for eleven of twelve deliveries should know which one.
+    if (t.denied_at) {
+      denied += 1;
+      continue;
+    }
     count += 1;
     cent += rateAt(tripRateChanges, t.out_at);
   }
-  return { count, cent };
+  return { count, cent, denied };
 }
 
 /** The `dayOf` a caller with the punches in hand should pass to tripPay. */
@@ -292,6 +307,7 @@ export function tripsOnCurrentWorkingDay(args: {
   let count = 0;
   for (const t of args.trips) {
     if (t.out_at > args.now) continue;
+    if (t.denied_at) continue;
     if (dayOf(t.out_at) === date) count += 1;
   }
   return { date, count };
@@ -384,6 +400,7 @@ export function computePayoutFromRows(args: {
     overtimeDeductionCent,
     tripsCount: trips.count,
     tripsCent: trips.cent,
+    tripsDenied: trips.denied,
     netCent,
   };
 }
@@ -438,7 +455,7 @@ export async function payoutForUser(
     ? await Promise.all([
         db.trip.findMany({
           where: { driver_id: userId, out_at: { gte: pairFrom, lt: pairTo } },
-          select: { out_at: true, back_at: true },
+          select: { out_at: true, back_at: true, denied_at: true },
         }),
         db.tripRateChange.findMany({
           where: { user_id: userId, effective_from: { lt: end } },
@@ -505,7 +522,7 @@ export async function accruedEarningsThisMonth(
   const [trips, tripRates] = await Promise.all([
     db.trip.findMany({
       where: { driver_id: userId, out_at: { gte: pairFrom, lt: pairTo } },
-      select: { out_at: true, back_at: true },
+      select: { out_at: true, back_at: true, denied_at: true },
     }),
     db.tripRateChange.findMany({
       where: { user_id: userId, effective_from: { lt: end } },

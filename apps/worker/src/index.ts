@@ -9,6 +9,7 @@ import { runDriverStale } from './jobs/driverStale';
 import { runEndOfDayWatcher } from './jobs/endOfDayWatcher';
 import { runDailySummary } from './jobs/dailySummary';
 import { runRingRepeater } from './jobs/ringRepeater';
+import { runWipeReceipts } from './jobs/wipeReceipts';
 
 const notifier = getNotifier();
 
@@ -50,6 +51,9 @@ cron.schedule('*/10 * * * *', safe('autoCloseAbandonedTrips', () => runAutoClose
 cron.schedule('*/30 * * * *', safe('driverStale', () => runDriverStale({ notifier })));
 cron.schedule('30 23 * * *', safe('endOfDayWatcher', () => runEndOfDayWatcher({ notifier })));
 cron.schedule('0 23 * * *', safe('dailySummary', () => runDailySummary({ notifier })));
+// Receipt photos older than a week. Daily rather than weekly so the database
+// never carries more than eight days of them; the hour is a quiet one.
+cron.schedule('20 3 * * *', safe('wipeReceipts', () => runWipeReceipts()));
 
 console.log('cron schedule registered:');
 console.log('  */5s    ringRepeater');
@@ -59,6 +63,7 @@ console.log('  */10    autoCloseAbandoned, autoCloseAbandonedTrips');
 console.log('  */30    driverStale');
 console.log('  30 23   endOfDayWatcher');
 console.log('  0 23    dailySummary');
+console.log('  20 3    wipeReceipts');
 
 process.on('SIGTERM', () => {
   console.log('worker received SIGTERM, shutting down');

@@ -45,7 +45,11 @@ export async function GET(req: Request) {
         out_at: true,
         back_at: true,
         system_generated: true,
+        denied_at: true,
+        denied_reason: true,
+        receipt_taken_at: true,
         branch: { select: { name: true } },
+        receipt: { select: { trip_id: true } },
       },
     }),
     prisma.tripRateChange.findMany({
@@ -68,23 +72,43 @@ export async function GET(req: Request) {
       date: string;
       count: number;
       cent: number;
-      trips: Array<{ id: string; out_at: string; back_at: string | null; branch: string; system_closed: boolean; rate_cent: number }>;
+      denied: number;
+      trips: Array<{
+        id: string;
+        out_at: string;
+        back_at: string | null;
+        branch: string;
+        system_closed: boolean;
+        rate_cent: number;
+        denied: boolean;
+        denied_reason: string | null;
+        receipt: 'available' | 'wiped' | 'none';
+      }>;
     }
   >();
   for (const t of trips) {
     const date = dayOf(t.out_at);
     if (date.slice(0, 7) !== month) continue; // the window is wider than the month on purpose
     const rate = rateAt(rates, t.out_at);
-    const day = byDay.get(date) ?? { date, count: 0, cent: 0, trips: [] };
-    day.count += 1;
-    day.cent += rate;
+    const day = byDay.get(date) ?? { date, count: 0, cent: 0, denied: 0, trips: [] };
+    // A denied trip is listed - the owner should see what he denied - but it
+    // is not counted and not paid, the same as tripPay.
+    const denied = t.denied_at !== null;
+    if (denied) day.denied += 1;
+    else {
+      day.count += 1;
+      day.cent += rate;
+    }
     day.trips.push({
       id: t.id,
       out_at: t.out_at.toISOString(),
       back_at: t.back_at?.toISOString() ?? null,
       branch: t.branch.name,
       system_closed: t.system_generated,
-      rate_cent: rate,
+      rate_cent: denied ? 0 : rate,
+      denied,
+      denied_reason: t.denied_reason,
+      receipt: t.receipt ? 'available' : t.receipt_taken_at ? 'wiped' : 'none',
     });
     byDay.set(date, day);
   }

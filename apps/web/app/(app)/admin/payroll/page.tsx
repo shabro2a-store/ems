@@ -411,7 +411,18 @@ interface TripDay {
   date: string;
   count: number;
   cent: number;
-  trips: Array<{ id: string; out_at: string; back_at: string | null; branch: string; system_closed: boolean; rate_cent: number }>;
+  denied: number;
+  trips: Array<{
+    id: string;
+    out_at: string;
+    back_at: string | null;
+    branch: string;
+    system_closed: boolean;
+    rate_cent: number;
+    denied: boolean;
+    denied_reason: string | null;
+    receipt: 'available' | 'wiped' | 'none';
+  }>;
 }
 
 // Read-only. Trips are made by the driver pressing OUT and BACK, and what is
@@ -438,7 +449,8 @@ function TripsModal({ row, month, onClose }: { row: Row; month: string; onClose:
       <p className="mb-3 text-sm text-muted">
         Every completed delivery on {month}, filed under the working day of the shift it happened in and
         priced at the per-trip rate in force when it went out. This total is already inside Gross. A trip
-        closed by the system is one the driver never pressed BACK on.
+        closed by the system is one the driver never pressed BACK on; a denied one is a receipt you refused
+        at review, and is not paid. Photos are reviewed on the Trips page.
       </p>
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
       {days === null ? (
@@ -452,14 +464,23 @@ function TripsModal({ row, month, onClose }: { row: Row; month: string; onClose:
               <li key={d.date} className="py-3">
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{d.date}</span>
-                  <span className="tabular">{d.count} trip{d.count === 1 ? '' : 's'} · {centsToUsd(d.cent)}</span>
+                  <span className="tabular">
+                    {d.count} trip{d.count === 1 ? '' : 's'}
+                    {d.denied > 0 && <span className="text-danger"> ({d.denied} denied)</span>} · {centsToUsd(d.cent)}
+                  </span>
                 </div>
                 <ul className="mt-1 space-y-0.5 pl-3 text-xs text-muted">
                   {d.trips.map((t) => (
-                    <li key={t.id} className="flex justify-between gap-3">
+                    <li key={t.id} className={`flex justify-between gap-3 ${t.denied ? 'line-through decoration-danger/60' : ''}`}>
                       <span>
                         {formatBeirutTime(t.out_at)} → {t.back_at ? formatBeirutTime(t.back_at) : '…'} · {t.branch}
                         {t.system_closed && <span className="ml-1 text-warning">closed by system</span>}
+                        {t.denied && <span className="ml-1 text-danger no-underline">denied{t.denied_reason ? `: ${t.denied_reason}` : ''}</span>}
+                        {t.receipt === 'available' && (
+                          <a href={`/api/admin/trips/${t.id}/receipt`} target="_blank" rel="noreferrer" className="ml-1 text-primary underline">
+                            photo
+                          </a>
+                        )}
                       </span>
                       <span className="tabular shrink-0">{centsToUsd(t.rate_cent, false)}</span>
                     </li>

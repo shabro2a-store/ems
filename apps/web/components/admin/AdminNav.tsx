@@ -17,6 +17,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/admin/users', label: 'Employees', match: (p: string) => p.startsWith('/admin/users') },
   { href: '/admin/branches', label: 'Branches', match: (p: string) => p.startsWith('/admin/branches') },
   { href: '/admin/punches', label: 'Punches', match: (p: string) => p.startsWith('/admin/punches') },
+  { href: '/admin/trips', label: 'Trips', match: (p: string) => p.startsWith('/admin/trips') },
   { href: '/admin/payroll', label: 'Payroll', match: (p: string) => p.startsWith('/admin/payroll') },
 ];
 

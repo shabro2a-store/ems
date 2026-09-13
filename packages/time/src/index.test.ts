@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { formatInTimeZone } from 'date-fns-tz';
-import { SHOP_TZ, previousBeirutDate, todayInBeirut, todayInBeirutDateRange } from './index';
+import { SHOP_TZ, previousBeirutDate, nextBeirutDate, todayInBeirut, todayInBeirutDateRange } from './index';
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -106,6 +106,15 @@ describe('todayInBeirutDateRange', () => {
     expect(local(todayInBeirutDateRange('2026-12-31').endUtc)).toBe('2027-01-01 00:00');
     expect(spanHours('2026-01-31')).toBe(24);
     expect(spanHours('2026-12-31')).toBe(24);
+  });
+});
+
+describe('nextBeirutDate', () => {
+  it('steps forward one calendar day, including over month and year boundaries', () => {
+    expect(nextBeirutDate('2026-08-22')).toBe('2026-08-23');
+    expect(nextBeirutDate('2026-02-28')).toBe('2026-03-01');
+    expect(nextBeirutDate('2026-12-31')).toBe('2027-01-01');
+    expect(nextBeirutDate('2026-03-28')).toBe('2026-03-29'); // the short DST day is a day
   });
 });
 

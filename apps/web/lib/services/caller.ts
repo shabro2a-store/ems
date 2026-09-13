@@ -233,7 +233,7 @@ export async function driverTripsToday(
   const [user, punches, trips] = await Promise.all([
     db.user.findUnique({ where: { id: driverId }, select: { day_start_hour: true } }),
     db.punch.findMany({ where: { user_id: driverId, at: { gte: since } }, orderBy: { at: 'asc' }, select: { kind: true, at: true } }),
-    db.trip.findMany({ where: { driver_id: driverId, out_at: { gte: since } }, select: { out_at: true, back_at: true } }),
+    db.trip.findMany({ where: { driver_id: driverId, out_at: { gte: since } }, select: { out_at: true, back_at: true, denied_at: true } }),
   ]);
   return tripsOnCurrentWorkingDay({ punches: punches as PunchLite[], trips, now, dayStartHour: dayStartHourFor(user) }).count;
 }

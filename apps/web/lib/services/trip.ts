@@ -11,6 +11,7 @@ export type TripErrorCode =
   | 'NOT_DISPATCHED'
   | 'OPEN_TRIP_EXISTS'
   | 'NOT_CLOCKED_IN'
+  | 'RECEIPT_REQUIRED'
   | 'NO_OPEN_TRIP'
   | 'OUT_OF_GEOFENCE'
   | 'LOW_GPS_ACCURACY';
@@ -19,11 +20,23 @@ export type TripErrorCode =
 // (DriverCall) is valid for this long and can dispatch exactly one trip.
 export const DISPATCH_WINDOW_MS = 30 * 60 * 1000;
 
+/**
+ * The receipt photo, already inspected by the route (receiptImage.ts): a JPEG
+ * the owner can read the order off later. A trip cannot start without one.
+ */
+export interface ReceiptInput {
+  bytes: Buffer;
+  mime: string;
+  width: number;
+  height: number;
+}
+
 export interface TripInput {
   userId: string;
   lat: number;
   lng: number;
   accuracy: number;
+  receipt?: ReceiptInput;
   now?: Date;
 }
 
@@ -44,6 +57,12 @@ export async function startTrip(
   if (user.role !== 'DRIVER') return { ok: false, code: 'NOT_DRIVER' };
   if (!user.branch) return { ok: false, code: 'BRANCH_NOT_FOUND' };
   if (!user.is_active) return { ok: false, code: 'USER_NOT_FOUND' };
+
+  // No photo, no trip. The receipt is the proof there was an order: the owner
+  // reviews it against the cash the driver hands in (tripReview.ts), and a
+  // trip that could exist without one is a trip nobody can check. Refused
+  // before anything is consumed, so the ring stays good for a proper attempt.
+  if (!input.receipt) return { ok: false, code: 'RECEIPT_REQUIRED' };
 
   // An approved day-off does not block trips — a driver may come in to help.
 
@@ -99,7 +118,11 @@ export async function startTrip(
     return { ok: false, code: 'OUT_OF_GEOFENCE' };
   }
 
+  const receipt = input.receipt;
   const trip = await db.$transaction(async (tx) => {
+    // The photo goes in with the trip, one write: a trip cannot exist without
+    // its receipt, and a receipt cannot be left behind by a start that failed
+    // on the ring below.
     const t = await tx.trip.create({
       data: {
         driver_id: user.id,
@@ -107,6 +130,16 @@ export async function startTrip(
         out_at: now,
         out_lat: input.lat,
         out_lng: input.lng,
+        receipt_taken_at: now,
+        receipt: {
+          create: {
+            mime: receipt.mime,
+            bytes: receipt.bytes,
+            size: receipt.bytes.length,
+            width: receipt.width,
+            height: receipt.height,
+          },
+        },
       },
     });
     // Consume the dispatch call — guard on trip_id null so a concurrent start
