@@ -71,6 +71,8 @@ export async function GET(req: Request) {
         adjustments_cent: payout.adjustmentsCent,
         penalties_cent: payout.penaltiesCent,
         overtime_deduction_cent: payout.overtimeDeductionCent,
+        trips_count: payout.tripsCount,
+        trips_cent: payout.tripsCent,
         advances_cent: payout.advancesCent,
         net_cent: payout.netCent,
       };

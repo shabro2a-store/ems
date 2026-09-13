@@ -19,6 +19,13 @@ export interface PayoutForUserResult {
   advancesCent: number;
   penaltiesCent: number;
   overtimeDeductionCent: number;
+  // Drivers only. Completed trips this month and what they paid, each priced at
+  // the per-trip rate in force when it went out. An ADDEND to net alongside
+  // gross, never folded into it: gross has to stay hours x rate so the payslip
+  // multiplies out, and a driver's trips are a second thing they earned, not a
+  // correction to the first. Zero for everyone who is not a driver.
+  tripsCount: number;
+  tripsCent: number;
   netCent: number;
 }
 
@@ -170,6 +177,42 @@ function pairHours(
   return { minutes: totalMinutes, grossCent };
 }
 
+export interface TripRow {
+  out_at: Date;
+  back_at: Date | null;
+}
+
+/**
+ * How many trips a driver completed in `month`, and what they earned for them.
+ *
+ * A trip counts when it has a BACK - a driver still out has not finished the
+ * delivery, and the trip-close sweep writes a BACK for one who forgot, so an
+ * abandoned trip still pays once it is closed. It belongs to the Beirut date it
+ * went OUT on. Trips are events rather than spans, so the month is simply the
+ * day it happened; a trip at 00:30 on the 1st during a shift that started the
+ * night before is the 1st's trip, and one trip's pay moving across a seam is
+ * the entire cost of keeping the rule this simple.
+ *
+ * Each trip is priced at the rate in force when it went out, the way an hour is
+ * priced at the rate in force when it was clocked out, so a mid-month change
+ * to the per-trip rate reprices nothing that already happened.
+ */
+export function tripPay(
+  trips: TripRow[],
+  tripRateChanges: { rate_cent: number; effective_from: Date }[],
+  month?: string,
+): { count: number; cent: number } {
+  let count = 0;
+  let cent = 0;
+  for (const t of trips) {
+    if (t.back_at === null) continue;
+    if (month !== undefined && inBeirut(t.out_at).date.slice(0, 7) !== month) continue;
+    count += 1;
+    cent += rateAt(tripRateChanges, t.out_at);
+  }
+  return { count, cent };
+}
+
 /**
  * Worked minutes plus any credited minutes, priced the same way.
  *
@@ -209,6 +252,10 @@ export function computePayoutFromRows(args: {
   // it - the two would disagree otherwise, and the penalty ceiling is clamped
   // to that per-day figure.
   creditedIntervals?: WorkInterval[];
+  // A driver's trips and the per-trip rate history that prices them. Both
+  // optional: everybody who is not a driver has neither, and gets zero.
+  trips?: TripRow[];
+  tripRateChanges?: { rate_cent: number; effective_from: Date }[];
   // The month these punches are being paid for, 'YYYY-MM'. Given it, a pair is
   // counted only if its ARRIVAL falls in that Beirut month - which is what
   // stops the night across the boundary being counted twice, or (as it was)
@@ -233,7 +280,9 @@ export function computePayoutFromRows(args: {
     args.month,
     args.dayStartHour,
   );
-  const netCent = grossCent + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
+  const trips = tripPay(args.trips ?? [], args.tripRateChanges ?? [], args.month);
+  const netCent =
+    grossCent + trips.cent + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
   return {
     hours,
     grossCent,
@@ -243,6 +292,8 @@ export function computePayoutFromRows(args: {
     advancesCent,
     penaltiesCent,
     overtimeDeductionCent,
+    tripsCount: trips.count,
+    tripsCent: trips.cent,
     netCent,
   };
 }
@@ -284,9 +335,26 @@ export async function payoutForUser(
     blockedCreditForUser(userId, month, db),
     db.user.findUnique({
       where: { id: userId },
-      select: { day_start_hour: true },
+      select: { day_start_hour: true, role: true },
     }),
   ]);
+  // Trips are a driver's second earnings line. Loaded on the Beirut month
+  // bounds because out_at is a real instant, and only for drivers - the query
+  // is not free and everybody else's answer is zero by definition.
+  const isDriver = user?.role === 'DRIVER';
+  const [trips, tripRateChanges] = isDriver
+    ? await Promise.all([
+        db.trip.findMany({
+          where: { driver_id: userId, out_at: { gte: beirutStart, lt: beirutEnd } },
+          select: { out_at: true, back_at: true },
+        }),
+        db.tripRateChange.findMany({
+          where: { user_id: userId, effective_from: { lt: end } },
+          orderBy: { effective_from: 'asc' },
+          select: { user_id: true, rate_cent: true, effective_from: true },
+        }),
+      ])
+    : [[], []];
   return computePayoutFromRows({
     userId,
     punches: punches as PunchRow[],
@@ -296,6 +364,8 @@ export async function payoutForUser(
     penaltiesCent: sumActivePenaltiesCent(penalties),
     overtimeDeductionCent,
     creditedIntervals: grantedIntervals(credits),
+    trips,
+    tripRateChanges: tripRateChanges as RateChangeRow[],
     month,
     dayStartHour: dayStartHourFor(user),
   });
@@ -326,16 +396,33 @@ export async function accruedEarningsThisMonth(
     blockedCreditForUser(userId, month, db),
     db.user.findUnique({
       where: { id: userId },
-      select: { day_start_hour: true },
+      select: { day_start_hour: true, role: true },
     }),
   ]);
-  return grossWithCredit(
+  const earned = grossWithCredit(
     punches as PunchRow[],
     rateChanges as RateChangeRow[],
     grantedIntervals(credits),
     month,
     dayStartHourFor(user),
   );
+  // A driver's trips are earned too, for the same reason blocked credit is:
+  // the cap has to be the month payroll is about to pay, or it lends against
+  // less than they are owed.
+  if (user?.role !== 'DRIVER') return earned;
+  const { start: bStart, end: bEnd } = monthRangeBeirut(month);
+  const [trips, tripRates] = await Promise.all([
+    db.trip.findMany({
+      where: { driver_id: userId, out_at: { gte: bStart, lt: bEnd } },
+      select: { out_at: true, back_at: true },
+    }),
+    db.tripRateChange.findMany({
+      where: { user_id: userId, effective_from: { lt: end } },
+      orderBy: { effective_from: 'asc' },
+      select: { user_id: true, rate_cent: true, effective_from: true },
+    }),
+  ]);
+  return { hours: earned.hours, grossCent: earned.grossCent + tripPay(trips, tripRates as RateChangeRow[], month).cent };
 }
 
 export interface RosterUser {

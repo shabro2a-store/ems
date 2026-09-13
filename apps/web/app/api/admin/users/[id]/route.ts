@@ -13,6 +13,10 @@ const Patch = z.object({
   role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN', 'CALLER']).optional(),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative().optional(),
+  // Per completed trip, drivers only. A change applies from now on and writes
+  // a TripRateChange, exactly as the hourly rate does, so trips already taken
+  // keep the price they were taken at.
+  tripRateCent: z.number().int().nonnegative().optional(),
   // Reference only (see schema.prisma). null clears it back to unset.
   expectedMonthlySalaryCent: z.number().int().nonnegative().nullable().optional(),
   // Clock in and out at any active branch, not only their own. Revoking it
@@ -95,6 +99,9 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         ...(body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent
           ? { hourly_rate_cent: body.hourlyRateCent }
           : {}),
+        ...(body.tripRateCent !== undefined && body.tripRateCent !== before.trip_rate_cent
+          ? { trip_rate_cent: body.tripRateCent }
+          : {}),
         ...(body.expectedMonthlySalaryCent !== undefined
           ? { expected_monthly_salary_cent: body.expectedMonthlySalaryCent }
           : {}),
@@ -112,6 +119,11 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         },
       });
     }
+    if (body.tripRateCent !== undefined && body.tripRateCent !== before.trip_rate_cent) {
+      await tx.tripRateChange.create({
+        data: { user_id: updated.id, rate_cent: body.tripRateCent, effective_from: new Date() },
+      });
+    }
     return updated;
   });
 
@@ -125,6 +137,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       role: before.role,
       branch_id: before.branch_id,
       hourly_rate_cent: before.hourly_rate_cent,
+      trip_rate_cent: before.trip_rate_cent,
       expected_monthly_salary_cent: before.expected_monthly_salary_cent,
       can_roam_branches: before.can_roam_branches,
       day_start_hour: before.day_start_hour,
@@ -134,6 +147,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       role: user.role,
       branch_id: user.branch_id,
       hourly_rate_cent: user.hourly_rate_cent,
+      trip_rate_cent: user.trip_rate_cent,
       expected_monthly_salary_cent: user.expected_monthly_salary_cent,
       can_roam_branches: user.can_roam_branches,
       day_start_hour: user.day_start_hour,

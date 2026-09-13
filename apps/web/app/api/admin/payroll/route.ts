@@ -76,6 +76,8 @@ export async function GET(req: Request) {
         // netCent subtracts this too. Leaving it out of the response made the
         // table stop adding up, with nothing on screen to explain the gap.
         overtime_deduction_cent: r.overtimeDeductionCent,
+        trips_count: r.tripsCount,
+        trips_cent: r.tripsCent,
         net_cent: r.netCent,
       };
     }),
@@ -90,6 +92,8 @@ export async function GET(req: Request) {
       advances_cent: s.advances_cent + r.advances_cent,
       penalties_cent: s.penalties_cent + r.penalties_cent,
       overtime_deduction_cent: s.overtime_deduction_cent + r.overtime_deduction_cent,
+      trips_count: s.trips_count + r.trips_count,
+      trips_cent: s.trips_cent + r.trips_cent,
       net_cent: s.net_cent + r.net_cent,
     }),
     {
@@ -100,6 +104,8 @@ export async function GET(req: Request) {
       advances_cent: 0,
       penalties_cent: 0,
       overtime_deduction_cent: 0,
+      trips_count: 0,
+      trips_cent: 0,
       net_cent: 0,
     },
   );

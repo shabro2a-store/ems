@@ -22,6 +22,9 @@ interface Row {
   advances_cent: number;
   penalties_cent: number;
   overtime_deduction_cent: number;
+  // Drivers only; an addend beside gross, never inside it.
+  trips_count: number;
+  trips_cent: number;
   net_cent: number;
 }
 interface Totals {
@@ -33,6 +36,9 @@ interface Totals {
   advances_cent: number;
   penalties_cent: number;
   overtime_deduction_cent: number;
+  // Drivers only; an addend beside gross, never inside it.
+  trips_count: number;
+  trips_cent: number;
   net_cent: number;
 }
 interface Branch { id: string; name: string }
@@ -62,6 +68,7 @@ export default function AdminPayrollPage() {
   const [penaltiesFor, setPenaltiesFor] = useState<Row | null>(null);
   const [overtimeFor, setOvertimeFor] = useState<Row | null>(null);
   const [adjustmentsFor, setAdjustmentsFor] = useState<Row | null>(null);
+  const [tripsFor, setTripsFor] = useState<Row | null>(null);
   const [blockedCreditFor, setBlockedCreditFor] = useState<Row | null>(null);
   const [salaryFor, setSalaryFor] = useState<Row | null>(null);
 
@@ -141,7 +148,7 @@ export default function AdminPayrollPage() {
 
       {totals && (
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + bonuses − deductions − advances − penalties − revoked overtime" />
+          <StatTile label="Total to pay" value={centsToUsd(totals.net_cent)} tone="primary" hint="Wages + trips + bonuses − deductions − advances − penalties − revoked overtime" />
           <StatTile
             label="Gross wages"
             value={centsToUsd(totals.gross_cent)}
@@ -179,6 +186,7 @@ export default function AdminPayrollPage() {
                   <th className="px-4 py-2.5 text-right">Hours</th>
                   <th className="px-4 py-2.5 text-right">Rate</th>
                   <th className="px-4 py-2.5 text-right">Gross</th>
+                  <th className="px-4 py-2.5 text-right">Trips</th>
                   <th className="px-4 py-2.5 text-right">Adjust.</th>
                   <th className="px-4 py-2.5 text-right">Penalty</th>
                   <th className="px-4 py-2.5 text-right">OT revoked</th>
@@ -220,6 +228,19 @@ export default function AdminPayrollPage() {
                           >
                             {r.blocked_credit_cent > 0 ? `incl. ${centsToUsd(r.blocked_credit_cent)} blocked` : 'blocked time'}
                           </button>
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          {r.role === 'DRIVER' ? (
+                            <button
+                              onClick={() => setTripsFor(r)}
+                              className="tabular border-b border-dashed border-primary/40 font-medium hover:text-primary"
+                              title="Completed deliveries this month, by day"
+                            >
+                              {r.trips_count === 0 ? '—' : `${r.trips_count} · ${centsToUsd(r.trips_cent, false)}`}
+                            </button>
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <button
@@ -284,6 +305,7 @@ export default function AdminPayrollPage() {
                     <td className="tabular px-4 py-3 text-right">{totals.hours.toFixed(1)}</td>
                     <td></td>
                     <td className="tabular px-4 py-3 text-right">{centsToUsd(totals.gross_cent)}</td>
+                    <td className="tabular px-4 py-3 text-right">{totals.trips_count === 0 ? '—' : `${totals.trips_count} · ${centsToUsd(totals.trips_cent, false)}`}</td>
                     <td className="tabular px-4 py-3 text-right">{totals.adjustments_cent >= 0 ? '+' : '−'}{centsToUsd(Math.abs(totals.adjustments_cent), false)}</td>
                     <td className="tabular px-4 py-3 text-right text-danger">{totals.penalties_cent === 0 ? '—' : `−${centsToUsd(totals.penalties_cent, false)}`}</td>
                     <td className="tabular px-4 py-3 text-right text-danger">{totals.overtime_deduction_cent === 0 ? '—' : `−${centsToUsd(totals.overtime_deduction_cent, false)}`}</td>
@@ -305,6 +327,9 @@ export default function AdminPayrollPage() {
       )}
       {rateFor && (
         <RateModal row={rateFor} onClose={() => setRateFor(null)} onSaved={() => { setRateFor(null); setMsg('Rate updated (applies from now on).'); load(); }} />
+      )}
+      {tripsFor && (
+        <TripsModal row={tripsFor} month={month} onClose={() => setTripsFor(null)} />
       )}
       {adjustmentsFor && (
         <AdjustmentsModal row={adjustmentsFor} month={month} onClose={() => setAdjustmentsFor(null)} />
@@ -380,6 +405,76 @@ interface PenaltyItem {
   amount_cent: number;
   waived: boolean;
   waiverStale: boolean;
+}
+
+interface TripDay {
+  date: string;
+  count: number;
+  cent: number;
+  trips: Array<{ id: string; out_at: string; back_at: string | null; branch: string; system_closed: boolean; rate_cent: number }>;
+}
+
+// Read-only. Trips are made by the driver pressing OUT and BACK, and what is
+// owed for them is the count times the rate in force that day; there is no
+// ruling to make here, only a record to check. The day-by-day shape is the one
+// the owner asked for - "how many trips did each driver do today" - and it is
+// also the shape that shows a forgotten BACK, because a trip the sweep closed
+// is marked.
+function TripsModal({ row, month, onClose }: { row: Row; month: string; onClose: () => void }) {
+  const [days, setDays] = useState<TripDay[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiGet<{ days: TripDay[] }>(`/api/admin/trips?userId=${row.user_id}&month=${month}`).then((r) => {
+      if (r.ok) setDays(r.data.days);
+      else setErr(errorMessage(r));
+    });
+  }, [row.user_id, month]);
+
+  const total = (days ?? []).reduce((a, d) => ({ count: a.count + d.count, cent: a.cent + d.cent }), { count: 0, cent: 0 });
+
+  return (
+    <Modal title={`Trips · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      <p className="mb-3 text-sm text-muted">
+        Every completed delivery on {month}, by day, each priced at the per-trip rate in force when it went out.
+        A trip closed by the system is one the driver never pressed BACK on.
+      </p>
+      {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
+      {days === null ? (
+        <div className="grid place-items-center py-8 text-muted"><Spinner /></div>
+      ) : days.length === 0 ? (
+        <EmptyState title="No trips" hint="No completed deliveries this month." />
+      ) : (
+        <>
+          <ul className="divide-y divide-border">
+            {days.map((d) => (
+              <li key={d.date} className="py-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{d.date}</span>
+                  <span className="tabular">{d.count} trip{d.count === 1 ? '' : 's'} · {centsToUsd(d.cent)}</span>
+                </div>
+                <ul className="mt-1 space-y-0.5 pl-3 text-xs text-muted">
+                  {d.trips.map((t) => (
+                    <li key={t.id} className="flex justify-between gap-3">
+                      <span>
+                        {formatBeirutTime(t.out_at)} → {t.back_at ? formatBeirutTime(t.back_at) : '…'} · {t.branch}
+                        {t.system_closed && <span className="ml-1 text-warning">closed by system</span>}
+                      </span>
+                      <span className="tabular shrink-0">{centsToUsd(t.rate_cent, false)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex justify-between border-t border-border pt-3 text-sm">
+            <span className="text-muted">{total.count} trips this month</span>
+            <span className="tabular font-semibold">{centsToUsd(total.cent)}</span>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
 }
 
 interface AdjustmentItem {

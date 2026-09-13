@@ -70,6 +70,12 @@ model User {
   branch_id            String?
   branch               Branch?            @relation(fields: [branch_id], references: [id])
   hourly_rate_cent     Int
+  // What a DRIVER earns per completed trip, on top of the hour. Zero for
+  // everybody else, and zero is what a driver has until the owner sets it - so
+  // adding the column changes nobody's pay. The current value, mirroring
+  // hourly_rate_cent; the history that prices past months lives in
+  // TripRateChange, exactly as RateChange does for the hour.
+  trip_rate_cent       Int                @default(0)
   // What the owner expects to pay this person monthly. Reference only: never
   // read by payout.ts or any other calculation, purely for the admin payroll
   // screen to display next to actual earnings. Edited freely, no history kept.
@@ -114,6 +120,7 @@ model User {
   created_at           DateTime           @default(now())
   punches              Punch[]
   rate_changes         RateChange[]
+  trip_rate_changes    TripRateChange[]
   schedules            Schedule[]
   schedule_overrides   ScheduleOverride[]
   leave_requests       LeaveRequest[]
@@ -307,6 +314,24 @@ model LeaveRequest {
   //   ALTER TABLE "LeaveRequest" ADD CONSTRAINT leave_off_min_chk CHECK ("off_min" IS NULL OR ("off_min" >= 0 AND "off_min" <= 1440));
 
   @@index([user_id, status])
+}
+
+// The per-trip rate a driver was on, and from when.
+//
+// Its own table rather than a column on RateChange, because the two rates move
+// independently: putting them in one row would make a change to either restate
+// the other, and a mid-month hourly raise would silently re-price every trip
+// that month. A trip is priced at the rate in force when it went OUT, the same
+// way an hour is priced at the rate in force when it was clocked out.
+model TripRateChange {
+  id             String   @id @default(cuid())
+  user_id        String
+  user           User     @relation(fields: [user_id], references: [id])
+  rate_cent      Int
+  effective_from DateTime
+  created_at     DateTime @default(now())
+
+  @@index([user_id, effective_from])
 }
 
 model Trip {

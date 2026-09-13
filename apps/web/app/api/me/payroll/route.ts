@@ -54,6 +54,9 @@ export async function GET(req: Request) {
       // Part of net_cent, so it needs a line of its own - otherwise take-home
       // drops with nothing on the payslip accounting for it.
       overtime_deduction_cent: result.overtimeDeductionCent,
+      // A driver's second earnings line; zero for everybody else.
+      trips_count: result.tripsCount,
+      trips_cent: result.tripsCent,
       net_cent: result.netCent,
     },
   });

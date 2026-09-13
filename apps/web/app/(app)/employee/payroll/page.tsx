@@ -10,6 +10,8 @@ interface PayoutData {
   blocked_credit_cent: number;
   blocked_credit_min: number;
   adjustments_cent: number;
+  trips_count: number;
+  trips_cent: number;
   adjustments: Array<{ id: string; kind: 'BONUS' | 'DEDUCTION'; amount_cent: number; reason: string; created_at: string }>;
   advances_cent: number;
   penalties_cent: number;
@@ -65,6 +67,9 @@ export default function EmployeePayrollPage() {
                     k={`of which time you could not clock in (${Math.round(data.blocked_credit_min / 6) / 10}h)`}
                     v={centsToUsd(data.blocked_credit_cent)}
                   />
+                )}
+                {data.trips_count > 0 && (
+                  <Line k={`Deliveries (${data.trips_count} trip${data.trips_count === 1 ? '' : 's'})`} v={`+${centsToUsd(data.trips_cent, false)}`} tone="success" />
                 )}
                 <Line k="Bonuses / deductions" v={`${data.adjustments_cent >= 0 ? '+' : '−'}${centsToUsd(Math.abs(data.adjustments_cent), false)}`} tone={data.adjustments_cent > 0 ? 'success' : data.adjustments_cent < 0 ? 'danger' : undefined} />
                 {/* Each one with the reason it was given. The total alone is a

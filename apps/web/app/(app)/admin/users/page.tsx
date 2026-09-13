@@ -15,6 +15,7 @@ interface User {
   branch_id: string | null;
   branch: { id: string; name: string } | null;
   hourly_rate_cent: number;
+  trip_rate_cent: number;
   is_active: boolean;
   can_roam_branches: boolean;
   day_start_hour: number | null;
@@ -212,7 +213,12 @@ export default function AdminEmployeesPage() {
                             </div>
                           </td>
                           <td className="px-4 py-2.5"><Badge tone={ROLE_TONE[u.role]}>{u.role.toLowerCase()}</Badge></td>
-                          <td className="tabular px-4 py-2.5">{PAID_ROLES.has(u.role) ? centsToUsd(u.hourly_rate_cent) : '—'}</td>
+                          <td className="tabular px-4 py-2.5">
+                            {PAID_ROLES.has(u.role) ? centsToUsd(u.hourly_rate_cent) : '—'}
+                            {u.role === 'DRIVER' && u.trip_rate_cent > 0 && (
+                              <span className="ml-1 text-xs text-muted">+ {centsToUsd(u.trip_rate_cent)}/trip</span>
+                            )}
+                          </td>
                           <td className="px-4 py-2.5">
                             {st ? <StatusChip st={st} /> : <span className="text-xs text-muted">—</span>}
                           </td>
@@ -370,6 +376,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
   const [role, setRole] = useState<Role>('EMPLOYEE');
   const [branch, setBranch] = useState(branches[0]?.id ?? '');
   const [rate, setRate] = useState('2.00');
+  const [tripRate, setTripRate] = useState('0.00');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -382,6 +389,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
         username, name, password, role,
         branchId: role === 'ADMIN' ? null : branch,
         hourlyRateCent: Math.round(parseFloat(rate || '0') * 100),
+        ...(role === 'DRIVER' ? { tripRateCent: Math.round(parseFloat(tripRate || '0') * 100) } : {}),
       },
     });
     setBusy(false);
@@ -411,6 +419,11 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
         {PAID_ROLES.has(role) && (
           <Field label="Hourly rate (USD)" htmlFor="crate"><Input id="crate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} required /></Field>
         )}
+        {role === 'DRIVER' && (
+          <Field label="Per trip (USD)" htmlFor="ctrip" hint="Paid on top of the hour for every completed delivery.">
+            <Input id="ctrip" type="number" step="0.01" min="0" value={tripRate} onChange={(e) => setTripRate(e.target.value)} />
+          </Field>
+        )}
         {err && <Alert tone="danger">{err}</Alert>}
       </form>
     </Modal>
@@ -424,6 +437,7 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
   const [role, setRole] = useState<Role>(user.role);
   const [branch, setBranch] = useState(user.branch_id ?? branches[0]?.id ?? '');
   const [rate, setRate] = useState((user.hourly_rate_cent / 100).toFixed(2));
+  const [tripRate, setTripRate] = useState((user.trip_rate_cent / 100).toFixed(2));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -433,7 +447,11 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
     // For the admin we only ever send the username (role/branch are locked).
     const body = isAdmin
       ? { name, username }
-      : { name, username, role, branchId: role === 'ADMIN' ? null : branch, hourlyRateCent: Math.round(parseFloat(rate || '0') * 100) };
+      : {
+          name, username, role, branchId: role === 'ADMIN' ? null : branch,
+          hourlyRateCent: Math.round(parseFloat(rate || '0') * 100),
+          ...(role === 'DRIVER' ? { tripRateCent: Math.round(parseFloat(tripRate || '0') * 100) } : {}),
+        };
     const res = await apiSend(`/api/admin/users/${user.id}`, { method: 'PATCH', body });
     setBusy(false);
     if (!res.ok) { setErr(errorMessage(res)); return; }
@@ -463,6 +481,11 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
             {PAID_ROLES.has(role) && (
               <Field label="Hourly rate (USD)" htmlFor="erate" hint="A rate change applies from now on; past shifts keep the old rate.">
                 <Input id="erate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} />
+              </Field>
+            )}
+            {role === 'DRIVER' && (
+              <Field label="Per trip (USD)" htmlFor="etrip" hint="Paid on top of the hour for every completed delivery. A change applies from now on; trips already taken keep their price.">
+                <Input id="etrip" type="number" step="0.01" min="0" value={tripRate} onChange={(e) => setTripRate(e.target.value)} />
               </Field>
             )}
           </>

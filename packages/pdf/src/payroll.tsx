@@ -19,6 +19,10 @@ export interface PayrollRow {
   // only way to see the difference is to reconcile against a screen. Optional
   // so a caller that predates the column still renders.
   overtime_deduction_cent?: number;
+  // Drivers only. A second earnings line beside gross, never inside it, so
+  // hours x rate still multiplies out to gross on the same row.
+  trips_count?: number;
+  trips_cent?: number;
   advances_cent: number;
   net_cent: number;
 }
@@ -70,9 +74,9 @@ const styles = StyleSheet.create({
   // Seven numeric columns now that revoked overtime has its own. The widths
   // have to total 100 or react-pdf silently wraps the last one onto its own
   // line, which reads as a blank row rather than as an error.
-  cName: { width: '18%' },
-  cBranch: { width: '12%' },
-  cNum: { width: '10%', textAlign: 'right' },
+  cName: { width: '17%' },
+  cBranch: { width: '11%' },
+  cNum: { width: '9%', textAlign: 'right' },
 
   totals: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 8, backgroundColor: C.band, borderBottomLeftRadius: 6, borderBottomRightRadius: 6, marginTop: 0 },
   totalLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: C.muted, textTransform: 'uppercase', letterSpacing: 0.4 },
@@ -100,8 +104,8 @@ function genLabel(d: Date): string {
 
 export function PayrollDocument({ month, generatedAt, rows, branchName }: PayrollPdfProps): React.ReactElement {
   const totals = rows.reduce(
-    (a, r) => ({ gross: a.gross + r.gross_cent, credit: a.credit + (r.blocked_credit_cent ?? 0), adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, ot: a.ot + (r.overtime_deduction_cent ?? 0), adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
-    { gross: 0, credit: 0, adj: 0, pen: 0, ot: 0, adv: 0, net: 0, hours: 0 },
+    (a, r) => ({ gross: a.gross + r.gross_cent, credit: a.credit + (r.blocked_credit_cent ?? 0), trips: a.trips + (r.trips_count ?? 0), tripsCent: a.tripsCent + (r.trips_cent ?? 0), adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, ot: a.ot + (r.overtime_deduction_cent ?? 0), adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
+    { gross: 0, credit: 0, trips: 0, tripsCent: 0, adj: 0, pen: 0, ot: 0, adv: 0, net: 0, hours: 0 },
   );
 
   return (
@@ -140,6 +144,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           <Text style={[styles.th, styles.cBranch]}>Branch</Text>
           <Text style={[styles.th, styles.cNum]}>Hours</Text>
           <Text style={[styles.th, styles.cNum]}>Gross</Text>
+          <Text style={[styles.th, styles.cNum]}>Trips</Text>
           <Text style={[styles.th, styles.cNum]}>Adjust.</Text>
           <Text style={[styles.th, styles.cNum]}>Penalty</Text>
           <Text style={[styles.th, styles.cNum]}>OT revoked</Text>
@@ -159,6 +164,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
               <Text style={[styles.td, styles.cBranch]}>{r.branch_name ?? '—'}</Text>
               <Text style={[styles.td, styles.cNum]}>{r.hours.toFixed(1)}</Text>
               <Text style={[styles.td, styles.cNum]}>{usd(r.gross_cent)}</Text>
+              <Text style={[styles.td, styles.cNum, { color: (r.trips_count ?? 0) > 0 ? C.ink : C.faint }]}>{(r.trips_count ?? 0) > 0 ? `${r.trips_count} · ${usd(r.trips_cent ?? 0)}` : '—'}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.adjustments_cent > 0 ? C.success : r.adjustments_cent < 0 ? C.danger : C.faint }]}>{signedUsd(r.adjustments_cent)}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.penalties_cent > 0 ? C.danger : C.faint }]}>{r.penalties_cent > 0 ? `−${usd(r.penalties_cent)}` : '—'}</Text>
               <Text style={[styles.td, styles.cNum, { color: (r.overtime_deduction_cent ?? 0) > 0 ? C.danger : C.faint }]}>{(r.overtime_deduction_cent ?? 0) > 0 ? `−${usd(r.overtime_deduction_cent!)}` : '—'}</Text>
@@ -173,6 +179,7 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           <Text style={[styles.totalLabel, styles.cBranch]}> </Text>
           <Text style={[styles.totalNum, styles.cNum]}>{totals.hours.toFixed(1)}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{usd(totals.gross)}</Text>
+          <Text style={[styles.totalNum, styles.cNum]}>{totals.trips > 0 ? `${totals.trips} · ${usd(totals.tripsCent)}` : '—'}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{signedUsd(totals.adj)}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{totals.pen > 0 ? `−${usd(totals.pen)}` : '—'}</Text>
           <Text style={[styles.totalNum, styles.cNum]}>{totals.ot > 0 ? `−${usd(totals.ot)}` : '—'}</Text>

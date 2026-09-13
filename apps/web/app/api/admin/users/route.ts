@@ -14,6 +14,9 @@ const Create = z.object({
   role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN', 'CALLER']),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative(),
+  // Per completed trip, drivers only. Ignored for any other role rather than
+  // rejected, so a form that always sends it does not have to know.
+  tripRateCent: z.number().int().nonnegative().optional(),
   // Omitted on every normal create, and the column defaults to false: a new
   // account is single-branch until the owner deliberately grants otherwise.
   canRoamBranches: z.boolean().optional(),
@@ -111,6 +114,7 @@ export async function POST(req: Request) {
         role: body.role,
         branch_id: ROLES_FOR_BRANCH.has(body.role) ? body.branchId : null,
         hourly_rate_cent: body.hourlyRateCent,
+        trip_rate_cent: body.role === 'DRIVER' ? (body.tripRateCent ?? 0) : 0,
         can_roam_branches: body.canRoamBranches ?? false,
         is_active: true,
       },
@@ -122,6 +126,13 @@ export async function POST(req: Request) {
           rate_cent: body.hourlyRateCent,
           effective_from: new Date(),
         },
+      });
+    }
+    // The per-trip history starts the same way the hourly one does, so a
+    // driver's first month prices every trip rather than none of them.
+    if (body.role === 'DRIVER' && (body.tripRateCent ?? 0) > 0) {
+      await tx.tripRateChange.create({
+        data: { user_id: u.id, rate_cent: body.tripRateCent!, effective_from: new Date() },
       });
     }
     return u;
