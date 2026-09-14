@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiSend, errorMessage } from '@/lib/api';
 import { Button, Field, Input, Alert } from '@/components/ui';
@@ -12,6 +12,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The button is disabled in the HTML and enabled only once React is running.
+  // A browser that cannot run the page's script - JavaScript off, or a Chrome
+  // too old for the bundle - used to submit the form natively and land back
+  // on this page, which read as "login keeps reloading". Now it shows a
+  // button that never wakes up, and the note under it says why.
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -64,9 +71,18 @@ export default function LoginPage() {
             />
           </Field>
           {error && <Alert tone="danger">{error}</Alert>}
-          <Button type="submit" size="lg" fullWidth loading={loading}>
-            {loading ? 'Signing in…' : 'Sign in'}
+          <Button type="submit" size="lg" fullWidth loading={loading} disabled={!ready}>
+            {loading ? 'Signing in…' : ready ? 'Sign in' : 'Loading…'}
           </Button>
+          {!ready && (
+            <p className="text-center text-xs text-muted">
+              If this stays on Loading, your browser cannot run the app: update Chrome from the Play Store, or open
+              this address in another browser.
+            </p>
+          )}
+          <noscript>
+            <p className="text-center text-xs text-danger">JavaScript is turned off in this browser. Turn it on for this site to sign in.</p>
+          </noscript>
         </form>
       </div>
     </main>
