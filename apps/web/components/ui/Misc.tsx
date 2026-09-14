@@ -10,25 +10,24 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    // Title left, controls right, on one line. On a phone the controls drop
-    // under the title into a two-column grid that stretches each one - a
-    // month picker, a branch filter and a button in one full-width row each
-    // is how a phone lays these out, not three sizes of pill wrapped at
-    // random. An odd last control takes the whole row. Pass the controls as
-    // siblings (a fragment), not inside a wrapper, or the grid sees one child.
-    // From sm up the row never wraps: a long subtitle folds under its title
-    // and the controls keep the right-hand corner. Letting the row wrap put
-    // payroll's month picker under the title, flush left, whenever the
-    // subtitle ran long. On the phone grid, three controls go one-then-two
-    // (a month picker needs the full width to show its month) and an odd
-    // last control takes the whole row.
+    // Title left, controls right, on one line. From sm up the row never
+    // wraps: a long subtitle folds under its title and the controls keep the
+    // right-hand corner - letting the row wrap put payroll's month picker
+    // under the title, flush left, whenever the subtitle ran long.
+    //
+    // On a phone the controls drop under the title into a two-column grid
+    // that stretches each one, the way a phone lays out a form rather than
+    // three sizes of pill wrapped at random: a lone control spans the row,
+    // three go one-then-two (a month picker needs the full width to show its
+    // month), pairs stay pairs. Pass the controls as siblings (a fragment),
+    // not inside a wrapper, or the grid sees one child.
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3 sm:flex-nowrap">
       <div className="min-w-0">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
         {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
       </div>
       {actions && (
-        <div className="grid w-full grid-cols-2 gap-2 [&>*:first-child:nth-last-child(3)]:col-span-2 [&>*:last-child:nth-child(odd)]:col-span-2 sm:flex sm:w-auto sm:flex-none sm:items-center">
+        <div className="grid w-full grid-cols-2 gap-2 [&>*:first-child:nth-last-child(3)]:col-span-2 [&>*:only-child]:col-span-2 sm:flex sm:w-auto sm:flex-none sm:items-center">
           {actions}
         </div>
       )}
