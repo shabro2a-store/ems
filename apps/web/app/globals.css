@@ -164,6 +164,16 @@
     background-color: rgb(var(--surface-muted));
   }
 
+  /* A row that scrolls sideways without showing a scrollbar: the admin tabs
+     on a phone. The content still scrolls; the bar was the only thing lost. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   /* Room for the phone's home bar under a bottom nav or a sheet. */
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);

@@ -16,13 +16,19 @@ export function PageHeader({
     // is how a phone lays these out, not three sizes of pill wrapped at
     // random. An odd last control takes the whole row. Pass the controls as
     // siblings (a fragment), not inside a wrapper, or the grid sees one child.
-    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+    // From sm up the row never wraps: a long subtitle folds under its title
+    // and the controls keep the right-hand corner. Letting the row wrap put
+    // payroll's month picker under the title, flush left, whenever the
+    // subtitle ran long. On the phone grid, three controls go one-then-two
+    // (a month picker needs the full width to show its month) and an odd
+    // last control takes the whole row.
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3 sm:flex-nowrap">
       <div className="min-w-0">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
         {subtitle && <p className="mt-1 max-w-2xl text-sm text-muted">{subtitle}</p>}
       </div>
       {actions && (
-        <div className="grid w-full grid-cols-2 gap-2 [&>*:last-child:nth-child(odd)]:col-span-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+        <div className="grid w-full grid-cols-2 gap-2 [&>*:first-child:nth-last-child(3)]:col-span-2 [&>*:last-child:nth-child(odd)]:col-span-2 sm:flex sm:w-auto sm:flex-none sm:items-center">
           {actions}
         </div>
       )}

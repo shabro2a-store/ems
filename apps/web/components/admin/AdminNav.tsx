@@ -64,7 +64,7 @@ export default function AdminNav({ username }: AdminNavProps) {
         </div>
       </div>
       {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
-      <nav className="mx-auto max-w-6xl overflow-x-auto px-2 sm:px-4" aria-label="Admin sections">
+      <nav className="no-scrollbar mx-auto max-w-6xl overflow-x-auto px-2 sm:px-4" aria-label="Admin sections">
         <ul className="flex gap-1 py-1.5 text-sm">
           {NAV_ITEMS.map((item) => {
             const active = item.match(pathname);
