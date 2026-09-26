@@ -174,9 +174,11 @@ phone. Generate one keypair (once) — this prints the two lines ready to paste:
 docker compose run --rm web node -e "const k=require('web-push').generateVAPIDKeys();console.log('VAPID_PUBLIC_KEY='+k.publicKey);console.log('VAPID_PRIVATE_KEY='+k.privateKey)"
 ```
 Then open `nano /opt/ems/.env`, paste those two lines (with the real values), add
-`VAPID_SUBJECT=mailto:you@shabro2a.com`, save, and recreate `web`:
+`VAPID_SUBJECT=mailto:you@shabro2a.com`, save, and recreate `web` and `worker` - web
+sends the first ring, the worker repeats it every five seconds until it is answered:
 ```bash
 docker compose up -d
+docker compose exec worker env | grep VAPID   # expect all three lines
 ```
 Do NOT paste the `VAPID_*` lines straight into the shell — they belong in the `.env` file.
 Rolling the keys invalidates existing device subscriptions (drivers re-enable alerts).

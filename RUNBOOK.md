@@ -374,6 +374,7 @@ between days - check the affected month's payroll after changing it.
 Env vars must be listed in `docker-compose.yml`, not just present in `.env`:
 ```bash
 docker compose exec web env | grep -E 'VAPID|TELEGRAM|SENTRY|ENABLE_DEV'
+docker compose exec worker env | grep -E 'VAPID|TELEGRAM'
 ```
 
 ---
@@ -389,7 +390,7 @@ docker compose exec web env | grep -E 'VAPID|TELEGRAM|SENTRY|ENABLE_DEV'
 | Telegram webhook 5xx spike | Network issue to api.telegram.org | Check VPS outbound; usually self-resolves |
 | Sentry alert: spike of `UNAUTHORIZED` | `JWT_SECRET` rotated (expected) or cookie domain misconfigured | Check most recent deploy; correlate with `JWT_SECRET` changes |
 | Sentry alert: spike of `INVALID_INPUT` | Schema drift between client + server | Verify both are on the latest `master` |
-| Drivers stop receiving the ring on locked phones | `VAPID_*` keys missing from the container, or rolled | `docker compose exec web env \| grep VAPID`; if rolled, each driver re-taps **Enable** |
+| Drivers stop receiving the ring on locked phones | `VAPID_*` keys missing from the container, or rolled | `docker compose exec web env \| grep VAPID` and the same for `worker` (it sends the repeats); if rolled, each driver re-taps **Enable** |
 | `/admin/punches` empty | Genuine fault — this page is backed by `/api/admin/punches` and should show history | Check `docker compose logs web` for the API error; verify the branch/date filters aren't excluding everything |
 
 **A single `DB_SLOW` right after a deploy or restart?** The connection pool is cold
