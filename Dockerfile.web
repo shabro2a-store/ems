@@ -3,7 +3,7 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
 
-COPY package.json pnpm-workspace.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/db/package.json packages/db/
 COPY packages/notify/package.json packages/notify/
 COPY packages/pdf/package.json packages/pdf/
@@ -11,7 +11,9 @@ COPY packages/time/package.json packages/time/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
 
-RUN rm -f pnpm-lock.yaml && pnpm install --shamefully-hoist
+# The lockfile CI tested, exactly: a build that resolved the caret ranges
+# afresh ran whatever the registry served that day, untested and unpinned.
+RUN pnpm install --frozen-lockfile --shamefully-hoist
 
 COPY packages/db/prisma ./packages/db/prisma
 RUN pnpm --filter db exec prisma generate

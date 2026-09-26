@@ -13,4 +13,6 @@ coverage
 *.tsbuildinfo
 .vscode
 .idea
-
+# Local agent worktrees: whole copies of the repo, never part of an image.
+.claude
+.kilo
