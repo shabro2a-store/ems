@@ -11,20 +11,23 @@ import {
   seedTestSchedule,
 } from '../test-helpers/db';
 import { loginAs } from '../test-helpers/auth';
+import { openPastDay, beirutAt } from '../test-helpers/days';
 import { overtimeDeductionForUser, pendingOvertimeNotices } from './overtime';
 
 const BASE_URL = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:3000';
 
-const MONTH = '2026-07';
-const DAY = '2026-07-01';
+// Yesterday, not a fixed date: the month lock closes a fixed one behind the suite.
+const DAY = openPastDay();
+const MONTH = DAY.slice(0, 7);
 const RATE_CENT = 200; // $2.00/h
 
-// Session 1: Beirut 08:00-18:00, 600 min against a 480 min shift = 120 over.
-const IN_1 = new Date('2026-07-01T05:00:00Z');
-const OUT_1 = new Date('2026-07-01T15:00:00Z');
-// Session 2, same Beirut day: 19:00-22:00, another 180 min. 780 worked = 300 over.
-const IN_2 = new Date('2026-07-01T16:00:00Z');
-const OUT_2 = new Date('2026-07-01T19:00:00Z');
+// Session 1: Beirut 04:00-14:00, 600 min against a 480 min shift = 120 over.
+const IN_1 = beirutAt(DAY, '04:00');
+const OUT_1 = beirutAt(DAY, '14:00');
+// Session 2, same Beirut day: 15:00-18:00, another 180 min. 780 worked = 300 over.
+// Early enough that the rest window has closed on the day by midnight.
+const IN_2 = beirutAt(DAY, '15:00');
+const OUT_2 = beirutAt(DAY, '18:00');
 
 const OVER_1_MIN = 120;
 const OVER_2_MIN = 300;

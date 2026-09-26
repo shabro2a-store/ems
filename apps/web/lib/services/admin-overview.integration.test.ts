@@ -136,15 +136,22 @@ describe('admin overview: an overnight shift after midnight (HTTP)', () => {
     await seedTestSchedule({ user_id: noShow.id, weekday, shift_min: 480 });
     await seedTestSchedule({ user_id: finished.id, weekday, shift_min: 480 });
     await seedTestPunch({ user_id: overnight.id, branch_id: branch.id, kind: 'IN', at: inAt });
-    // Worked 21:00-23:00 Beirut yesterday and went home. Widening the punch
+    // Worked 15:00-17:00 Beirut yesterday and went home. Widening the punch
     // window is only half the fix: without the shift-day attribution those two
-    // hours would land on today's total.
-    await seedTestPunch({ user_id: finished.id, branch_id: branch.id, kind: 'IN', at: inAt });
+    // hours would land on today's total. Early enough that the rest window has
+    // closed by midnight - a shift ending at 23:00 is still the day in progress
+    // until 03:15, and would rightly count.
+    await seedTestPunch({
+      user_id: finished.id,
+      branch_id: branch.id,
+      kind: 'IN',
+      at: new Date(startUtc.getTime() - 9 * 60 * 60 * 1000),
+    });
     await seedTestPunch({
       user_id: finished.id,
       branch_id: branch.id,
       kind: 'OUT',
-      at: new Date(startUtc.getTime() - 60 * 60 * 1000),
+      at: new Date(startUtc.getTime() - 7 * 60 * 60 * 1000),
     });
 
     const session = await loginAs(admin.username, 'change-me');
@@ -170,13 +177,13 @@ describe('admin overview: an overnight shift after midnight (HTTP)', () => {
   it('counts both of today\'s sessions, not just the open one', async () => {
     const branch = await seedTestBranch();
     const weekday = beirutWeekday(new Date());
-    const { startUtc } = todayInBeirutDateRange(todayInBeirut());
-    // Anchored to this Beirut morning so both arrivals sit in today's shift-day
-    // regardless of the hour the suite runs at.
-    const first = new Date(startUtc.getTime() + 60 * 60 * 1000);
-    const firstOut = new Date(first.getTime() + 60 * 60 * 1000);
-    const second = new Date(firstOut.getTime() + 30 * 60 * 1000);
-    const secondOut = new Date(second.getTime() + 60 * 60 * 1000);
+    // Ending ten minutes ago, not at a fixed hour: the day in progress lasts
+    // only as long as the rest window after the last checkout, so sessions
+    // anchored to this morning read as a finished day by the afternoon.
+    const secondOut = new Date(Date.now() - 10 * 60 * 1000);
+    const second = new Date(secondOut.getTime() - 60 * 60 * 1000);
+    const firstOut = new Date(second.getTime() - 30 * 60 * 1000);
+    const first = new Date(firstOut.getTime() - 60 * 60 * 1000);
 
     const emp = await seedTestUser({ username: 'ov-two-sessions', branch_id: branch.id });
     const admin = await seedTestUser({ username: 'ov-admin4', role: Role.ADMIN });

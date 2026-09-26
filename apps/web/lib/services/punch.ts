@@ -1,9 +1,10 @@
 import type { PrismaClient, Punch, Trip } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { verifyWithinGeofence } from '@/lib/geofence';
-import { MAX_OPEN_SESSION_MIN, dayStartHourFor, workingDaysOf, type PunchLite } from './coverage';
+import { dayStartHourFor, workingDaysOf, type PunchLite } from './coverage';
 import { writeAuditLog } from './audit';
 import {
+  AUTO_CLOSE_AFTER_MIN,
   abandonedSessionClose,
   requiredMinForArrival,
   staleSessionClose,
@@ -274,8 +275,8 @@ export async function punchEmployee(
   // employee made is discarded - so `required + grace` on an earlier Beirut day
   // is enough. On a clock-out the employee is standing there asserting the
   // truth about their own shift, and the system must not overrule them: only a
-  // session past MAX_OPEN_SESSION_MIN, which is no longer a shift by the
-  // codebase's own definition, may be closed out from under a punch they made.
+  // session past AUTO_CLOSE_AFTER_MIN (20h, the owner's number) may be closed
+  // out from under a punch they made.
   //
   // Using the check-in threshold on the clock-out path silently truncated real
   // work: a night worker on a 10h shift clocking out at 07:16 was paid 600
@@ -333,7 +334,7 @@ export async function punchEmployee(
               `evidence it ended. Closed at check-in plus those ${stale.requiredMin} min. Overtime ` +
               `actually worked that night is not included and must be added as a bonus.`
             : `${user.username} tried to clock out of the session opened ${openIn!.at.toISOString()}, ` +
-              `which had been open past the ${MAX_OPEN_SESSION_MIN} min abandoned threshold and is no ` +
+              `which had been open past the ${AUTO_CLOSE_AFTER_MIN} min auto-close threshold and is no ` +
               `longer a shift. Closed at check-in plus the ${stale.requiredMin} min that day required ` +
               `rather than paying the whole span. No punch of theirs was written.`,
       });

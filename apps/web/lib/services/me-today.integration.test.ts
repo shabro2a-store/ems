@@ -45,7 +45,10 @@ describe('GET /api/me/today: the day total (HTTP)', () => {
     // read 110 and the first session simply vanished.
     const branch = await seedTestBranch();
     const emp = await seedTestUser({ username: 'today-two-sessions', branch_id: branch.id });
-    const start = dayAnchor();
+    // Ending ten minutes ago, not at a fixed hour: the day in progress lasts
+    // only as long as the rest window after the last checkout, so a day that
+    // ended at 03:00 reads as over by the afternoon.
+    const start = new Date(Date.now() - 185 * MIN);
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date(start.getTime() + 60 * MIN) });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: new Date(start.getTime() + 65 * MIN) });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date(start.getTime() + 65 * MIN) });
@@ -63,7 +66,8 @@ describe('GET /api/me/today: the day total (HTTP)', () => {
   it('adds the open session to what is already banked, rather than replacing it', async () => {
     const branch = await seedTestBranch();
     const emp = await seedTestUser({ username: 'today-open-session', branch_id: branch.id });
-    const start = dayAnchor();
+    // Relative to now, so no punch lands in the future when this runs before 03:00.
+    const start = new Date(Date.now() - 190 * MIN);
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date(start.getTime() + 60 * MIN) });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: new Date(start.getTime() + 65 * MIN) });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date(start.getTime() + 65 * MIN) });

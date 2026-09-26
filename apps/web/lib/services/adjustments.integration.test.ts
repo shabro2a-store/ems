@@ -45,6 +45,7 @@ describe('adjustments integration', () => {
         kind: 'BONUS',
         amountCent: 5000,
         reason: 'performance bonus',
+        month: currentMonth(),
       }),
     });
     expect(res.status).toBe(200);

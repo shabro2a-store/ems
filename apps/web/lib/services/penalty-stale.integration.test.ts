@@ -11,31 +11,33 @@ import {
   seedTestSchedule,
 } from '../test-helpers/db';
 import { loginAs } from '../test-helpers/auth';
+import { openPastDay, beirutAt } from '../test-helpers/days';
 import { pendingPenaltyNotices } from './penalty';
 
 const BASE_URL = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:3000';
 
-const MONTH = '2026-07';
-const DAY = '2026-07-01';
+// Yesterday, not a fixed date: the month lock closes a fixed one behind the suite.
+const DAY = openPastDay();
+const MONTH = DAY.slice(0, 7);
 const RATE_CENT = 200; // $2.00/h
 const SHIFT_MIN = 480;
 
 // Beirut 08:00-14:00: 360 of 480 minutes, 120 short. Doubled = 240 docked, $8.00.
-const IN_AT = new Date('2026-07-01T05:00:00Z');
-const OUT_AT = new Date('2026-07-01T11:00:00Z');
+const IN_AT = beirutAt(DAY, '08:00');
+const OUT_AT = beirutAt(DAY, '14:00');
 // The owner corrects the checkout to 13:00: 300 worked, 180 short. Doubling says
 // 360, the ceiling says 300, so 300 docked - $10.00.
-const OUT_CORRECTED = new Date('2026-07-01T10:00:00Z');
+const OUT_CORRECTED = beirutAt(DAY, '13:00');
 
 // The owner's worst case, and the one that would have shipped: a 30-minute
 // shortfall waived, then a correction that turns the day into a 4-hour one.
 // Out 15:30 Beirut: 450 worked, 30 short -> 60 docked, $2.00.
-const OUT_SMALL = new Date('2026-07-01T12:30:00Z');
+const OUT_SMALL = beirutAt(DAY, '15:30');
 // Out 12:00 Beirut: 240 worked, 240 short -> ceilinged to 240 docked, $8.00.
-const OUT_BIG = new Date('2026-07-01T09:00:00Z');
+const OUT_BIG = beirutAt(DAY, '12:00');
 // Out 16:00 Beirut: the full 480 minutes, so the day has no penalty at all and
 // penaltyMinForDay answers 0 for it.
-const OUT_FULL = new Date('2026-07-01T13:00:00Z');
+const OUT_FULL = beirutAt(DAY, '16:00');
 const SMALL_MIN = 60;
 const SMALL_CENT = 200;
 const BIG_MIN = 240;

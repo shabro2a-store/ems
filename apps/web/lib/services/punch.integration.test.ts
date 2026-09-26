@@ -360,10 +360,11 @@ describe('punch integration (HTTP)', () => {
   it('a blocked check-in explains itself and is recorded as evidence', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-blocked', branch_id: branch.id });
-    // A session opened earlier on the SAME Beirut day: a duplicate tap, which
-    // is the only kind of block left. A session from a day that is over
-    // self-resolves and lets the check-in through.
-    const openAt = new Date(`${todayInBeirut(new Date())}T00:00:00.000Z`);
+    // A session opened half an hour ago: a duplicate tap, which is the only
+    // kind of block left. A session from a day that is over self-resolves and
+    // lets the check-in through - which is what a fixed hour of the morning
+    // turns into by the evening.
+    const openAt = new Date(Date.now() - 30 * 60_000);
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: openAt });
     const { cookies, csrf } = await loginAs(user.username, 'change-me');
 
@@ -477,12 +478,13 @@ describe('punch integration (HTTP)', () => {
   }
 
   it('clocking out well past the scheduled hours records the employee’s own punch', async () => {
-    // 26h open: past required + grace and on an earlier Beirut day, so the
+    // 19h open: past required + grace and on an earlier Beirut day, so the
     // check-in rule would have closed it and paid 8h. The employee is the one
-    // asserting when their shift ended, and below 30h they are believed.
+    // asserting when their shift ended, and below the 20h auto-close they are
+    // believed.
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-lateout', branch_id: branch.id });
-    const arrival = new Date(Date.now() - 26 * 3_600_000);
+    const arrival = new Date(Date.now() - 19 * 3_600_000);
     await seedTestSchedule({ user_id: user.id, weekday: beirutWeekday(arrival), shift_min: 480 });
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: arrival });
 
@@ -490,15 +492,15 @@ describe('punch integration (HTTP)', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.system_closed_instead_of_punch).toBeUndefined();
-    // ~26h, not the scheduled 480 minutes.
-    expect(body.data.minutes_since_in).toBeGreaterThan(1500);
+    // ~19h, not the scheduled 480 minutes.
+    expect(body.data.minutes_since_in).toBeGreaterThan(1100);
 
     const punches = await getTestPrisma().punch.findMany({ where: { user_id: user.id }, orderBy: { at: 'asc' } });
     expect(punches.filter((p) => p.kind === 'OUT')).toHaveLength(1);
     expect(punches[1]!.system_generated).toBe(false);
   });
 
-  it('clocking out of a session past 30h closes it at its hours instead', async () => {
+  it('clocking out of a session past the 20h auto-close closes it at its hours instead', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-staleout', branch_id: branch.id });
     const arrival = new Date(Date.now() - 40 * 3_600_000);
