@@ -179,6 +179,31 @@ export const SHIFT_GAP_MIN = 255;
 export const REST_RULE_FROM = new Date('2026-09-08T00:00:00+03:00');
 
 /**
+ * Where a query must start reading punches for the working days it labels to
+ * agree with every other query's.
+ *
+ * A label is not a function of the punches near it. The collision rule carries a
+ * claimed date forward for as long as somebody keeps working: one 00:02 start
+ * puts a night worker a date ahead of the calendar, and every night after it
+ * stays there until one is skipped. A read that starts after that 00:02 files
+ * the same nights a date earlier - so two month windows with different starts
+ * disagreed about the night on the seam, and each left it to the other. Paid in
+ * neither month.
+ *
+ * Nothing short of the cutover is safe, because the chain lasts as long as the
+ * person works. Before it the clock rule labelled each shift on its own, so two
+ * days ahead of it - a session open across it, the dates claimed just before it
+ * - settle every label after it. A window that already starts earlier keeps its
+ * own start. The read grows by a few rows per person per day; if that ever
+ * shows, the answer is a stored checkpoint of the chain, never a shorter read.
+ */
+export const WORKING_DAY_HISTORY_FROM = new Date(REST_RULE_FROM.getTime() - 2 * 86_400_000);
+
+export function workingDayHistoryFrom(from: Date): Date {
+  return from < WORKING_DAY_HISTORY_FROM ? from : WORKING_DAY_HISTORY_FROM;
+}
+
+/**
  * Which working day each punch belongs to, decided by REST rather than by a
  * clock hour.
  *

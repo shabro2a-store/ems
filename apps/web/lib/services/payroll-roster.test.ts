@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: {} }));
 
+import { scheduledToUtc, nextBeirutDate } from 'time';
 import { payrollRoster } from './payout';
 
 type UserRow = {
@@ -18,10 +19,21 @@ type PunchRow = { user_id: string; kind: 'IN' | 'OUT'; at: Date };
 function fakeDb(users: UserRow[], punches: PunchRow[]) {
   return {
     punch: {
-      findMany: async ({ where }: { where: { kind: 'IN'; at: { gte: Date; lt: Date } } }) =>
+      // Two shapes: every arrival in the month's window, and one person's
+      // history up to an arrival, which the roster reads to settle the seam.
+      findMany: async ({
+        where,
+      }: {
+        where: { kind?: 'IN'; user_id?: string; at: { gte: Date; lt?: Date; lte?: Date } };
+      }) =>
         punches
-          .filter((p) => p.kind === where.kind && p.at >= where.at.gte && p.at < where.at.lt)
-          .map((p) => ({ user_id: p.user_id, at: p.at })),
+          .filter((p) => (where.kind ? p.kind === where.kind : true))
+          .filter((p) => (where.user_id ? p.user_id === where.user_id : true))
+          .filter((p) => p.at >= where.at.gte)
+          .filter((p) => (where.at.lt ? p.at < where.at.lt : true))
+          .filter((p) => (where.at.lte ? p.at <= where.at.lte : true))
+          .sort((a, b) => a.at.getTime() - b.at.getTime())
+          .map((p) => ({ user_id: p.user_id, kind: p.kind, at: p.at })),
     },
     user: {
       findMany: async ({
@@ -122,6 +134,25 @@ describe('payrollRoster', () => {
 
     expect((await payrollRoster(db, '2026-01', null)).map((u) => u.id)).toEqual(['night']);
     expect((await payrollRoster(db, '2026-02', null)).map((u) => u.id)).toEqual([]);
+  });
+
+  it('follows a night chain that files the last night on the 1st', async () => {
+    // Retired on 2 December after a run of nights that began with one 00:02
+    // start, so every 23:00 arrival after it is filed on the next date and the
+    // 30 November night is 1 December's working day. December pays it, so
+    // December must list them, although no arrival of theirs is in December.
+    const rows: PunchRow[] = [
+      { user_id: 'chain', kind: 'IN', at: scheduledToUtc('2026-11-20', '00:02') },
+      { user_id: 'chain', kind: 'OUT', at: scheduledToUtc('2026-11-20', '07:00') },
+    ];
+    for (let d = '2026-11-20'; d <= '2026-11-30'; d = nextBeirutDate(d)) {
+      rows.push({ user_id: 'chain', kind: 'IN', at: scheduledToUtc(d, '23:00') });
+      rows.push({ user_id: 'chain', kind: 'OUT', at: scheduledToUtc(nextBeirutDate(d), '07:00') });
+    }
+    const worker = staff({ id: 'chain', is_active: false, deleted_at: new Date('2026-12-02T12:00:00Z') });
+    const db = fakeDb([worker], rows);
+
+    expect((await payrollRoster(db, '2026-12', null)).map((u) => u.id)).toEqual(['chain']);
   });
 
   it('respects the branch filter', async () => {

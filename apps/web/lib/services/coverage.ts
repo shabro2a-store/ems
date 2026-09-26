@@ -70,12 +70,10 @@ export function dayStartHourFor(
  * longer a pure function of one timestamp and two consumers deriving it
  * separately would put a shift's pay in one month and its lock in another.
  *
- * Callers must pass the punches they already loaded, and must load them wide
- * enough: the rest before an arrival is measured against the previous
- * checkout, so a window that starts mid-shift sees no previous checkout and
- * calls that arrival a new day. Two days either side is what payout already
- * reads for pairing and is more than enough - a 24h gap resets the chain
- * completely.
+ * Callers must pass the punches they already loaded, and must load them from
+ * `workingDayHistoryFrom`: the dates a chain claims carry forward for as long
+ * as somebody keeps working, so no fixed lookback settles them, and two reads
+ * with different starts would file the same night on different days.
  */
 export function workingDaysOf(punches: PunchLite[], dayStartHour: number): Array<string | null> {
   return assignWorkingDays(punches, {

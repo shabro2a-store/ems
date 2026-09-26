@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { shiftDateOf, scheduledToUtc, inBeirut, SHIFT_GAP_MIN } from 'time';
+import { shiftDateOf, scheduledToUtc, inBeirut, nextBeirutDate, SHIFT_GAP_MIN, workingDayHistoryFrom } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
@@ -419,7 +419,7 @@ export async function payoutForUser(
   const { start: beirutStart, end: beirutEnd } = monthRangeBeirut(month);
   const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent, credits, user] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: pairFrom, lt: pairTo } },
+      where: { user_id: userId, at: { gte: workingDayHistoryFrom(pairFrom), lt: pairTo } },
       orderBy: { at: 'asc' },
       select: { id: true, user_id: true, kind: true, at: true },
     }),
@@ -490,7 +490,7 @@ export async function accruedEarningsThisMonth(
   const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
   const [punches, rateChanges, credits, user] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: pairFrom, lt: pairTo } },
+      where: { user_id: userId, at: { gte: workingDayHistoryFrom(pairFrom), lt: pairTo } },
       orderBy: { at: 'asc' },
       select: { id: true, user_id: true, kind: true, at: true },
     }),
@@ -610,19 +610,33 @@ export async function payrollRoster(
   // are not symmetric - including somebody who worked nothing shows a payslip
   // of zero, while excluding somebody drops a month of their pay off the screen
   // entirely.
-  const workedIds = [
-    ...new Set(
-      arrivals
-        .filter((a) => {
-          const hour = hourByUser.get(a.user_id) ?? 0;
-          return (
-            inBeirut(a.at).date.slice(0, 7) === month ||
-            shiftDateOf(a.at, hour).slice(0, 7) === month
-          );
-        })
-        .map((a) => a.user_id),
-    ),
-  ];
+  const worked = new Set(
+    arrivals
+      .filter((a) => {
+        const hour = hourByUser.get(a.user_id) ?? 0;
+        return (
+          inBeirut(a.at).date.slice(0, 7) === month ||
+          shiftDateOf(a.at, hour).slice(0, 7) === month
+        );
+      })
+      .map((a) => a.user_id),
+  );
+  // Neither date sees a night chain: once one 00:02 start puts a night worker a
+  // date ahead, the last night of the previous month is the 1st's working day.
+  // Only the rule can say, so it is asked - of the few arrivals on that last
+  // date whose owner is not already listed, which is nobody on a normal month.
+  for (const a of arrivals) {
+    if (worked.has(a.user_id) || nextBeirutDate(inBeirut(a.at).date).slice(0, 7) !== month) continue;
+    const history = await db.punch.findMany({
+      where: { user_id: a.user_id, at: { gte: workingDayHistoryFrom(a.at), lte: a.at } },
+      orderBy: { at: 'asc' },
+      select: { kind: true, at: true },
+    });
+    const labels = workingDaysOf(history as PunchLite[], hourByUser.get(a.user_id) ?? 0);
+    const i = history.findIndex((p) => p.kind === 'IN' && p.at.getTime() === a.at.getTime());
+    if (i >= 0 && labels[i]?.slice(0, 7) === month) worked.add(a.user_id);
+  }
+  const workedIds = [...worked];
 
   return db.user.findMany({
     where: {

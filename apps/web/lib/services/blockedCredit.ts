@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { inBeirut } from 'time';
+import { inBeirut, workingDayHistoryFrom } from 'time';
 import { rateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   computeCoverage,
@@ -343,7 +343,7 @@ export async function blockedCreditForUser(
   const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
   const [punches, schedules, overrides, rateChanges, blocked, user] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: punchFrom, lt: punchTo } },
+      where: { user_id: userId, at: { gte: workingDayHistoryFrom(punchFrom), lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     }),
@@ -482,7 +482,7 @@ async function allBlockedCredits(
 
   const [punches, schedules, overrides, rateChanges, blocked, userBranches] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: { in: ids }, at: { gte: punchFrom, lt: punchTo } },
+      where: { user_id: { in: ids }, at: { gte: workingDayHistoryFrom(punchFrom), lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { user_id: true, kind: true, at: true },
     }),

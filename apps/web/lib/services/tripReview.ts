@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { todayInBeirutDateRange } from 'time';
+import { todayInBeirutDateRange, workingDayHistoryFrom } from 'time';
 import { isMonthOpen } from './periodLock';
 import { tripDayResolver, PAIR_LOOKAROUND_MS } from './payout';
 import { dayStartHourFor, type PunchLite } from './coverage';
@@ -167,7 +167,7 @@ export async function loadReviewWindow(
     db.punch.findMany({
       where: {
         user_id: { in: driverIds },
-        at: { gte: new Date(from.getTime() - PAIR_LOOKAROUND_MS), lt: new Date(to.getTime() + PAIR_LOOKAROUND_MS) },
+        at: { gte: workingDayHistoryFrom(new Date(from.getTime() - PAIR_LOOKAROUND_MS)), lt: new Date(to.getTime() + PAIR_LOOKAROUND_MS) },
       },
       orderBy: { at: 'asc' },
       select: { user_id: true, kind: true, at: true },

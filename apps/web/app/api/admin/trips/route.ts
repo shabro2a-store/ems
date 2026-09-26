@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
+import { workingDayHistoryFrom } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { monthRangeUtc, rateAt, tripDayResolver, PAIR_LOOKAROUND_MS } from '@/lib/services/payout';
 import { dayStartHourFor, type PunchLite } from '@/lib/services/coverage';
@@ -58,7 +59,7 @@ export async function GET(req: Request) {
       select: { rate_cent: true, effective_from: true },
     }),
     prisma.punch.findMany({
-      where: { user_id: userId, at: { gte: from, lt: to } },
+      where: { user_id: userId, at: { gte: workingDayHistoryFrom(from), lt: to } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     }),

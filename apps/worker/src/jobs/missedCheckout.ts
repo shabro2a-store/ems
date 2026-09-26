@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, beirutWeekday, workingDayHistoryFrom } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
@@ -67,7 +67,7 @@ export async function runMissedCheckout(
     // calendar date, and only the walk knows which of them claimed it.
     const dayStart = branchDayStart.get(s.user_id) ?? 0;
     const around = await db.punch.findMany({
-      where: { user_id: s.user_id, at: { gte: new Date(lastIn.at.getTime() - 3 * 86_400_000), lte: lastIn.at } },
+      where: { user_id: s.user_id, at: { gte: workingDayHistoryFrom(lastIn.at), lte: lastIn.at } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     });

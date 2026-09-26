@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
-import { todayInBeirut, todayInBeirutDateRange, beirutWeekday } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, beirutWeekday, workingDayHistoryFrom } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
 import { pendingOvertimeNotices } from '@/lib/services/overtime';
 import { grantedCreditMinutesByDate, pendingBlockedCreditNotices } from '@/lib/services/blockedCredit';
@@ -96,7 +96,7 @@ export async function GET(req: Request) {
         select: { id: true, username: true, name: true, role: true, branch_id: true, hourly_rate_cent: true, day_start_hour: true },
       }),
       prisma.punch.findMany({
-        where: { at: { gte: punchesFromUtc, lt: endUtc } },
+        where: { at: { gte: workingDayHistoryFrom(punchesFromUtc), lt: endUtc } },
         select: { user_id: true, kind: true, at: true },
       }),
       prisma.trip.findMany({

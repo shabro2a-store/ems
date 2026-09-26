@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { beirutWeekday, previousBeirutDate, todayInBeirut } from 'time';
+import { beirutWeekday, previousBeirutDate, todayInBeirut, workingDayHistoryFrom } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
@@ -104,15 +104,17 @@ export async function runWatchedDetector(
       // before it. The label is the same one payroll files the shift under, so
       // "was this day worked" and "was this day paid" cannot disagree.
       //
-      // Three days either side, because a shift labelled `judged` may have
-      // started the evening before it and may still be running.
+      // From wherever the day rule needs its history, and three days past the
+      // date, because a shift labelled `judged` may still be running.
       const around = await db.punch.findMany({
         where: {
           user_id: s.user_id,
           at: {
-            gte: new Date(`${judged}T00:00:00.000Z`).getTime() - 3 * 86_400_000 > 0
-              ? new Date(new Date(`${judged}T00:00:00.000Z`).getTime() - 3 * 86_400_000)
-              : new Date(0),
+            gte: workingDayHistoryFrom(
+              new Date(`${judged}T00:00:00.000Z`).getTime() - 3 * 86_400_000 > 0
+                ? new Date(new Date(`${judged}T00:00:00.000Z`).getTime() - 3 * 86_400_000)
+                : new Date(0),
+            ),
             lte: new Date(new Date(`${judged}T00:00:00.000Z`).getTime() + 3 * 86_400_000),
           },
         },

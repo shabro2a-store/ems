@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { workingDayHistoryFrom } from 'time';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { sendPushToUser } from './push';
 import { openCheckInBranchId } from './branchScope';
@@ -82,12 +83,12 @@ export async function branchDriverStatuses(
 
       // Trips on the WORKING day they are on, by the same rule payroll files
       // them - not "since this clock-in", which reset to zero every time a
-      // chunk worker came back from a two-hour break. Three days of punches
-      // and trips is the same lookback every consumer of the day rule uses.
+      // chunk worker came back from a two-hour break. Punches from wherever
+      // the day rule needs them; trips from three days back.
       const since = new Date(now.getTime() - 3 * 86_400_000);
       const [recentPunches, recentTrips] = await Promise.all([
         db.punch.findMany({
-          where: { user_id: d.id, at: { gte: since } },
+          where: { user_id: d.id, at: { gte: workingDayHistoryFrom(since) } },
           orderBy: { at: 'asc' },
           select: { kind: true, at: true },
         }),
@@ -232,7 +233,7 @@ export async function driverTripsToday(
   const since = new Date(now.getTime() - 3 * 86_400_000);
   const [user, punches, trips] = await Promise.all([
     db.user.findUnique({ where: { id: driverId }, select: { day_start_hour: true } }),
-    db.punch.findMany({ where: { user_id: driverId, at: { gte: since } }, orderBy: { at: 'asc' }, select: { kind: true, at: true } }),
+    db.punch.findMany({ where: { user_id: driverId, at: { gte: workingDayHistoryFrom(since) } }, orderBy: { at: 'asc' }, select: { kind: true, at: true } }),
     db.trip.findMany({ where: { driver_id: driverId, out_at: { gte: since } }, select: { out_at: true, back_at: true, denied_at: true } }),
   ]);
   return tripsOnCurrentWorkingDay({ punches: punches as PunchLite[], trips, now, dayStartHour: dayStartHourFor(user) }).count;

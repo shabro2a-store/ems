@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { workingDayHistoryFrom } from 'time';
 import { rateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   centsForLastMinutes,
@@ -101,7 +102,7 @@ export async function overtimeForUser(
   const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
   const [punches, schedules, overrides, rateChanges, decisions, user, blocked] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: userId, at: { gte: punchFrom, lt: punchTo } },
+      where: { user_id: userId, at: { gte: workingDayHistoryFrom(punchFrom), lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     }),
@@ -230,7 +231,7 @@ export async function pendingOvertimeNotices(
 
   const [punches, schedules, overrides, rateChanges, decisions, userBranches, blocked] = await Promise.all([
     db.punch.findMany({
-      where: { user_id: { in: ids }, at: { gte: punchFrom, lt: punchTo } },
+      where: { user_id: { in: ids }, at: { gte: workingDayHistoryFrom(punchFrom), lt: punchTo } },
       orderBy: { at: 'asc' },
       select: { user_id: true, kind: true, at: true },
     }),

@@ -1,5 +1,5 @@
 import type { PrismaClient, Punch } from '@prisma/client';
-import { SHIFT_GAP_MIN } from 'time';
+import { SHIFT_GAP_MIN, workingDayHistoryFrom } from 'time';
 import { requiredMinFor, workingDaysOf, weekdayOfWorkingDay, type PunchLite } from './coverage';
 
 /**
@@ -173,13 +173,12 @@ export async function requiredMinForArrival(
   // Which working day this arrival is on, asked of the same rule payroll asks.
   // It cannot be answered from the timestamp alone any more - two shifts can
   // share a calendar date and only the walk knows which claimed it - so the
-  // punches around it are read. Three days is far past the point where a gap
-  // resets the chain, and matches the lookback the pairing already uses.
-  const window = 3 * 86_400_000;
+  // punches before it are read, from as far back as every other reader of the
+  // rule reads them.
   const nearby = await db.punch.findMany({
     where: {
       user_id: userId,
-      at: { gte: new Date(arrivalAt.getTime() - window), lte: arrivalAt },
+      at: { gte: workingDayHistoryFrom(arrivalAt), lte: arrivalAt },
     },
     orderBy: { at: 'asc' },
     select: { kind: true, at: true },

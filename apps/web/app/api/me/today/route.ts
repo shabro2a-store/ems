@@ -6,7 +6,7 @@ import { payoutForUser } from '@/lib/services/payout';
 import { currentShiftDayMinutes, type PunchLite, dayStartHourFor } from '@/lib/services/coverage';
 import { abandonedSessionClose, requiredMinForArrival } from '@/lib/services/autoClose';
 import { grantedCreditMinutesByDate } from '@/lib/services/blockedCredit';
-import { todayInBeirut, todayInBeirutDateRange } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, workingDayHistoryFrom } from 'time';
 
 // A shift belongs to the Beirut day it started, so the day total has to see an
 // arrival that happened before today's midnight. Two days is far more than any
@@ -33,7 +33,7 @@ export async function GET() {
     currentOpenIn(userId),
     payoutForUser(userId, month, prisma),
     prisma.punch.findMany({
-      where: { user_id: userId, at: { gte: punchesFromUtc, lt: endUtc } },
+      where: { user_id: userId, at: { gte: workingDayHistoryFrom(punchesFromUtc), lt: endUtc } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     }),

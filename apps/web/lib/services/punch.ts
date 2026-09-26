@@ -11,7 +11,7 @@ import {
 } from './autoClose';
 import { abandonedTripClose, writeSystemTripClose, MAX_OPEN_TRIP_MIN } from './tripClose';
 import { punchableBranches } from './branchScope';
-import { inBeirut, SHIFT_GAP_MIN } from 'time';
+import { inBeirut, SHIFT_GAP_MIN, workingDayHistoryFrom } from 'time';
 import { getNotifier, type Notifier } from 'notify';
 
 export type PunchDirection = 'IN' | 'OUT';
@@ -642,7 +642,7 @@ async function warnIfSecondWorkingDay(
     // Three days back: enough for the rest chain to have reset, and the same
     // lookback every other consumer of the rule uses.
     const around = await db.punch.findMany({
-      where: { user_id: user.id, at: { gte: new Date(at.getTime() - 3 * 86_400_000), lte: at } },
+      where: { user_id: user.id, at: { gte: workingDayHistoryFrom(at), lte: at } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     });

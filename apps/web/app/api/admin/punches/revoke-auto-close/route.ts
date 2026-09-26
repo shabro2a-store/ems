@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { z } from 'zod';
+import { workingDayHistoryFrom } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
@@ -99,7 +100,7 @@ export async function POST(req: Request) {
   const nearby = await prisma.punch.findMany({
     where: {
       user_id: out.user_id,
-      at: { gte: new Date(arrival.at.getTime() - 3 * 86_400_000), lte: arrival.at },
+      at: { gte: workingDayHistoryFrom(arrival.at), lte: arrival.at },
     },
     orderBy: { at: 'asc' },
     select: { kind: true, at: true },

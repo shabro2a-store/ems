@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { beirutWeekday, inBeirut } from 'time';
+import { beirutWeekday, inBeirut, workingDayHistoryFrom } from 'time';
 import type { Notifier } from 'notify';
 import { prisma as defaultPrisma } from '../db/prisma';
 import { resolveRequiredMin } from './requiredMin';
@@ -142,7 +142,7 @@ export async function runAutoCloseAbandoned(
     // Three days of punches around it, because the answer depends on the rest
     // before it and on which shift already claimed the date.
     const nearby = await db.punch.findMany({
-      where: { user_id: u.id, at: { gte: new Date(lastIn.at.getTime() - 3 * 86_400_000), lte: lastIn.at } },
+      where: { user_id: u.id, at: { gte: workingDayHistoryFrom(lastIn.at), lte: lastIn.at } },
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     });
