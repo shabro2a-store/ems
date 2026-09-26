@@ -140,19 +140,23 @@ network. Check it after a deploy — the second command must refuse:
 docker compose port db 5432          # expect 127.0.0.1:5433
 psql "postgresql://ems:<password>@<the VPS public IP>:5433/ems" -c 'select 1'
 ```
-`web` still publishes on `0.0.0.0:3000`, so anyone who learns the origin IP can
-reach the app directly and bypass the tunnel (the app's own login still gates
-every request). If `cloudflared` runs **on the host** — the layout these docs
-describe, `https://app.shabro2a.com` → `localhost:3000` — then narrowing it costs
-nothing:
-```yaml
-    ports:
-      - '127.0.0.1:3000:3000'
+`web` publishes to `127.0.0.1:3000` the same way. It used to be `0.0.0.0:3000`,
+which let anyone who learned the VPS address skip the tunnel — and with it
+Cloudflare — and talk to the app directly. The tunnel is unaffected as long as
+`cloudflared` runs **on the host**, the layout these docs describe
+(`https://app.shabro2a.com` → `localhost:3000`).
+
+**Before the first deploy with this change**, confirm that:
+```bash
+systemctl status cloudflared         # expect: active (running)
 ```
-Confirm `cloudflared` is a host service (`systemctl status cloudflared`) before
-making that change: a `cloudflared` running in its own container reaches the host
-over the docker bridge, not loopback, and a loopback bind would take the site
-down.
+A `cloudflared` running in its own container reaches the host over the docker
+bridge, not loopback, and the loopback bind would take the site down. If that is
+the layout, put `'3000:3000'` back in `docker-compose.yml` until `cloudflared`
+moves to the host. After the deploy, from another machine this must refuse:
+```bash
+curl -m 5 http://<the VPS public IP>:3000/api/health
+```
 
 ## Migrations & seed (first deploy, or after schema changes)
 ```bash

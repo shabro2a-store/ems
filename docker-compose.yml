@@ -29,13 +29,12 @@ services:
       dockerfile: Dockerfile.web
     restart: unless-stopped
     ports:
-      # Published on every interface, unlike db above. The Cloudflare Tunnel
-      # target is documented as localhost:3000, which a loopback bind would
-      # still serve when cloudflared runs on the host - but cloudflared's own
-      # config lives outside this repo and could not be checked, so narrowing
-      # this is left as a deliberate manual step. See DEPLOY.md "Network
-      # exposure".
-      - '3000:3000'
+      # Loopback only, for the same reason as db above: a 0.0.0.0 publish is
+      # reachable from the internet whatever UFW says, which lets anybody who
+      # learns the VPS address skip the tunnel and Cloudflare with it. The
+      # tunnel still reaches it, because cloudflared runs on the host and
+      # targets localhost:3000 (DEPLOY.md "Network exposure").
+      - '127.0.0.1:3000:3000'
     environment:
       DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
       NODE_ENV: production
