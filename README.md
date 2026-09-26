@@ -49,8 +49,15 @@ Default logins after seeding (all `change-me`): `owner` (admin), `emp1`/`emp2` (
 pnpm -r typecheck
 pnpm -r test        # unit tests + HTTP integration tests
 ```
-The HTTP integration tests need the web app running at `TEST_BASE_URL`
-(default `http://127.0.0.1:3000`) and a reachable Postgres. The web server itself needs
+The integration tests **erase every table** of the database they use, so they refuse to
+run unless `DATABASE_URL` names a database ending in `_test` — never the dev database, and
+never production. Give them their own, and point the web server under test at the same one:
+```bash
+docker compose exec db createdb -U ems ems_test
+export DATABASE_URL=postgresql://ems:ems_dev_password@localhost:5433/ems_test
+pnpm --filter db exec prisma migrate deploy
+```
+They also need the web app running at `TEST_BASE_URL` (default `http://127.0.0.1:3000`). The web server itself needs
 `DATABASE_URL`/`JWT_SECRET` in its own process to boot — a root `.env` is not enough on
 its own, since `next start`/`next dev` run with their cwd inside `apps/web` and never
 load it automatically. See RUNBOOK.md §1 for how to get it there; skipping this fails

@@ -50,7 +50,10 @@ pnpm -r typecheck                 # typecheck entire monorepo
 pnpm -r test                      # unit + HTTP integration tests
 ```
 The integration tests hit a live server at `TEST_BASE_URL`
-(default `http://127.0.0.1:3000`) and need a reachable Postgres.
+(default `http://127.0.0.1:3000`) and need a reachable Postgres. They **erase every
+table** of the database they use, so they refuse any `DATABASE_URL` whose database name
+does not end in `_test` — create `ems_test` for them and run the server under test
+against it too (README "Checks"). Never run them on the VPS.
 
 **The server itself needs `DATABASE_URL` and `JWT_SECRET` in its own process to
 boot** — a root `.env` (matching `.env.example`) is the project's convention, and

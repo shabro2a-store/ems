@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import fs from 'fs';
 import path from 'path';
 import { BCRYPT_ROUNDS } from '@/lib/auth/constants';
+import { assertTestDatabaseUrl } from './testDbGuard';
 
 function loadEnvOnce() {
   if (process.env.DATABASE_URL && process.env.JWT_SECRET) return;
@@ -36,6 +37,7 @@ let _prisma: PrismaClient | null = null;
 
 export function getTestPrisma(): PrismaClient {
   if (!_prisma) {
+    assertTestDatabaseUrl(process.env.DATABASE_URL);
     _prisma = new PrismaClient({
       log: ['error'],
     });
