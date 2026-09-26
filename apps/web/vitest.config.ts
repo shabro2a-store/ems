@@ -11,7 +11,7 @@ export default defineConfig({
     include: [
       'lib/**/*.test.ts',
       'lib/**/__tests__/**/*.test.ts',
-      '../../apps/worker/src/jobs/**/*.test.ts',
+      '../../apps/worker/src/**/*.test.ts',
     ],
     testTimeout: 30_000,
     fileParallelism: false,

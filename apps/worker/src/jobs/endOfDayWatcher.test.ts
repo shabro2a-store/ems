@@ -102,3 +102,20 @@ describe('runEndOfDayWatcher', () => {
     expect(r.notified).toBe(0);
   });
 });
+describe('the time the alert quotes', () => {
+  it('is the Beirut time the flag was raised, not the server clock', async () => {
+    store.users.set('u1', { id: 'u1', username: 'hasan' });
+    store.flags.push({
+      id: 'f-tz',
+      kind: 'WATCHED',
+      user_id: 'u1',
+      branch_id: null,
+      context_json: {},
+      created_at: new Date('2026-09-26T18:10:00Z'), // 21:10 Beirut
+      notified_at: null,
+    });
+    await runEndOfDayWatcher({ db: makeDb() as never, now: new Date('2026-09-26T20:30:00Z'), notifier: notifier as never });
+    const message = (store.notifications[0]!.context as { message: string }).message;
+    expect(message).toContain('watched since 21:10');
+  });
+});

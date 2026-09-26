@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { inBeirut } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 
@@ -33,7 +34,7 @@ export async function runEndOfDayWatcher(
   for (const f of flags) {
     const since_h = Math.floor((now.getTime() - f.created_at.getTime()) / (60 * 60_000));
     const since_min = Math.floor((now.getTime() - f.created_at.getTime()) / 60_000);
-    const hhmm = `${String(f.created_at.getUTCHours()).padStart(2, '0')}:${String(f.created_at.getUTCMinutes()).padStart(2, '0')}`;
+    const hhmm = inBeirut(f.created_at).hhmm;
 
     await opts.notifier.send({
       channel: 'telegram',
