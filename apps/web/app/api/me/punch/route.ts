@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { headers } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { inBeirut } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { getClientIp, setAccessCookie } from '@/lib/auth/cookies';
-import { signToken } from '@/lib/auth/jwt';
+import { signToken, verifyToken } from '@/lib/auth/jwt';
+import { ACCESS_COOKIE_NAME } from '@/lib/auth/constants';
 import { sessionExpiryFor } from '@/lib/auth/session';
 import { consumePunchRateLimit } from '@/lib/services/rateLimit';
 import {
@@ -92,10 +93,16 @@ async function reissueDriverSession(
   kind: 'IN' | 'OUT',
 ): Promise<void> {
   if (role !== 'DRIVER') return;
+  // Only for a session that is still current: re-issuing a revoked one would
+  // hand a driver the owner has just signed out a fresh twelve hours.
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { session_version: true } });
+  const current = cookies().get(ACCESS_COOKIE_NAME)?.value;
+  const token = current ? await verifyToken(current, 'access') : null;
+  if (!user || !token || token.sv !== user.session_version) return;
   const now = new Date();
   const exp = sessionExpiryFor({ role: 'DRIVER' }, kind === 'IN', now);
-  const token = await signToken({ sub: userId, role: 'DRIVER', branchId }, exp);
-  setAccessCookie(token, exp);
+  const fresh = await signToken({ sub: userId, role: 'DRIVER', branchId, sv: user.session_version }, exp, 'access');
+  setAccessCookie(fresh, exp);
 }
 
 export async function POST(req: Request) {

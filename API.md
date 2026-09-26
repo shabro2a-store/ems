@@ -14,7 +14,8 @@ model and business rules.
   `X-CSRF-Token` header (double-submit). Failure → `403 FORBIDDEN` "CSRF token mismatch".
 - **Idempotency**: POSTs marked *Idempotent* require an `Idempotency-Key` header;
   a replay within 24h returns the original response.
-- **Rate limits**: login, punch, trip-start, advance — 5/min each → `429 RATE_LIMITED`
+- **Rate limits**: punch, trip-start, advance — 5/min each; login — 10 per account per 15 min,
+  and 30/min per Cloudflare-verified address → `429 RATE_LIMITED`
   (with `Retry-After` except login).
 - **Money** is integer cents (USD). **Times** are ISO-8601 UTC; the business day is Asia/Beirut.
 - Secrets (e.g. `password_hash`) are never returned.
@@ -27,17 +28,23 @@ Common error codes: `UNAUTHORIZED` 401, `FORBIDDEN` 403, `INVALID_INPUT` 400,
 ## Auth (public)
 
 ### POST /api/auth/login
-Body `{ username, password }`. Rate-limited per (username, ip).
+Body `{ username, password }`. Limited per account (10 per 15 min, whatever address each
+attempt claims) and per `CF-Connecting-IP` (30/min); `X-Forwarded-For` is never trusted for
+this. An unknown username takes as long as a wrong password.
 → `200 { user: { id, username, role, branchId }, mustChangePassword }` and sets the
 `ems_access`, `ems_refresh`, `csrf` cookies. Errors: `INVALID_INPUT`, `RATE_LIMITED`,
 `UNAUTHORIZED` (unknown/inactive user or wrong password).
 
 ### POST /api/auth/logout
-CSRF. Clears the auth cookies. → `200 { loggedOut: true }`.
+CSRF. Signs the person out **everywhere**: their `session_version` moves on, so every
+access and refresh token they hold stops working, then the cookies are cleared.
+→ `200 { loggedOut: true }`.
 
 ### POST /api/auth/refresh
 CSRF. Reads the `ems_refresh` cookie, rotates access + refresh + csrf. → `200 { refreshed: true }`.
-Error: `UNAUTHORIZED`.
+Error: `UNAUTHORIZED` — also when the session has ended (sign-out, password reset or change,
+role change, retirement all bump `session_version`) or the account is inactive. Tokens carry
+a kind (`access`/`refresh`): a refresh token in the access cookie is refused.
 
 ## Health (public)
 - **GET /api/health** → `200 { uptime_s, version }`.
@@ -169,8 +176,9 @@ device subscription (upsert by endpoint). → `{ subscribed: true }`.
 
 ### POST /api/me/password  *(CSRF, ADMIN only)*
 Change your own password. **Admin only** — employees/drivers/callers get `403 FORBIDDEN`
-(the admin resets their password instead). Body `{ currentPassword, newPassword }` (new ≥ 6
-chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 400.
+(the admin resets their password instead). Body `{ currentPassword, newPassword }` (new ≥ 8
+chars). Ends every other session of the admin's; this one is re-issued.
+→ `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 400.
 
 ---
 
@@ -242,7 +250,7 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`).
 - **POST /api/admin/users** *(CSRF, Idempotent)* `{ username, name?, password, role:
   "EMPLOYEE"|"DRIVER"|"CALLER", branchId, hourlyRateCent, canRoamBranches? }` →
-  `{ user, temp_password }`. `canRoamBranches` defaults to **false**: a new account is
+  `{ user, temp_password }` (`password` ≥ 8 chars). `canRoamBranches` defaults to **false**: a new account is
   single-branch until the owner grants otherwise.
   `username` is the login; `name` is the display name. Creating an **ADMIN is
   rejected (403)**. **CALLER** needs a branch, gets no pay rate/RateChange, and is capped at

@@ -27,7 +27,9 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
   const user = await prisma.user.update({
     where: { id: ctx.params.id },
-    data: { is_active: !before.is_active },
+    // Either way round, sessions from before start over: deactivating ends them,
+    // and reactivating must not bring a week-old refresh token back to life.
+    data: { is_active: !before.is_active, session_version: { increment: 1 } },
   });
 
   await writeAuditLog({

@@ -114,6 +114,10 @@ model User {
   // back to a month they worked still shows them, and the month after they are
   // gone on their own without anything having to expire them.
   deleted_at           DateTime?
+  // Bumped to end every session this person has: sign-out, a password reset
+  // or change, a change of role, retirement. Tokens carry the version they
+  // were issued under; a refresh at an older version is refused.
+  session_version      Int                @default(0)
   telegram_chat_id     String?
   notify_daily_summary Boolean            @default(true)
   notify_routine_pings Boolean            @default(true)

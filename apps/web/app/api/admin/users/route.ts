@@ -6,11 +6,12 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
+import { PASSWORD_MIN_LENGTH } from '@/lib/auth/constants';
 
 const Create = z.object({
   username: z.string().min(1).max(64),
   name: z.string().max(120).optional(),
-  password: z.string().min(1).max(256),
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(256),
   role: z.enum(['EMPLOYEE', 'DRIVER', 'ADMIN', 'CALLER']),
   branchId: z.string().nullable().optional(),
   hourlyRateCent: z.number().int().nonnegative(),

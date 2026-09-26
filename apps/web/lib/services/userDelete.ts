@@ -135,6 +135,8 @@ export async function retireUser(
         // Nothing can match this, so the account is dead even if is_active were
         // ever flipped back by hand.
         password_hash: 'retired',
+        // And every session already open ends with it.
+        session_version: { increment: 1 },
         telegram_chat_id: null,
         can_roam_branches: false,
       },

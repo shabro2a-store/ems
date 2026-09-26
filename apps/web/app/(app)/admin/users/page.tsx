@@ -377,7 +377,7 @@ function SetPasswordModal({ user, onClose, onDone }: { user: User; onClose: () =
         <Button onClick={() => submit(false)} loading={busy} disabled={pw.length < 6}>Set password</Button>
       </>}>
       <div className="space-y-3">
-        <Field label="New password" htmlFor="spw" hint="At least 6 characters, or use Generate random.">
+        <Field label="New password" htmlFor="spw" hint="At least 8 characters, or use Generate random.">
           <Input id="spw" type="text" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Type a password" autoComplete="off" />
         </Field>
         <p className="text-xs text-muted">The user should change it after logging in.</p>
@@ -421,7 +421,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
       <form id="create-emp" onSubmit={submit} className="space-y-4">
         <Field label="Full name" htmlFor="cn"><Input id="cn" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ahmad Khalil" required /></Field>
         <Field label="Username (login)" htmlFor="cu" hint="What they type to log in."><Input id="cu" value={username} onChange={(e) => setUsername(e.target.value)} required autoCapitalize="none" /></Field>
-        <Field label="Temporary password" htmlFor="cp" hint="Share verbally; only you can change it later."><Input id="cp" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
+        <Field label="Temporary password" htmlFor="cp" hint="At least 8 characters. Share it verbally; only you can change it later."><Input id="cp" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
         <Field label="Role" htmlFor="cr">
           <Select id="cr" value={role} onChange={(e) => setRole(e.target.value as Role)}>
             <option value="EMPLOYEE">Employee</option><option value="DRIVER">Driver</option><option value="CALLER">Caller (POS)</option>

@@ -15,7 +15,7 @@ export function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (next.length < 6) { setErr('New password must be at least 6 characters.'); return; }
+    if (next.length < 8) { setErr('New password must be at least 8 characters.'); return; }
     if (next !== confirm) { setErr('The new passwords do not match.'); return; }
     setBusy(true);
     const res = await apiSend('/api/me/password', { body: { currentPassword: current, newPassword: next } });

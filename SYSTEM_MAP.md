@@ -28,13 +28,22 @@ check `/api/health`'s `uptime_s` if in doubt.
 | ADMIN (owner) | Everything: live dashboard, employees + schedules, branches + GPS, punches + corrections, payroll + PDF, approvals |
 
 - **Login** issues 3 cookies: `ems_access` (JWT, httpOnly), `ems_refresh` (JWT, httpOnly, 7d), `csrf` (readable).
+  Each token says which it is (`typ`) and carries the user's `session_version`; the
+  middleware accepts only an access token, and a refresh is refused once the version has
+  moved on — sign-out (everywhere), a password reset or change, a role change and
+  retirement all bump it. Access tokens are not checked against it (the middleware cannot
+  reach the database), so an ended session keeps its current access token until it
+  expires: up to 2h, or 12h for a checked-in driver.
 - **Middleware** verifies the access JWT and injects `x-user-id` / `x-user-role` /
   `x-user-branch-id` headers (clients cannot spoof them). Any `/api/me/*` or `/api/admin/*`
   without a valid session → `401`. Each route re-checks the role.
 - **CSRF**: every state-changing route validates `X-CSRF-Token` vs the `csrf` cookie
   (double-submit; both sides URL-decoded — the encoding bug is fixed).
 - **Idempotency**: mutating POSTs require an `Idempotency-Key` (24h dedupe).
-- **Rate limits**: login (per user+IP), punch, trip-start, advance — 5/min token bucket → `429`.
+- **Rate limits**: punch, trip-start, advance — 5/min; login — 10 per account per 15 min plus
+  30/min per `CF-Connecting-IP` (the only address a client cannot forge), counted in one
+  atomic statement (`consumeRateLimit`) → `429`. Unknown usernames cost the same bcrypt as a
+  wrong password. New passwords are at least 8 characters.
 - **Identity**: `username` = login handle (unique); `name` = display name shown in the
   app (greetings, admin bar, lists). **Only the admin manages passwords** — the admin
   changes their own (`POST /api/me/password`, ADMIN-only) and sets/resets every other

@@ -6,10 +6,12 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { verifyPassword } from '@/lib/auth/password';
 import { writeAuditLog } from '@/lib/services/audit';
+import { PASSWORD_MIN_LENGTH } from '@/lib/auth/constants';
+import { issueSession } from '@/lib/auth/issueSession';
 
 const Body = z.object({
   currentPassword: z.string().min(1).max(256),
-  newPassword: z.string().min(6).max(256),
+  newPassword: z.string().min(PASSWORD_MIN_LENGTH).max(256),
 });
 
 function jsonError(code: string, message: string, status: number) {
@@ -32,7 +34,7 @@ export async function POST(req: Request) {
   try {
     body = Body.parse(await req.json());
   } catch {
-    return jsonError('INVALID_INPUT', 'New password must be at least 6 characters', 400);
+    return jsonError('INVALID_INPUT', `New password must be at least ${PASSWORD_MIN_LENGTH} characters`, 400);
   }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -41,8 +43,15 @@ export async function POST(req: Request) {
   const ok = await verifyPassword(body.currentPassword, user.password_hash);
   if (!ok) return jsonError('WRONG_PASSWORD', 'Your current password is incorrect', 400);
 
+  // Every other session - a stolen cookie included - ends with the old
+  // password; this one is signed again at the new version so the owner stays in.
   const passwordHash = await bcrypt.hash(body.newPassword, 12);
-  await prisma.user.update({ where: { id: userId }, data: { password_hash: passwordHash } });
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: { password_hash: passwordHash, session_version: { increment: 1 } },
+    select: { id: true, role: true, branch_id: true, session_version: true },
+  });
+  await issueSession(prisma, updated);
 
   await writeAuditLog({ actorId: userId, action: 'user.change_password', entity: 'User', entityId: userId });
 

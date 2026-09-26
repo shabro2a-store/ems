@@ -72,7 +72,21 @@ export function clearAuthCookies(): void {
   }
 }
 
+/**
+ * The client's address as Cloudflare saw it, or null when nothing vouches for
+ * it. Cloudflare overwrites CF-Connecting-IP on every request it forwards, and
+ * the app only listens on loopback behind the tunnel, so a client cannot set
+ * it. X-Forwarded-For and X-Real-IP are whatever the client sent - fine as
+ * evidence of what a phone claimed, never as the key a limit is counted on.
+ */
+export function trustedClientIp(req: Request): string | null {
+  return req.headers.get('cf-connecting-ip')?.trim() || null;
+}
+
+/** Best-effort address for the record (punch evidence): trusted when possible. */
 export function getClientIp(req: Request): string {
+  const trusted = trustedClientIp(req);
+  if (trusted) return trusted;
   const xff = req.headers.get('x-forwarded-for');
   if (xff) return xff.split(',')[0]!.trim();
   return req.headers.get('x-real-ip') ?? '0.0.0.0';

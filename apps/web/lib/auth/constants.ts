@@ -1,7 +1,16 @@
 export const SHOP_TZ = 'Asia/Beirut';
 export const BCRYPT_ROUNDS = 12;
 export const PUNCH_RATE_LIMIT_PER_MIN = 5;
-export const LOGIN_RATE_LIMIT_PER_MIN = 5;
+// Sign-in attempts per account, whatever address they come from: 10 in 15
+// minutes. Counted per ACCOUNT because the address is whatever the client says
+// it is unless Cloudflare vouches for it, and rotating it made the old
+// per-(username, address) limit disappear.
+export const LOGIN_ATTEMPTS_PER_ACCOUNT = 10;
+export const LOGIN_ACCOUNT_WINDOW_MS = 15 * 60_000;
+// And per address Cloudflare vouches for, to slow one machine trying many names.
+export const LOGIN_ATTEMPTS_PER_ADDRESS = 30;
+export const LOGIN_ADDRESS_WINDOW_MS = 60_000;
+export const PASSWORD_MIN_LENGTH = 8;
 export const ADVANCE_RATE_LIMIT_PER_MIN = 5;
 export const IDEMPOTENCY_TTL_HOURS = 24;
 export const SESSION_TTL_EMPLOYEE_MIN = 120;

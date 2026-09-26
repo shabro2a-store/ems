@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
+import { PASSWORD_MIN_LENGTH } from '@/lib/auth/constants';
 import { randomBytes } from 'crypto';
 
 function generateTempPassword(): string {
@@ -33,8 +34,8 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   try {
     const body = await req.json().catch(() => ({}));
     if (body && typeof body.password === 'string' && body.password.length > 0) {
-      if (body.password.length < 6 || body.password.length > 256) {
-        return jsonError('INVALID_INPUT', 'Password must be 6-256 characters', 400);
+      if (body.password.length < PASSWORD_MIN_LENGTH || body.password.length > 256) {
+        return jsonError('INVALID_INPUT', `Password must be ${PASSWORD_MIN_LENGTH}-256 characters`, 400);
       }
       chosen = body.password;
     }
@@ -45,9 +46,11 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const tempPassword = chosen ?? generateTempPassword();
   const passwordHash = await bcrypt.hash(tempPassword, 12);
 
+  // A new password ends every session opened with the old one - which is
+  // usually the reason for resetting it.
   await prisma.user.update({
     where: { id: ctx.params.id },
-    data: { password_hash: passwordHash },
+    data: { password_hash: passwordHash, session_version: { increment: 1 } },
   });
 
   await writeAuditLog({

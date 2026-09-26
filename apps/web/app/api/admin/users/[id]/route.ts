@@ -94,7 +94,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
       data: {
         ...(body.username ? { username: body.username } : {}),
         ...(body.name !== undefined ? { name: body.name.trim() || null } : {}),
-        ...(body.role ? { role: body.role } : {}),
+        // A new role ends the sessions signed with the old one.
+        ...(body.role && body.role !== before.role ? { role: body.role, session_version: { increment: 1 } } : {}),
         ...(body.branchId !== undefined ? { branch_id: body.branchId } : {}),
         ...(body.hourlyRateCent !== undefined && body.hourlyRateCent !== before.hourly_rate_cent
           ? { hourly_rate_cent: body.hourlyRateCent }

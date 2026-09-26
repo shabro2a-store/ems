@@ -21,7 +21,7 @@ export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
 
   if (token) {
-    const payload = await verifyToken(token);
+    const payload = await verifyToken(token, 'access');
     if (payload) {
       requestHeaders.set('x-user-id', payload.sub);
       requestHeaders.set('x-user-role', payload.role);

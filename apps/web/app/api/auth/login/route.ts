@@ -2,53 +2,46 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { verifyPassword } from '@/lib/auth/password';
-import { signToken } from '@/lib/auth/jwt';
-import { generateCsrfToken } from '@/lib/auth/csrf';
-import { sessionExpiryFor } from '@/lib/auth/session';
-import { setAuthCookies, getClientIp } from '@/lib/auth/cookies';
+import { trustedClientIp } from '@/lib/auth/cookies';
+import { issueSession } from '@/lib/auth/issueSession';
 import {
-  LOGIN_RATE_LIMIT_PER_MIN,
+  LOGIN_ATTEMPTS_PER_ACCOUNT,
+  LOGIN_ACCOUNT_WINDOW_MS,
+  LOGIN_ATTEMPTS_PER_ADDRESS,
+  LOGIN_ADDRESS_WINDOW_MS,
   SEED_DEFAULT_PASSWORD,
 } from '@/lib/auth/constants';
+import { consumeRateLimit } from '@/lib/services/rateLimit';
 
 const LoginBody = z.object({
   username: z.string().min(1).max(64),
   password: z.string().min(1).max(256),
 });
 
+// A real bcrypt hash (cost 12) of a random string nobody knows. Checked when
+// the username does not exist, so an unknown name costs the same ~250ms as a
+// wrong password and the response time stops saying which usernames are real.
+const NO_SUCH_USER_HASH = '$2a$12$k6fta/HOSdqfkwFmC45VR.H/wyrSYOXvL2cV/IeKU743ZyZrmrxpu';
+
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-async function consumeLoginRateLimit(username: string, ip: string): Promise<boolean> {
-  const identifier = `login:${username}:${ip}`;
-  const now = new Date();
-  const oneMinAgo = new Date(now.getTime() - 60_000);
-  const existing = await prisma.rateLimitBucket.findUnique({ where: { identifier } });
-  if (!existing) {
-    await prisma.rateLimitBucket.create({
-      data: { identifier, tokens: LOGIN_RATE_LIMIT_PER_MIN - 1, refilled_at: now },
-    });
-    return true;
-  }
-  if (existing.refilled_at < oneMinAgo) {
-    await prisma.rateLimitBucket.update({
-      where: { identifier },
-      data: { tokens: LOGIN_RATE_LIMIT_PER_MIN - 1, refilled_at: now },
-    });
-    return true;
-  }
-  if (existing.tokens <= 0) return false;
-  await prisma.rateLimitBucket.update({
-    where: { identifier },
-    data: { tokens: { decrement: 1 } },
-  });
-  return true;
+function tooMany(retryAfterSec = 60) {
+  const minutes = Math.max(1, Math.ceil(retryAfterSec / 60));
+  return NextResponse.json(
+    {
+      ok: false,
+      error: {
+        code: 'RATE_LIMITED',
+        message: `Too many sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      },
+    },
+    { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
+  );
 }
 
 export async function POST(req: Request) {
-  const ip = getClientIp(req);
-
   let body: z.infer<typeof LoginBody>;
   try {
     body = LoginBody.parse(await req.json());
@@ -56,44 +49,34 @@ export async function POST(req: Request) {
     return jsonError('INVALID_INPUT', 'Invalid request body', 400);
   }
 
-  const allowed = await consumeLoginRateLimit(body.username, ip);
-  if (!allowed) {
-    return jsonError('RATE_LIMITED', 'Too many login attempts. Try again in a minute.', 429);
+  // Per account first: that is the limit an attacker cannot step around by
+  // changing the address they claim. Counted for every name tried, real or
+  // not, so being limited says nothing about whether the account exists.
+  const account = await consumeRateLimit(
+    prisma,
+    `login:user:${body.username}`,
+    LOGIN_ATTEMPTS_PER_ACCOUNT,
+    LOGIN_ACCOUNT_WINDOW_MS,
+  );
+  if (!account.allowed) return tooMany(account.retryAfterSec);
+  const ip = trustedClientIp(req);
+  if (ip) {
+    const address = await consumeRateLimit(prisma, `login:ip:${ip}`, LOGIN_ATTEMPTS_PER_ADDRESS, LOGIN_ADDRESS_WINDOW_MS);
+    if (!address.allowed) return tooMany(address.retryAfterSec);
   }
 
   const user = await prisma.user.findUnique({
     where: { username: body.username },
   });
-
-  if (!user || !user.is_active) {
+  // A retired account's hash is a placeholder bcrypt cannot parse, so anyone
+  // who cannot sign in is checked against the dummy instead.
+  const live = user && user.is_active ? user : null;
+  const ok = await verifyPassword(body.password, live?.password_hash ?? NO_SUCH_USER_HASH);
+  if (!live || !ok) {
     return jsonError('UNAUTHORIZED', 'Invalid credentials', 401);
   }
 
-  const ok = await verifyPassword(body.password, user.password_hash);
-  if (!ok) {
-    return jsonError('UNAUTHORIZED', 'Invalid credentials', 401);
-  }
-
-  const now = new Date();
-  const lastPunch = await prisma.punch.findFirst({
-    where: { user_id: user.id },
-    orderBy: { at: 'desc' },
-    select: { kind: true },
-  });
-  const hasOpenPunch = lastPunch?.kind === 'IN';
-  const exp = sessionExpiryFor({ role: user.role }, hasOpenPunch, now);
-  const accessToken = await signToken(
-    { sub: user.id, role: user.role, branchId: user.branch_id ?? null },
-    exp,
-  );
-  const refreshExp = new Date(now.getTime() + 7 * 24 * 60 * 60_000);
-  const refreshToken = await signToken(
-    { sub: user.id, role: user.role, branchId: user.branch_id ?? null },
-    refreshExp,
-  );
-
-  const csrf = generateCsrfToken();
-  setAuthCookies(accessToken, refreshToken, csrf, exp);
+  await issueSession(prisma, live);
 
   const mustChangePassword = body.password === SEED_DEFAULT_PASSWORD;
 
@@ -101,10 +84,10 @@ export async function POST(req: Request) {
     ok: true,
     data: {
       user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        branchId: user.branch_id ?? null,
+        id: live.id,
+        username: live.username,
+        role: live.role,
+        branchId: live.branch_id ?? null,
       },
       mustChangePassword,
     },
