@@ -41,6 +41,16 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     if (result.code === 'NOT_FOUND') return jsonError('NOT_FOUND', 'Advance not found', 404);
     if (result.code === 'ALREADY_DECIDED') return jsonError('ALREADY_DECIDED', 'Advance already decided', 409);
     if (result.code === 'INVALID_INPUT') return jsonError('INVALID_INPUT', 'Invalid decision', 400);
+    if (result.code === 'EXCEEDS_ACCRUED_EARNINGS') {
+      const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+      return jsonError(
+        'EXCEEDS_ACCRUED_EARNINGS',
+        `Approving this would advance more than they have earned in ${result.month}: ` +
+          `${usd(result.earnedCent)} earned so far, ${usd(result.advancedCent)} already advanced. ` +
+          'Reject it, or approve it once they have earned enough.',
+        409,
+      );
+    }
   }
 
   const okResult = result as { ok: true; id: string; status: 'APPROVED' | 'REJECTED' };

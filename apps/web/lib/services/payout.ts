@@ -3,6 +3,7 @@ import { shiftDateOf, scheduledToUtc, inBeirut, nextBeirutDate, SHIFT_GAP_MIN, w
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { overtimeDeductionForUser } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
+import { approvedAdvancesForMonth } from './advanceMonth';
 import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval, type PunchLite, dayStartHourFor, workingDaysOf, currentShiftDayMinutes } from './coverage';
 
 export interface PayoutForUserResult {
@@ -416,7 +417,6 @@ export async function payoutForUser(
   // window as-is.
   const pairFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
   const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
-  const { start: beirutStart, end: beirutEnd } = monthRangeBeirut(month);
   const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent, credits, user] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: workingDayHistoryFrom(pairFrom), lt: pairTo } },
@@ -432,11 +432,9 @@ export async function payoutForUser(
       where: { user_id: userId, period: { gte: start, lt: end } },
       select: { user_id: true, kind: true, amount_cent: true },
     }),
-    db.advance.findMany({
-      // Beirut bounds: created_at is a real instant, not a date marker.
-      where: { user_id: userId, status: 'APPROVED', created_at: { gte: beirutStart, lt: beirutEnd } },
-      select: { user_id: true, amount_cent: true, status: true },
-    }),
+    // Filed by the month each advance comes out of, not the month it was asked
+    // for - see advancePayMonth.
+    approvedAdvancesForMonth(db, userId, month),
     penaltiesForUser(userId, month, db),
     overtimeDeductionForUser(userId, month, db),
     blockedCreditForUser(userId, month, db),

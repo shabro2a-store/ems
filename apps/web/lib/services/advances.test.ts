@@ -24,8 +24,10 @@ const mocks = vi.hoisted(() => ({
     aggregate: vi.fn(),
     count: vi.fn(),
     create: vi.fn(),
+    findMany: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   auditLog: { create: vi.fn() },
   user: { findUnique: vi.fn() },
@@ -104,6 +106,28 @@ beforeEach(() => {
 
   mocks.advance.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => {
     return store.advances.find((a) => a.id === where.id) ?? null;
+  });
+
+  // The approved advances a month could hold: asked for before it ended, and
+  // asked for or decided inside it. advanceMonth.ts files them from there.
+  mocks.advance.findMany.mockImplementation(
+    async ({ where }: { where: { user_id: string; status: string; created_at: { lt: Date }; OR: Array<{ created_at?: { gte: Date }; decided_at?: { gte: Date } }> } }) =>
+      store.advances.filter(
+        (a) =>
+          a.user_id === where.user_id &&
+          a.status === where.status &&
+          a.created_at < where.created_at.lt &&
+          where.OR.some((o) =>
+            o.created_at ? a.created_at >= o.created_at.gte : a.decided_at !== null && a.decided_at >= o.decided_at!.gte,
+          ),
+      ),
+  );
+
+  mocks.advance.updateMany.mockImplementation(async ({ where, data }: { where: { id: string; status: string }; data: Partial<{ status: 'APPROVED' | 'REJECTED'; decided_by: string; decided_at: Date }> }) => {
+    const a = store.advances.find((x) => x.id === where.id && x.status === where.status);
+    if (!a) return { count: 0 };
+    Object.assign(a, data);
+    return { count: 1 };
   });
 
   mocks.advance.update.mockImplementation(async ({ where, data }: { where: { id: string }; data: Partial<{ status: 'APPROVED' | 'REJECTED'; decided_by: string; decided_at: Date }> }) => {
@@ -204,6 +228,12 @@ describe('requestAdvance', () => {
 
 describe('decideAdvance', () => {
   it('approves a pending advance and writes an audit row', async () => {
+    // Earned enough to cover it: approving re-checks the cap.
+    store.punches.push(
+      { id: 'p1', user_id: 'u1', kind: 'IN', at: new Date('2026-07-01T08:00:00Z') },
+      { id: 'p2', user_id: 'u1', kind: 'OUT', at: new Date('2026-07-01T18:00:00Z') },
+    );
+    store.rateChanges.push({ user_id: 'u1', rate_cent: 600, effective_from: new Date('2026-01-01T00:00:00Z') });
     store.advances.push({
       id: 'adv1',
       user_id: 'u1',
@@ -214,7 +244,7 @@ describe('decideAdvance', () => {
       decided_at: null,
       created_at: new Date('2026-07-10T00:00:00Z'),
     });
-    const r = await decideAdvance({ adminId: 'admin', advanceId: 'adv1', decision: 'APPROVED' });
+    const r = await decideAdvance({ adminId: 'admin', advanceId: 'adv1', decision: 'APPROVED', now: new Date('2026-07-12T00:00:00Z') });
     expect(r.ok).toBe(true);
     const audit = store.audits.find((a) => a.action === 'advance.approve');
     expect(audit).toBeTruthy();

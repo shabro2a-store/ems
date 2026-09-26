@@ -1,7 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 import { writeAuditLog } from './audit';
-import { accruedEarningsThisMonth, monthRangeUtc, monthRangeBeirut } from './payout';
+import { accruedEarningsThisMonth, monthRangeUtc } from './payout';
+import { advancePayMonth, approvedAdvancesForMonth } from './advanceMonth';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
 import { getNotifier, type Notifier } from 'notify';
 
@@ -33,35 +34,19 @@ export async function requestAdvance(
     return { ok: false, code: 'INVALID_INPUT' };
   }
 
-  // An employee can borrow against everything they've earned this month:
-  // worked wages (gross) PLUS bonuses, MINUS deductions. Approved advances are
-  // scoped to the same month so the limit refills at the start of each month.
-  const { start, end } = monthRangeUtc(input.month);
-  // created_at is a real instant, so the month it belongs to is the Beirut one.
-  // The adjustment query below stays on the UTC window: `period` is a date
-  // marker at UTC midnight and matches it exactly.
-  const { start: beirutStart, end: beirutEnd } = monthRangeBeirut(input.month);
-  const [approvedSum, adjustments, accrued, penalties] = await Promise.all([
+  // An employee can borrow against everything they've earned this month, and
+  // the requests still waiting for an answer are already spoken for: counting
+  // only approved ones let three $200 requests through on $250 earned.
+  const [earnedCent, approved, pending] = await Promise.all([
+    entitlementCent(input.userId, input.month, db),
+    approvedAdvancesForMonth(db, input.userId, input.month),
     db.advance.aggregate({
-      where: { user_id: input.userId, status: 'APPROVED', created_at: { gte: beirutStart, lt: beirutEnd } },
+      where: { user_id: input.userId, status: 'PENDING' },
       _sum: { amount_cent: true },
     }),
-    db.adjustment.findMany({
-      where: { user_id: input.userId, period: { gte: start, lt: end } },
-      select: { kind: true, amount_cent: true },
-    }),
-    accruedEarningsThisMonth(input.userId, input.month, db),
-    penaltiesForUser(input.userId, input.month, db),
   ]);
-
-  const approvedBalance = approvedSum._sum.amount_cent ?? 0;
-  const adjustmentsCent = adjustments.reduce(
-    (s, a) => s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent),
-    0,
-  );
-  const penaltiesCent = sumActivePenaltiesCent(penalties);
-  const entitlementCent = accrued.grossCent + adjustmentsCent - penaltiesCent;
-  if (approvedBalance + input.amountCent > entitlementCent) {
+  const committedCent = sumCents(approved) + (pending._sum.amount_cent ?? 0);
+  if (committedCent + input.amountCent > earnedCent) {
     return { ok: false, code: 'EXCEEDS_ACCRUED_EARNINGS' };
   }
 
@@ -106,11 +91,13 @@ export interface DecideAdvanceInput {
   advanceId: string;
   decision: 'APPROVED' | 'REJECTED';
   db?: PrismaClient;
+  now?: Date;
 }
 
 export type DecideAdvanceResult =
   | { ok: true; id: string; status: 'APPROVED' | 'REJECTED' }
-  | { ok: false; code: 'NOT_FOUND' | 'ALREADY_DECIDED' | 'INVALID_INPUT' };
+  | { ok: false; code: 'NOT_FOUND' | 'ALREADY_DECIDED' | 'INVALID_INPUT' }
+  | { ok: false; code: 'EXCEEDS_ACCRUED_EARNINGS'; month: string; earnedCent: number; advancedCent: number };
 
 export async function decideAdvance(
   input: DecideAdvanceInput,
@@ -123,11 +110,28 @@ export async function decideAdvance(
   if (!advance) return { ok: false, code: 'NOT_FOUND' };
   if (advance.status !== 'PENDING') return { ok: false, code: 'ALREADY_DECIDED' };
 
-  const now = new Date();
-  const updated = await db.advance.update({
-    where: { id: input.advanceId },
+  const now = input.now ?? new Date();
+  if (input.decision === 'APPROVED') {
+    // The cap again, at the moment money is handed over: earnings can have
+    // shrunk since the request (a penalty, a correction), and other requests
+    // may have been approved in between. Refusing is always allowed.
+    const month = advancePayMonth({ created_at: advance.created_at, decided_at: now });
+    const [earnedCent, approved] = await Promise.all([
+      entitlementCent(advance.user_id, month, db),
+      approvedAdvancesForMonth(db, advance.user_id, month, advance.id),
+    ]);
+    const advancedCent = sumCents(approved);
+    if (advancedCent + advance.amount_cent > earnedCent) {
+      return { ok: false, code: 'EXCEEDS_ACCRUED_EARNINGS', month, earnedCent, advancedCent };
+    }
+  }
+
+  // Only a request that is still pending, so two clicks cannot both decide it.
+  const { count } = await db.advance.updateMany({
+    where: { id: input.advanceId, status: 'PENDING' },
     data: { status: input.decision, decided_by: input.adminId, decided_at: now },
   });
+  if (count === 0) return { ok: false, code: 'ALREADY_DECIDED' };
 
   await writeAuditLog({
     actorId: input.adminId,
@@ -139,7 +143,27 @@ export async function decideAdvance(
     db,
   });
 
-  return { ok: true, id: updated.id, status: updated.status as 'APPROVED' | 'REJECTED' };
+  return { ok: true, id: input.advanceId, status: input.decision };
+}
+
+/** What one person has earned in `month` that can be lent against: gross, bonuses in, deductions and penalties out. */
+async function entitlementCent(userId: string, month: string, db: PrismaClient): Promise<number> {
+  // `period` is a date marker at UTC midnight, so the UTC month matches it exactly.
+  const { start, end } = monthRangeUtc(month);
+  const [adjustments, accrued, penalties] = await Promise.all([
+    db.adjustment.findMany({
+      where: { user_id: userId, period: { gte: start, lt: end } },
+      select: { kind: true, amount_cent: true },
+    }),
+    accruedEarningsThisMonth(userId, month, db),
+    penaltiesForUser(userId, month, db),
+  ]);
+  const adjustmentsCent = adjustments.reduce((s, a) => s + (a.kind === 'BONUS' ? a.amount_cent : -a.amount_cent), 0);
+  return accrued.grossCent + adjustmentsCent - sumActivePenaltiesCent(penalties);
+}
+
+function sumCents(rows: Array<{ amount_cent: number }>): number {
+  return rows.reduce((s, r) => s + r.amount_cent, 0);
 }
 
 export interface AdvanceSummary {

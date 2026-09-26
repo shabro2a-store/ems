@@ -83,7 +83,9 @@ cuid PKs, money = Int cents.
 - **LeaveRequest** — kind, start/end date, optional `off_min`, status. Approval → ScheduleOverride rows.
 - **Trip** — driver, branch, out_at/lat/lng, back_at/lat/lng?, over_threshold, threshold_alerted_at.
   **Partial unique index: one open trip per driver.**
-- **Advance** — amount_cent, reason?, status. Approved advances reduce net pay (by created_at month).
+- **Advance** — amount_cent, reason?, status. Approved advances reduce net pay in the month they come
+  out of (`advancePayMonth`): the month asked for, or — approved from 1 Oct 2026 after that month's
+  pay was settled — the month open at approval.
 - **Adjustment** — period(1st of month), kind(BONUS/DEDUCTION), amount_cent(≥0, sign from kind), reason.
 - **DriverCall** — a caller ringing a driver (driver, caller, branch?, created_at, acknowledged_at?,
   trip_id?). The driver's app polls for an unacknowledged ring in the last 2 min and raises the
@@ -418,9 +420,10 @@ Full request/response detail is in [API.md](API.md). Summary:
 - **Trips (`trip.ts`)**: one open trip per driver (service + DB index); geofenced both ends.
 - **Advances**: an employee can borrow against everything earned **this month** —
   worked wages **plus bonuses, minus deductions and penalties**: capped so
-  `approvedBalance + amount ≤ grossThisMonth + adjustmentsThisMonth − penaltiesThisMonth`. Approved
-  advances counted in the cap are scoped to the current month, so the limit
-  refills at the start of each month (payroll's month boundary).
+  `approvedThisMonth + pending + amount ≤ grossThisMonth + adjustmentsThisMonth − penaltiesThisMonth`.
+  Pending requests count, and **approving re-checks the cap** against the month the advance
+  comes out of (`EXCEEDS_ACCRUED_EARNINGS` 409, naming what was earned and advanced).
+  Rejecting is never blocked, and approval only changes a request that is still pending.
 - **Leave**: approval upserts one ScheduleOverride per date in range.
 - **Time (`time`)**: Beirut day boundaries, weekday Sun=0..Sat=6, schedule wall-clock → UTC.
   Day boundaries are always resolved from the **calendar date**, never by adding or

@@ -125,7 +125,8 @@ Summary `{ pending, approved_balance_cent }`, or `{ advances: [...] }` (latest 5
 
 ### POST /api/me/advances  *(CSRF, Idempotent, rate-limited)*
 Body `{ amountCent, reason? }`. Capped at what's earned this month —
-worked wages + bonuses − deductions − advances already approved this month.
+worked wages + bonuses − deductions − penalties, less advances approved this month and
+every request still pending.
 → `200 { id, status: "PENDING" }`. Error: `EXCEEDS_ACCRUED_EARNINGS` 409.
 
 ### GET /api/me/leave  ·  POST /api/me/leave  *(POST: CSRF, Idempotent)*
@@ -355,7 +356,8 @@ Photos are wiped by the worker a week after the trip (`Trip.receipt_taken_at` st
   decision. Refuses `409 MONTH_CLOSED` for any month before the current Beirut one.
 - **GET /api/admin/advances** → pending `{ advances: [...] }`.
 - **POST /api/admin/advances/[id]/decision** *(CSRF, Idempotent)* `{ decision:
-  "APPROVED"|"REJECTED" }`. Error: `ALREADY_DECIDED` 409.
+  "APPROVED"|"REJECTED" }`. Errors: `ALREADY_DECIDED` 409; `EXCEEDS_ACCRUED_EARNINGS` 409 when
+  approving would advance more than was earned in the month it comes out of.
 - **POST /api/admin/leave/[id]/decision** *(CSRF, Idempotent)* `{ decision }` →
   `{ id, status, overrides_created }` (approval materializes ScheduleOverrides).
 
