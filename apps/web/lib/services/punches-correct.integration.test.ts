@@ -24,6 +24,47 @@ describe('punch.correct integration', () => {
     await getTestPrisma().$disconnect();
   });
 
+  async function correct(punchId: string, newAt: string) {
+    const admin = await seedTestUser({ username: `corr-admin-${Math.random().toString(36).slice(2, 8)}`, role: Role.ADMIN });
+    const aSession = await loginAs(admin.username, 'change-me');
+    return fetch(`${BASE_URL}/api/admin/punches/correct`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idemKey('corr'),
+        'X-CSRF-Token': aSession.csrf,
+        Cookie: aSession.cookies,
+      },
+      body: JSON.stringify({ punchId, newAt, reason: 'typo check' }),
+    });
+  }
+
+  it('refuses to move a checkout before the check-in it closes, and changes nothing', async () => {
+    const branch = await seedTestBranch();
+    const emp = await seedTestUser({ username: 'corr-order', branch_id: branch.id });
+    await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date('2026-07-01T05:00:00Z') });
+    const out = await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: new Date('2026-07-01T13:00:00Z') });
+
+    const res = await correct(out.id, '2026-07-01T03:00:00.000Z');
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('OUT_OF_ORDER');
+    expect(body.error.message).toContain('check-in at 2026-07-01 08:00');
+    const dbPunch = await getTestPrisma().punch.findUnique({ where: { id: out.id } });
+    expect(dbPunch?.at.toISOString()).toBe('2026-07-01T13:00:00.000Z');
+    expect(dbPunch?.corrected).toBe(false);
+  });
+
+  it('refuses a time in the future', async () => {
+    const branch = await seedTestBranch();
+    const emp = await seedTestUser({ username: 'corr-future', branch_id: branch.id });
+    const punch = await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date(Date.now() - 3_600_000) });
+
+    const res = await correct(punch.id, new Date(Date.now() + 3_600_000).toISOString());
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('IN_THE_FUTURE');
+  });
+
   it('creates an AuditLog row and persists the correction to the Punch row', async () => {
     const branch = await seedTestBranch();
     const employee = await seedTestUser({ username: 'corr-emp', branch_id: branch.id });

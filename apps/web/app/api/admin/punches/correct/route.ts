@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
+import { correctionProblem } from '@/lib/services/correctionCheck';
 
 const Body = z.object({
   punchId: z.string().min(1),
@@ -40,6 +41,17 @@ export async function POST(req: Request) {
 
   const original = await prisma.punch.findUnique({ where: { id: body.punchId } });
   if (!original) return jsonError('NOT_FOUND', 'Punch not found', 404);
+
+  if (body.newAt) {
+    // Only between the person's punches either side of it - see correctionProblem.
+    const around = { user_id: original.user_id, id: { not: original.id } };
+    const [previous, next] = await Promise.all([
+      prisma.punch.findFirst({ where: { ...around, at: { lt: original.at } }, orderBy: { at: 'desc' }, select: { kind: true, at: true } }),
+      prisma.punch.findFirst({ where: { ...around, at: { gt: original.at } }, orderBy: { at: 'asc' }, select: { kind: true, at: true } }),
+    ]);
+    const problem = correctionProblem({ newAt: new Date(body.newAt), now: new Date(), previous, next });
+    if (problem) return jsonError(problem.code, problem.message, 400);
+  }
 
   // Persist the correction to the Punch row (previously this only wrote an audit
   // log and left the row unchanged, so corrections silently did nothing).

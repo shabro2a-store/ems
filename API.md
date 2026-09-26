@@ -311,6 +311,8 @@ chars). → `200 { changed: true }`. Errors: `FORBIDDEN` 403, `WRONG_PASSWORD` 4
 - **POST /api/admin/punches/correct** *(CSRF, Idempotent)* `{ punchId, newAt?,
   newBranchId?, reason }` — **persists** the correction (sets `corrected`,
   `corrected_by`, `correction_reason`) and audits before/after. GPS evidence is kept.
+  `newAt` must be in the past and strictly between the person's punches either side of it:
+  `400 IN_THE_FUTURE` / `400 OUT_OF_ORDER` (the message names the neighbouring punch).
 
 ### Trips review (receipts)
 The owner reviews a driver's deliveries one **working day** at a time, beside the cash count
