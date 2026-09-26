@@ -522,7 +522,7 @@ model BlockedCreditDecision {
 model PushSubscription {
   id         String   @id @default(cuid())
   user_id    String
-  user       User     @relation(fields: [user_id], references: [id])
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
   endpoint   String   @unique
   p256dh     String
   auth       String
@@ -548,6 +548,7 @@ model DriverCall {
   trip_id         String?
 
   @@index([driver_id, created_at])
+  @@index([driver_id, trip_id])
 }
 
 model Flag {

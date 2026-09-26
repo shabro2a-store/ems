@@ -23,6 +23,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # Throwaway database for the drift check below: Prisma replays every
+      # migration into it to see what schema they produce.
+      shadow:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ems
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: ems_shadow
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ems -d ems_shadow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     env:
       DATABASE_URL: postgresql://ems:test@localhost:5432/ems_test
@@ -47,6 +62,18 @@ jobs:
       - run: pnpm --filter db exec prisma generate
 
       - run: pnpm --filter db exec prisma migrate deploy
+
+      # schema.prisma and the migrations must describe the same database.
+      # Migrations are what production runs; a schema that disagrees makes the
+      # next `prisma migrate dev` write a migration that quietly undoes part of
+      # them. Fails the build when they drift; run it locally to see the SQL.
+      - name: Schema matches migrations
+        run: >-
+          pnpm --filter db exec prisma migrate diff
+          --from-migrations prisma/migrations
+          --to-schema-datamodel prisma/schema.prisma
+          --shadow-database-url postgresql://ems:test@localhost:5433/ems_shadow
+          --exit-code
 
       - run: pnpm -r typecheck
 

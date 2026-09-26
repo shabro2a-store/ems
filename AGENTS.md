@@ -12,6 +12,9 @@ endpoint contract.
 ## Code conventions
 - No emoji in code; no comments unless they explain a non-obvious decision.
 - All money is `Int` cents (USD) — never floats.
+- Schema changes ship as a migration in `packages/db/prisma/migrations`, with
+  `schema.prisma` kept in step — CI fails when the two disagree. What Prisma
+  cannot express (the partial indexes on `Trip`) lives only in migrations.
 - No new dependencies without justification in the commit message.
 - File naming: services camelCase (`payout.ts`), components PascalCase
   (`AdminDashboard.tsx`), API routes `app/api/{path}/route.ts`.
