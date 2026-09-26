@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { z } from 'zod';
-import { workingDayHistoryFrom } from 'time';
+import { inBeirut, workingDayHistoryFrom } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
 import { isMonthOpen, CLOSED_MONTH_MESSAGE } from '@/lib/services/periodLock';
 import { dayStartHourFor, workingDaysOf, type PunchLite } from '@/lib/services/coverage';
+import { revokeSystemCheckout } from '@/lib/services/revokeAutoClose';
 
 const Body = z.object({
   punchId: z.string().min(1),
@@ -114,13 +115,22 @@ export async function POST(req: Request) {
   }
 
   const revokedAt = new Date();
-  await prisma.$transaction(async (tx) => {
-    await tx.punch.delete({ where: { id: out.id } });
-    await tx.punch.update({
-      where: { id: arrival.id },
-      data: { auto_close_revoked_at: revokedAt },
-    });
+  const result = await revokeSystemCheckout(prisma, {
+    userId: out.user_id,
+    outId: out.id,
+    outAt: out.at,
+    arrivalId: arrival.id,
+    revokedAt,
   });
+  if ('refused' in result) {
+    const since = inBeirut(result.at);
+    return jsonError(
+      'PUNCHED_SINCE',
+      `They punched again on ${since.date} at ${since.hhmm}, after this checkout. Reopening it now would ` +
+        'join that new shift onto this one. Correct this checkout to the time they left instead.',
+      409,
+    );
+  }
 
   await writeAuditLog({
     actorId: adminId,

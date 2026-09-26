@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiGet, apiSend, errorMessage, formatBeirut } from '@/lib/api';
+import { toBeirutInput, fromBeirutInput } from '@/lib/beirutInput';
 import {
   PageHeader, Card, CardHeader, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner,
 } from '@/components/ui';
@@ -106,7 +107,7 @@ export default function AdminPunchesPage() {
 
   function openCorrect(p: Punch) {
     setTarget(p);
-    setCorrAt(p.at.slice(0, 16));
+    setCorrAt(toBeirutInput(p.at));
     setCorrBranch(p.branch_id);
     setCorrReason('');
     setErr(null);
@@ -123,7 +124,9 @@ export default function AdminPunchesPage() {
       idemPrefix: 'correct',
       body: {
         punchId: target.id,
-        newAt: new Date(corrAt).toISOString(),
+        // Only a time that was edited is sent. The box holds minutes, so
+        // echoing it back would also drop the punch's seconds.
+        newAt: corrAt === toBeirutInput(target.at) ? undefined : fromBeirutInput(corrAt),
         newBranchId: corrBranch || undefined,
         reason: corrReason,
       },
@@ -280,6 +283,7 @@ export default function AdminPunchesPage() {
                 required
               />
             </Field>
+            {err && <Alert tone="danger">{err}</Alert>}
           </form>
         </Modal>
       )}
