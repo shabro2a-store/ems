@@ -125,69 +125,73 @@ block in `docker-compose.yml`, or the container never sees it.
 
 ## 3. Backup setup
 
-Run once on the VPS after first deploy:
+`scripts/backup.sh` dumps the database from inside the `db` container, encrypts it,
+**restores it into a scratch database to prove it works**, keeps 30 days on the VPS,
+uploads to Google Drive and deletes Drive copies older than 30 days. It runs as root,
+because it drives `docker compose`. Run once on the VPS:
 
-1. **Generate GPG passphrase file** (mode 0400, owned by backup user):
+1. **The passphrase.** It lives in `/etc/ems`, which survives a reboot — `/run/secrets`
+   (the old location) is wiped by every reboot, taking the only key with it.
    ```bash
-   sudo install -d -m 0700 -o backup -g backup /run/secrets
-   openssl rand -hex 32 | sudo tee /run/secrets/backup.key | sudo chmod 0400 /run/secrets/backup.key
-   sudo chown backup:backup /run/secrets/backup.key
+   sudo install -d -m 0700 /etc/ems
+   # already have one in /run/secrets? keep it, or every existing backup is lost:
+   sudo cp /run/secrets/backup.key /etc/ems/backup.key 2>/dev/null \
+     || openssl rand -hex 32 | sudo tee /etc/ems/backup.key >/dev/null
+   sudo chmod 0400 /etc/ems/backup.key
+   sudo cat /etc/ems/backup.key
+   ```
+   **Copy that line into your password manager now.** If the VPS dies, the backups on
+   Drive can only be opened with it.
+
+2. **Google Drive** (as root, so the cron job finds the config):
+   ```bash
+   sudo apt-get install -y rclone
+   sudo rclone config        # name: gdrive, type: drive, follow the wizard
+   ```
+   No Drive? Put `RCLONE_REMOTE=none` in front of the command in the cron line, and
+   backups stay on the VPS only — which does not survive losing the VPS.
+
+3. **Run it once by hand** and read the end of the output:
+   ```bash
+   sudo /opt/ems/scripts/backup.sh
+   # expect: "check passed: N users, N punches ..." then "backup complete"
    ```
 
-2. **Configure rclone** for Google Drive:
-   ```bash
-   sudo -u backup rclone config
-   # name: gdrive
-   # type: drive
-   # follow the wizard; the resulting config lives at /root/.config/rclone/rclone.conf
-   # copy to /root/.config/rclone/rclone.conf (or the backup user's home)
-   ```
-
-3. **Test backup manually**:
-   ```bash
-   sudo -u backup BACKUP_GPG_PASSPHRASE_PATH=/run/secrets/backup.key \
-     /opt/ems/scripts/backup.sh
-   # verify /var/backups/ems/ems-YYYY-MM-DD.dump.gpg exists
-   ```
-
-4. **Schedule the cron**:
+4. **Schedule it** (`sudo crontab -e`):
    ```cron
-   0 2 * * * backup /opt/ems/scripts/backup.sh >> /var/log/ems-backup.log 2>&1
+   0 2 * * * /opt/ems/scripts/backup.sh >> /var/log/ems-backup.log 2>&1
+   ```
+
+5. **Look at it now and then** — nothing alerts you yet when a night fails:
+   ```bash
+   cat /var/backups/ems/last-success           # should be today, around 02:00 UTC
+   grep 'BACKUP FAILED' /var/log/ems-backup.log | tail
    ```
 
 ---
 
 ## 4. Restore procedure
 
-**Always dry-run first.**
-
-1. **List available dumps**:
+1. **Pick a backup**:
    ```bash
-   ls -lh /var/backups/ems/        # local
-   rclone ls gdrive:EMS-Backups/   # remote
+   ls -lh /var/backups/ems/                                                        # on the VPS
+   sudo rclone copy gdrive:EMS-Backups/ems-2026-07-19.dump.gpg /var/backups/ems/   # or from Drive
    ```
 
-2. **Restore into a staging DB** (never prod first time):
+2. **Prove it restores** — into a scratch database, touching nothing live:
    ```bash
-   # create empty staging DB
-   createdb -h <staging-host> -U ems ems_restore_test
-   DATABASE_URL=postgresql://ems:<pw>@<staging-host>:5432/ems_restore_test \
-     /opt/ems/scripts/restore.sh /var/backups/ems/ems-2026-07-19.dump.gpg
+   sudo /opt/ems/scripts/restore.sh --check /var/backups/ems/ems-2026-07-19.dump.gpg
+   # "check passed: N users, N punches (latest ...)" - the latest punch says how old it is
    ```
 
-3. **Spot-check** the restored data:
+3. **Restore it for real**:
    ```bash
-   psql $RESTORE_URL -c "SELECT COUNT(*) FROM \"User\";"
-   psql $RESTORE_URL -c "SELECT MAX(at) FROM \"Punch\";"
+   sudo /opt/ems/scripts/restore.sh /var/backups/ems/ems-2026-07-19.dump.gpg --force
    ```
-
-4. **Restore into prod** (only after spot-check passes):
-   ```bash
-   # BACKUP the current state first
-   /opt/ems/scripts/backup.sh
-   # then restore
-   DATABASE_URL=$PROD_URL /opt/ems/scripts/restore.sh /var/backups/ems/ems-2026-07-19.dump.gpg
-   ```
+   It checks the file again, stops `web` and `worker`, saves the database as it is now
+   to `/var/backups/ems/ems-pre-restore-<time>.dump.gpg`, replaces it with the backup,
+   runs the migrations and starts `web` and `worker`. Without `--force` it only says what
+   it would do. **To undo**, restore the `ems-pre-restore-…` file the same way.
 
 **Point-in-time caveat:** `pg_restore` only restores the state at dump-time. There is no WAL archiving, so any punches recorded after the dump are lost. For real PITR, enable `archive_mode=on` + `archive_command` on the DB and stream WALs to S3.
 
