@@ -60,6 +60,10 @@ export async function GET(req: Request) {
         // Falls back to the current rate only for somebody with no RateChange
         // history at all, which is an account that has never been paid.
         rate_cent: rateAtMonthEnd.get(u.id) ?? u.hourly_rate_cent,
+        // Today's rate, which is what the rate dialog edits. The column above is
+        // the rate the MONTH was paid at; starting the dialog from it made "open
+        // August, press Save" set August's rate as the rate from now on.
+        current_rate_cent: u.hourly_rate_cent,
         // Reference only — what the owner expects to pay this person. Deliberately
         // excluded from `totals` below: it must never be summed or compared, only
         // displayed next to what they actually earned.

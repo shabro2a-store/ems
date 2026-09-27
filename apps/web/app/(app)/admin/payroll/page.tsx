@@ -12,6 +12,7 @@ interface Row {
   branch_id: string | null;
   branch_name: string | null;
   rate_cent: number;
+  current_rate_cent: number;
   // Reference only — what the owner expects to pay this person monthly. Never
   // part of any total; shown next to net pay so he can eyeball the gap himself.
   expected_salary_cent: number | null;
@@ -931,7 +932,9 @@ function BlockedCreditModal({ row, month, closed, onClose, onChanged }: { row: R
 }
 
 function RateModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void }) {
-  const [rate, setRate] = useState((row.rate_cent / 100).toFixed(2));
+  // Starts from TODAY's rate, never the month on screen: saving unchanged must
+  // change nothing.
+  const [rate, setRate] = useState((row.current_rate_cent / 100).toFixed(2));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   async function submit(e: React.FormEvent) {
@@ -949,7 +952,16 @@ function RateModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; o
     <Modal title={`Hourly rate · ${row.username}`} onClose={onClose}
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="rate" type="submit" loading={busy}>Save rate</Button></>}>
       <form id="rate" onSubmit={submit} className="space-y-4">
-        <Field label="New hourly rate (USD)" htmlFor="rr" hint="Applies from now on; hours already worked this month keep the old rate.">
+        {row.rate_cent !== row.current_rate_cent && (
+          <p className="text-sm text-muted">
+            This month was paid at {centsToUsd(row.rate_cent)}; the rate today is {centsToUsd(row.current_rate_cent)}.
+          </p>
+        )}
+        <Field
+          label="New hourly rate (USD)"
+          htmlFor="rr"
+          hint="Applies to every shift clocked out from now on - including one still open, which is paid at the rate in force when it ends."
+        >
           <Input id="rr" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} required />
         </Field>
         {err && <Alert tone="danger">{err}</Alert>}

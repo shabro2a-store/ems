@@ -364,7 +364,9 @@ Photos are wiped by the worker a week after the trip (`Trip.receipt_taken_at` st
   **inside** `gross_cent`, never added to it — accepted blocked-time credit, shown so a
   gross figure containing hours nobody clocked says so. Each row also carries
   `expected_salary_cent` (nullable) — the owner's reference figure; deliberately absent
-  from `totals`, since it is never summed or built into `net_cent`.
+  from `totals`, since it is never summed or built into `net_cent`. `rate_cent` is the
+  rate the month was paid at; `current_rate_cent` is the rate in force today (what the
+  rate dialog starts from - the two differ when the rate has changed since that month).
 - **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
   scoped to the branch filter.
 - **POST /api/admin/adjustments** *(CSRF, Idempotent)* `{ userId, month, kind:
