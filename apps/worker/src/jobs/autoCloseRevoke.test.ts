@@ -103,6 +103,7 @@ function makeDb() {
       },
     },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
+    $executeRaw: async () => 0,
   };
   return db;
 }

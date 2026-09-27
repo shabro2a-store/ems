@@ -119,37 +119,46 @@ export async function startTrip(
   }
 
   const receipt = input.receipt;
-  const trip = await db.$transaction(async (tx) => {
-    // The photo goes in with the trip, one write: a trip cannot exist without
-    // its receipt, and a receipt cannot be left behind by a start that failed
-    // on the ring below.
-    const t = await tx.trip.create({
-      data: {
-        driver_id: user.id,
-        branch_id: dispatchBranch.id,
-        out_at: now,
-        out_lat: input.lat,
-        out_lng: input.lng,
-        receipt_taken_at: now,
-        receipt: {
-          create: {
-            mime: receipt.mime,
-            bytes: receipt.bytes,
-            size: receipt.bytes.length,
-            width: receipt.width,
-            height: receipt.height,
+  // Two taps at once both pass the open-trip check above; the one-open-trip
+  // index lets only one insert through, and the other is the same refusal it
+  // would have got a second later - not a server error.
+  let trip;
+  try {
+    trip = await db.$transaction(async (tx) => {
+      // The photo goes in with the trip, one write: a trip cannot exist without
+      // its receipt, and a receipt cannot be left behind by a start that failed
+      // on the ring below.
+      const t = await tx.trip.create({
+        data: {
+          driver_id: user.id,
+          branch_id: dispatchBranch.id,
+          out_at: now,
+          out_lat: input.lat,
+          out_lng: input.lng,
+          receipt_taken_at: now,
+          receipt: {
+            create: {
+              mime: receipt.mime,
+              bytes: receipt.bytes,
+              size: receipt.bytes.length,
+              width: receipt.width,
+              height: receipt.height,
+            },
           },
         },
-      },
+      });
+      // Consume the dispatch call — guard on trip_id null so a concurrent start
+      // can't reuse the same ring.
+      await tx.driverCall.updateMany({
+        where: { id: call.id, trip_id: null },
+        data: { trip_id: t.id },
+      });
+      return t;
     });
-    // Consume the dispatch call — guard on trip_id null so a concurrent start
-    // can't reuse the same ring.
-    await tx.driverCall.updateMany({
-      where: { id: call.id, trip_id: null },
-      data: { trip_id: t.id },
-    });
-    return t;
-  });
+  } catch (e) {
+    if ((e as { code?: string }).code === 'P2002') return { ok: false, code: 'OPEN_TRIP_EXISTS' };
+    throw e;
+  }
 
   return { ok: true, trip_id: trip.id, out_at: trip.out_at };
 }
@@ -200,14 +209,18 @@ export async function endTrip(
     return { ok: false, code: 'OUT_OF_GEOFENCE' };
   }
 
-  const updated = await db.trip.update({
-    where: { id: open.id },
+  // Conditional on still being open: the sweep may have closed it since the
+  // read above, and a plain update by id wrote over the close it had recorded.
+  const claimed = await db.trip.updateMany({
+    where: { id: open.id, back_at: null },
     data: {
       back_at: now,
       back_lat: input.lat,
       back_lng: input.lng,
     },
   });
+  if (claimed.count !== 1) return { ok: false, code: 'NO_OPEN_TRIP' };
+  const updated = { id: open.id, out_at: open.out_at, back_at: now };
 
   const durationMs = now.getTime() - updated.out_at.getTime();
   const duration_min = Math.max(0, Math.floor(durationMs / 60_000));

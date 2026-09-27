@@ -4,6 +4,7 @@ import type { Notifier } from 'notify';
 import { prisma as defaultPrisma } from '../db/prisma';
 import { resolveRequiredMin } from './requiredMin';
 import { resolveDayStartHour, resolveWorkingDays } from './dayStart';
+import { punchLockKey } from './punchLock';
 
 /**
  * Past this, an open check-in is treated as a forgotten checkout.
@@ -182,6 +183,10 @@ export async function runAutoCloseAbandoned(
     const openMin = Math.floor((now.getTime() - lastIn.at.getTime()) / 60_000);
 
     const wrote = await db.$transaction(async (tx) => {
+      // The lock every punch writer takes (punchLock.ts): without it the re-read
+      // below is only a check, and this sweep and a check-in at the same moment
+      // both saw "no checkout" and both wrote one.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${punchLockKey(u.id)}::bigint)`;
       // Re-read inside the transaction: a real checkout landing between the
       // scan and the write must win, and two overlapping runs of this job must
       // not both write a checkout for the same session.

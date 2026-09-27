@@ -1,6 +1,7 @@
 import type { PrismaClient, Punch } from '@prisma/client';
 import { SHIFT_GAP_MIN, scheduleRowOn, workingDayHistoryFrom } from 'time';
 import { requiredMinFor, workingDaysOf, weekdayOfWorkingDay, type PunchLite } from './coverage';
+import { punchLockKey } from './punchLock';
 
 /**
  * How long an open check-in may run before the system decides nobody is going
@@ -226,6 +227,10 @@ export async function writeSystemCheckout(
   },
 ): Promise<Punch | null> {
   return db.$transaction(async (tx) => {
+    // The employee's own punches take this lock; without it the re-read below
+    // is only a check, and two writers at once (the sweep and a check-in, or
+    // two sweeps) both saw "no checkout" and both wrote one.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${punchLockKey(args.userId)}::bigint)`;
     const raced = await tx.punch.findFirst({
       where: { user_id: args.userId, kind: 'OUT', at: { gt: args.arrivalAt } },
       select: { id: true },

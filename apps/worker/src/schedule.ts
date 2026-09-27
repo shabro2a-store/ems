@@ -16,12 +16,28 @@ export interface CronLike {
   schedule(expression: string, fn: () => unknown, options?: { timezone?: string }): unknown;
 }
 
-function safe(name: string, fn: () => Promise<unknown>) {
+const running = new Set<string>();
+
+/**
+ * One run of a job at a time. node-cron starts a job on its tick whether or not
+ * the last run has finished, so a slow one - a big sweep, a slow database -
+ * overlapped the next: two sweeps writing the same checkouts, two ring
+ * repeaters pushing twice. A tick that finds its job still going skips; the
+ * next tick runs as usual. A failed run is logged and does not stop the next.
+ */
+export function guarded(name: string, fn: () => Promise<unknown>) {
   return async () => {
+    if (running.has(name)) {
+      console.warn(`[cron:${name}] still running from the last tick - skipped`);
+      return;
+    }
+    running.add(name);
     try {
       await fn();
     } catch (e) {
       console.error(`[cron:${name}]`, e);
+    } finally {
+      running.delete(name);
     }
   };
 }
@@ -31,7 +47,7 @@ export function registerJobs(cron: CronLike, notifier: Notifier): void {
   // this "0 23" was 02:00 Beirut in summer and 01:00 in winter, and the evening
   // summary described the day that had just begun.
   const at = (expression: string, name: string, fn: () => Promise<unknown>) =>
-    cron.schedule(expression, safe(name, fn), { timezone: SHOP_TZ });
+    cron.schedule(expression, guarded(name, fn), { timezone: SHOP_TZ });
 
   // Six fields: this one runs every five SECONDS. A ring has to behave like a
   // phone ringing rather than a single notification nobody heard, and the driver

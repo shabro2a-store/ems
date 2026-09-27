@@ -60,7 +60,7 @@ const mocks = vi.hoisted(() => ({
   user: { findUnique: vi.fn() },
   punch: { findFirst: vi.fn() },
   scheduleOverride: { findUnique: vi.fn() },
-  trip: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+  trip: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   driverCall: { findFirst: vi.fn(), updateMany: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -177,6 +177,13 @@ beforeEach(() => {
     if (!t) throw new Error('not found');
     Object.assign(t, data);
     return t;
+  });
+
+  mocks.trip.updateMany.mockImplementation(async ({ where, data }: { where: { id: string; back_at?: null }; data: Partial<{ back_at: Date; back_lat: number; back_lng: number }> }) => {
+    const t = store.trips.find((x) => x.id === where.id && (where.back_at !== null || x.back_at === null));
+    if (!t) return { count: 0 };
+    Object.assign(t, data);
+    return { count: 1 };
   });
 
   // openCheckInBranchId: the latest IN, then any OUT after it.
