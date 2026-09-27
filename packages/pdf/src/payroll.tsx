@@ -102,7 +102,46 @@ function genLabel(d: Date): string {
   return d.toLocaleDateString('en-GB', { timeZone: 'Asia/Beirut', day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+export interface SummaryPart {
+  label: string;
+  cent: number;
+  /** +1 adds to the total to pay, -1 comes out of it. */
+  sign: 1 | -1;
+}
+
+/**
+ * The money cards across the top, in the order they combine: gross, plus
+ * adjustments, less penalties, revoked overtime and advances, is the total to
+ * pay. Revoked overtime once had no card, so the cards did not add up to the
+ * total printed beside them.
+ */
+export function summaryCards(rows: PayrollRow[]): { total: number; parts: SummaryPart[] } {
+  const sum = (f: (r: PayrollRow) => number) => rows.reduce((a, r) => a + f(r), 0);
+  return {
+    total: sum((r) => r.net_cent),
+    parts: [
+      { label: 'Gross wages', cent: sum((r) => r.gross_cent), sign: 1 },
+      { label: 'Adjustments', cent: sum((r) => r.adjustments_cent), sign: 1 },
+      { label: 'Penalties', cent: sum((r) => r.penalties_cent), sign: -1 },
+      { label: 'Overtime revoked', cent: sum((r) => r.overtime_deduction_cent ?? 0), sign: -1 },
+      { label: 'Advances', cent: sum((r) => r.advances_cent), sign: -1 },
+    ],
+  };
+}
+
+function partText(p: SummaryPart): string {
+  if (p.sign === 1) return p.label === 'Gross wages' ? usd(p.cent) : signedUsd(p.cent);
+  return p.cent > 0 ? `−${usd(p.cent)}` : '—';
+}
+
+function partColor(p: SummaryPart): string {
+  if (p.label === 'Gross wages') return C.ink;
+  if (p.sign === -1) return p.cent > 0 ? C.danger : C.ink;
+  return p.cent > 0 ? C.success : p.cent < 0 ? C.danger : C.ink;
+}
+
 export function PayrollDocument({ month, generatedAt, rows, branchName }: PayrollPdfProps): React.ReactElement {
+  const cards = summaryCards(rows);
   const totals = rows.reduce(
     (a, r) => ({ gross: a.gross + r.gross_cent, credit: a.credit + (r.blocked_credit_cent ?? 0), trips: a.trips + (r.trips_count ?? 0), tripsCent: a.tripsCent + (r.trips_cent ?? 0), adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, ot: a.ot + (r.overtime_deduction_cent ?? 0), adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
     { gross: 0, credit: 0, trips: 0, tripsCent: 0, adj: 0, pen: 0, ot: 0, adv: 0, net: 0, hours: 0 },
@@ -126,17 +165,24 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
           </View>
         </View>
 
+        <View style={[styles.cards, { marginBottom: 8 }]}>
+          <View style={styles.card}><Text style={styles.cardK}>Total to pay</Text><Text style={[styles.cardV, { color: C.primary }]}>{usd(cards.total)}</Text></View>
+          {cards.parts.map((p) => (
+            <View key={p.label} style={styles.card}><Text style={styles.cardK}>{p.label}</Text><Text style={[styles.cardV, { color: partColor(p) }]}>{partText(p)}</Text></View>
+          ))}
+        </View>
+        {/* The cards above add up to the total; these two only describe it, so
+            they sit on a row of their own. */}
         <View style={styles.cards}>
-          <View style={styles.card}><Text style={styles.cardK}>Total to pay</Text><Text style={[styles.cardV, { color: C.primary }]}>{usd(totals.net)}</Text></View>
-          <View style={styles.card}><Text style={styles.cardK}>Gross wages</Text><Text style={styles.cardV}>{usd(totals.gross)}</Text></View>
-          <View style={styles.card}><Text style={styles.cardK}>Adjustments</Text><Text style={[styles.cardV, { color: totals.adj > 0 ? C.success : totals.adj < 0 ? C.danger : C.ink }]}>{signedUsd(totals.adj)}</Text></View>
-          <View style={styles.card}><Text style={styles.cardK}>Penalties</Text><Text style={[styles.cardV, { color: totals.pen > 0 ? C.danger : C.ink }]}>{totals.pen > 0 ? `−${usd(totals.pen)}` : '—'}</Text></View>
-          <View style={styles.card}><Text style={styles.cardK}>Advances</Text><Text style={[styles.cardV, { color: totals.adv > 0 ? C.danger : C.ink }]}>{usd(totals.adv)}</Text></View>
           {/* Inside gross wages above, not on top of it: time the app refused
               a check-in for, which the owner approved. Shown because a gross
               figure that includes hours nobody clocked has to say so. */}
           <View style={styles.card}><Text style={styles.cardK}>of which blocked time</Text><Text style={styles.cardV}>{totals.credit > 0 ? usd(totals.credit) : '—'}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Hours</Text><Text style={styles.cardV}>{totals.hours.toFixed(1)}</Text></View>
+          <View style={[styles.card, { borderWidth: 0 }]} />
+          <View style={[styles.card, { borderWidth: 0 }]} />
+          <View style={[styles.card, { borderWidth: 0 }]} />
+          <View style={[styles.card, { borderWidth: 0 }]} />
         </View>
 
         <View style={styles.thead}>
