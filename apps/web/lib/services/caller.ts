@@ -128,15 +128,18 @@ export async function branchDriverStatuses(
         ringing: Boolean(pendingRing),
         last_trip_at: lastTrip ? lastTrip.out_at.toISOString() : null,
         roaming: d.branch_id !== branchId,
-        // Not part of DriverStatus - only used to drop visitors who are not here.
-        _here: d.branch_id === branchId || clockInBranchId === branchId,
+        // Not part of DriverStatus - only used to drop drivers who are not here.
+        // Clocked in: the branch they clocked in at, and no other - a driver of
+        // this branch clocked in elsewhere used to show here as available,
+        // where ringing them could only fail. Off shift: their own branch.
+        _here: clockedIn ? clockInBranchId === branchId : d.branch_id === branchId,
       };
     }),
   );
 
-  // A visiting driver belongs on exactly one board: the branch they clocked in
-  // at. Showing them everywhere would put a driver who is at Hamra on the
-  // Achrafieh board, where ringing them only produces a geofence refusal.
+  // A driver belongs on exactly one board: the branch they are clocked in at,
+  // visitor or not. Showing them anywhere else puts a driver who is at Hamra on
+  // the Achrafieh board, where ringing them only produces a refusal.
   return statuses
     .filter((s) => s._here)
     .map(({ _here: _drop, ...rest }) => rest)
