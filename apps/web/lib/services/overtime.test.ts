@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeOvertime, sumRevokedOvertimeCent } from './overtime';
 import { centsForLastMinutes, computeCoverage, type DayCoverage, type PunchLite } from './coverage';
-import { computePayoutFromRows, rateAt } from './payout';
+import { computePayoutFromRows, hourlyRateAt } from './payout';
 
 const RATE_CENT = 60_000;
 const RATE = [{ rate_cent: RATE_CENT, effective_from: new Date('2020-01-01T00:00:00Z') }];
@@ -225,7 +225,7 @@ describe('revoking overtime takes back only what the excess was paid', () => {
       punches: ACROSS_THE_RAISE,
       shiftMinByWeekday: new Map([0, 1, 2, 3, 4, 5, 6].map((d) => [d, requiredMin] as const)),
       overridesByDate: new Map(),
-      rateCentAt: (at) => rateAt(RAISE, at),
+      rateCentAt: (at) => hourlyRateAt(RAISE, at),
     });
   }
 

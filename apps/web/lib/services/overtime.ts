@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { workingDayHistoryFrom } from 'time';
-import { rateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
+import { hourlyRateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   centsForLastMinutes,
   type DayCoverage,
@@ -60,7 +60,7 @@ export function computeOvertime(args: {
   for (const day of args.coverage) {
     if (!day.closed) continue;
     if (day.deltaMin <= args.graceMin) continue;
-    const rate = rateAt(args.rateChanges, day.lastPunchAt);
+    const rate = hourlyRateAt(args.rateChanges, day.lastPunchAt);
     items.push({
       date: day.date,
       overtimeMin: day.deltaMin,
@@ -162,7 +162,7 @@ export async function overtimeForUser(
     punches: punches as PunchLite[],
     shiftMinByWeekday,
     overridesByDate,
-    rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
+    rateCentAt: (at) => hourlyRateAt(rateChanges as RateChangeLite[], at),
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
     dayStartHour: dayStartHourFor(user),
@@ -308,7 +308,7 @@ export async function pendingOvertimeNotices(
       punches: (punchesBy.get(u.id) ?? []) as PunchLite[],
       shiftMinByWeekday,
       overridesByDate,
-      rateCentAt: (at) => rateAt(userRates, at),
+      rateCentAt: (at) => hourlyRateAt(userRates, at),
       attempts: blocked.attemptsByUser.get(u.id) ?? [],
       decisionsByDate: blocked.decisionsByUser.get(u.id) ?? new Map(),
       dayStartHour: dayStartByUser.get(u.id) ?? 0,

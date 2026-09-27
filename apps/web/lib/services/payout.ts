@@ -131,6 +131,16 @@ export function rateAt(rateChanges: { rate_cent: number; effective_from: Date }[
 }
 
 /**
+ * The hourly rate at an instant. Before the person's first rate - a correction
+ * moved back past the day they were added - it is the rate they started on:
+ * $0 was never anybody's wage, and nothing said the hours had been dropped.
+ * Not for trips (rateAt): a driver had no trip rate until one was set.
+ */
+export function hourlyRateAt(rateChanges: { rate_cent: number; effective_from: Date }[], at: Date): number {
+  return rateAt(rateChanges, at) || (rateChanges[0] && rateChanges[0].effective_from > at ? rateChanges[0].rate_cent : 0);
+}
+
+/**
  * Pair IN/OUT and price each pair, keeping only the pairs that belong to
  * `month` - which is decided by the Beirut day of the ARRIVAL, never by the
  * timestamp of either punch.
@@ -172,7 +182,7 @@ function pairHours(
         if (belongs) {
           const minutes = Math.max(0, Math.floor((p.at.getTime() - openIn.at.getTime()) / 60_000));
           totalMinutes += minutes;
-          const rateCent = rateAt(rateChanges, p.at);
+          const rateCent = hourlyRateAt(rateChanges, p.at);
           grossCent += Math.floor((minutes * rateCent) / 60);
         }
         openIn = null;

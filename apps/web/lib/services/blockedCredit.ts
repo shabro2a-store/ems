@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { inBeirut, workingDayHistoryFrom } from 'time';
-import { rateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
+import { hourlyRateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   computeCoverage,
   type CreditedTime,
@@ -380,7 +380,7 @@ export async function blockedCreditForUser(
     punches: punches as PunchLite[],
     shiftMinByWeekday,
     overridesByDate,
-    rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
+    rateCentAt: (at) => hourlyRateAt(rateChanges as RateChangeLite[], at),
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
     dayStartHour: dayStartHourFor(user),
@@ -541,7 +541,7 @@ async function allBlockedCredits(
       punches: (punchesBy.get(id) ?? []) as PunchLite[],
       shiftMinByWeekday,
       overridesByDate,
-      rateCentAt: (at) => rateAt(userRates, at),
+      rateCentAt: (at) => hourlyRateAt(userRates, at),
       attempts,
       decisionsByDate: blocked.decisionsByUser.get(id) ?? new Map(),
       dayStartHour: dayStartByUser.get(id) ?? 0,

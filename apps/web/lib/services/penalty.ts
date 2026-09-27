@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { workingDayHistoryFrom } from 'time';
-import { rateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
+import { hourlyRateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   currentShiftDayMinutes,
   type DayCoverage,
@@ -125,7 +125,7 @@ export function shortfallPenalties(args: {
     const shortfallMin = -day.deltaMin;
     const penaltyMin = penaltyMinutes(shortfallMin, day.workedMin, args.graceMin);
     if (penaltyMin === 0) continue;
-    const rate = rateAt(args.rateChanges, day.lastPunchAt);
+    const rate = hourlyRateAt(args.rateChanges, day.lastPunchAt);
     const waiver = args.waivers.get(`${day.date}|SHORTFALL`);
     // The minute ceiling gets the intent right but cannot get the money right
     // on its own: it prices the whole day at one rate, while payroll prices
@@ -239,7 +239,7 @@ export async function penaltiesForUser(
     punches: punches as PunchLite[],
     shiftMinByWeekday,
     overridesByDate,
-    rateCentAt: (at) => rateAt(rateChanges as RateChangeLite[], at),
+    rateCentAt: (at) => hourlyRateAt(rateChanges as RateChangeLite[], at),
     attempts: blocked.attemptsByUser.get(userId) ?? [],
     decisionsByDate: blocked.decisionsByUser.get(userId) ?? new Map(),
     dayStartHour,
@@ -393,7 +393,7 @@ export async function pendingPenaltyNotices(
       punches: userPunches,
       shiftMinByWeekday,
       overridesByDate,
-      rateCentAt: (at) => rateAt(userRates, at),
+      rateCentAt: (at) => hourlyRateAt(userRates, at),
       attempts: blocked.attemptsByUser.get(u.id) ?? [],
       decisionsByDate: blocked.decisionsByUser.get(u.id) ?? new Map(),
       dayStartHour: dayStartByUser.get(u.id) ?? 0,

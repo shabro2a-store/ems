@@ -8,7 +8,7 @@ import {
 import { computeCoverage, type PunchLite } from './coverage';
 import { computeOvertime } from './overtime';
 import { currentShiftDate, shortfallPenalties } from './penalty';
-import { computePayoutFromRows, rateAt } from './payout';
+import { computePayoutFromRows, rateAt, hourlyRateAt } from './payout';
 
 // 2026-08-17 is a Monday; Beirut is UTC+3 in August.
 const DATE = '2026-08-17';
@@ -37,7 +37,7 @@ function build(args: {
     punches: args.punches,
     shiftMinByWeekday: shiftOf(args.shiftMin),
     overridesByDate: new Map(),
-    rateCentAt: (at) => rateAt(rates, at),
+    rateCentAt: (at) => hourlyRateAt(rates, at),
     attempts: args.attempts ?? [],
     decisionsByDate: args.decisions ?? new Map(),
   });
@@ -186,7 +186,7 @@ describe('blocked-time credit', () => {
       punches: overtimeDay,
       shiftMinByWeekday: shiftOf(480),
       overridesByDate: new Map(),
-      rateCentAt: (at) => rateAt(RATES, at),
+      rateCentAt: (at) => hourlyRateAt(RATES, at),
     });
     expect(withAttempt.credits).toEqual([]);
     expect(withAttempt.coverage).toEqual(without);

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { currentShiftDate, penaltyMinutes, shortfallPenalties, sumActivePenaltiesCent } from './penalty';
 import type { PenaltyDecisionLite } from './penalty';
 import { computeCoverage, type DayCoverage, type PunchLite } from './coverage';
-import { computePayoutFromRows, rateAt } from './payout';
+import { computePayoutFromRows, hourlyRateAt } from './payout';
 
 // The owner's own numbers: $2.00/h against an 8-hour day. One rate throughout,
 // so a fixture's grossCent is derived from it and cannot drift away from the
@@ -264,7 +264,7 @@ function judgeAt(list: PunchLite[], rates: RateLite[], now: Date) {
       punches: list,
       shiftMinByWeekday: ALL_DAYS_8H,
       overridesByDate: new Map(),
-      rateCentAt: (at) => rateAt(rates, at),
+      rateCentAt: (at) => hourlyRateAt(rates, at),
     }),
     rateChanges: rates,
     graceMin: GRACE,
@@ -383,18 +383,18 @@ describe('a penalty never reaches past the day it is for', () => {
     expect(gross - item.amount_cent).toBe(0);
   });
 
-  it('raises no penalty at all for a day that priced at zero', () => {
-    // A punch backdated to before the employee's first RateChange prices the
-    // whole day at nothing, so the clamp takes the penalty to nothing too. The
-    // day is dropped rather than shown as a $0.00 penalty nobody can act on -
-    // and the real problem, a day of work paying zero, is a rate-history one.
+  it('prices a day from before the first rate at the rate the person started on', () => {
+    // A punch backdated to before the employee's first RateChange used to price
+    // the whole day at nothing - and the clamp then took its penalty to nothing
+    // too. Money #32: the day is paid at the starting rate, so it is judged
+    // like any other.
     const rateSetLater: RateLite[] = [{ rate_cent: 200, effective_from: new Date('2026-09-01T00:00:00Z') }];
     const worked = punches(['2026-08-17T05:00:00Z', 'IN'], ['2026-08-17T09:00:00Z', 'OUT']);
 
-    expect(paidForCent(worked, rateSetLater)).toBe(0);
-    // The shortfall is real - 240 of 480 minutes - it is only the money that is not.
-    expect(judgeAt(worked, REAL_RATE, NEXT_DAY)[0]!.shortfallMin).toBe(240);
-    expect(judgeAt(worked, rateSetLater, NEXT_DAY)).toHaveLength(0);
+    expect(paidForCent(worked, rateSetLater)).toBe(800);
+    const [item] = judgeAt(worked, rateSetLater, NEXT_DAY);
+    expect(item!.shortfallMin).toBe(240);
+    expect(item!.amount_cent).toBeGreaterThan(0);
   });
 
   it('does not overshoot by the rounding on each session', () => {

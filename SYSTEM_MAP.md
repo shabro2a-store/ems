@@ -94,6 +94,9 @@ cuid PKs, money = Int cents.
   real punch carries. Written **only** past `verifyWithinGeofence`, which is what makes it
   evidence rather than a claim — see the blocked-time credit in §4.
 - **RateChange** — point-in-time hourly rate history (payroll uses the rate in effect at each shift).
+  Work from before the first row (a correction moved back past the day the person was added) is
+  paid at the first rate, never $0 (`hourlyRateAt`). Trip rates do not fall back: a trip from
+  before any trip rate really was unpaid.
 - **Schedule** — rows per (user, weekday 0=Sun..6=Sat, `effective_from`): `shift_min`, the hours owed
   that day from that date on. A day is judged against the row in force on it (`scheduleRowOn`),
   so an edit — which adds rows dated today, a weekday switched off being a 0 — never re-judges

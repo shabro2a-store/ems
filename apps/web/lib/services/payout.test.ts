@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computePayoutFromRows, monthRangeUtc } from './payout';
+import { computePayoutFromRows, monthRangeUtc, rateAt, hourlyRateAt } from './payout';
 
 function rc(rateCent: number, iso: string) {
   return { user_id: 'u', rate_cent: rateCent, effective_from: new Date(iso) };
@@ -167,5 +167,29 @@ describe('computePayoutFromRows', () => {
     });
     expect(result.hours).toBe(0);
     expect(result.grossCent).toBe(0);
+  });
+});
+/*
+ * Money #32: a shift from before the person's first rate - a correction moved
+ * back past the day they were added, say - was priced at $0, and nothing said
+ * so. It is paid at the rate they started on. Trips are different: a driver
+ * had no trip rate until one was set, so a trip before it really was unpaid.
+ */
+describe('a shift from before the first rate', () => {
+  it('is paid at the rate the person started on, not $0', () => {
+    const result = computePayoutFromRows({
+      userId: 'u',
+      punches: [p('IN', '2026-07-01T08:00:00Z'), p('OUT', '2026-07-01T16:00:00Z')],
+      rateChanges: [rc(250, '2026-07-05T00:00:00Z'), rc(300, '2026-07-20T00:00:00Z')],
+      adjustments: [],
+      approvedAdvances: [],
+    });
+    expect(result.grossCent).toBe(8 * 250);
+  });
+
+  it('leaves a trip from before any trip rate unpaid', () => {
+    expect(rateAt([rc(150, '2026-07-05T00:00:00Z')], new Date('2026-07-01T10:00:00Z'))).toBe(0);
+    expect(hourlyRateAt([rc(150, '2026-07-05T00:00:00Z')], new Date('2026-07-01T10:00:00Z'))).toBe(150);
+    expect(hourlyRateAt([], new Date('2026-07-01T10:00:00Z'))).toBe(0);
   });
 });

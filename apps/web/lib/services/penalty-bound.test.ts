@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { currentShiftDate, shortfallPenalties } from './penalty';
 import { computeCoverage, type PunchLite } from './coverage';
-import { computePayoutFromRows, rateAt } from './payout';
+import { computePayoutFromRows, hourlyRateAt } from './payout';
 
 /**
  * The ceiling exists so one bad day can cost that day's pay and nothing more.
@@ -80,7 +80,7 @@ function penaltyCentFor(c: Case): number {
       punches: c.punches,
       shiftMinByWeekday: new Map([0, 1, 2, 3, 4, 5, 6].map((d) => [d, c.shiftMin] as const)),
       overridesByDate: new Map(),
-      rateCentAt: (at) => rateAt(c.rates, at),
+      rateCentAt: (at) => hourlyRateAt(c.rates, at),
     }),
     rateChanges: c.rates,
     graceMin: c.graceMin,
