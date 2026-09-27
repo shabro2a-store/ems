@@ -548,7 +548,7 @@ The POS caller's board. A caller belongs to one branch and can only see/ring dri
 ### GET /api/caller/drivers
 → `{ branch, drivers: [{ id, username, name, clocked_in, available, open_trip_since,
 trips_today, ringing, last_trip_at, roaming }] }`. `available` = clocked in and not on a trip;
-`roaming` = belongs to another branch and is covering here. A visiting driver appears on
+`roaming` = belongs to another branch and is covering here. A clocked-in driver appears on
 exactly one board — the branch their open check-in was made at — and sorts behind the
 branch's own drivers at equal availability;
 `trips_today` counts trips since this shift's clock-in.

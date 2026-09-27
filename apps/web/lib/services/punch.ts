@@ -729,11 +729,16 @@ export async function resolveWatchedFlag(
   punch: Punch,
   notifierInstance?: Notifier,
 ): Promise<void> {
+  // Only a flag for the day this punch is on. A WATCHED flag is raised once a
+  // working day is over and nobody came, so a punch on any later day proves
+  // nothing about it - resolving it here made every absence vanish at the
+  // person's next check-in. The owner clears those on the dashboard.
+  const today = inBeirut(punch.at).date;
   const candidate = await db.flag.findFirst({
-    where: { kind: 'WATCHED', user_id: user.id, resolved_at: null },
+    where: { kind: 'WATCHED', user_id: user.id, resolved_at: null, context_json: { path: ['date'], equals: today } },
     orderBy: { created_at: 'asc' },
   });
-  if (!candidate) return;
+  if (!candidate || (candidate.context_json as { date?: string } | null)?.date !== today) return;
   const claim = await db.flag.updateMany({
     where: { id: candidate.id, resolved_at: null },
     data: { resolved_at: new Date() },

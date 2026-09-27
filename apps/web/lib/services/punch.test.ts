@@ -122,6 +122,7 @@ vi.mock('@/lib/db/prisma', () => ({
 }));
 
 import { punchEmployee, punchLockKey } from './punch';
+import { todayInBeirut } from 'time';
 
 function resetStore() {
   store.users.clear();
@@ -983,7 +984,7 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
       user_id: user.id,
       kind: 'WATCHED',
       resolved_at: null,
-      context_json: { scheduled_start: '09:00' },
+      context_json: { date: todayInBeirut() },
       created_at: new Date('2026-07-10T09:00:00Z'),
     });
 
@@ -1002,6 +1003,40 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
     expect(sent.length).toBe(1);
     expect((sent[0] as { template: string }).template).toBe('watched_resolved');
     expect(store.flags[0]!.resolved_at).not.toBeNull();
+  });
+
+  /*
+   * #38: a WATCHED flag is raised for a working day that is already over - the
+   * person never came. Their next punch is on a later day and proves nothing
+   * about that one, yet it marked the flag resolved and the absence vanished.
+   */
+  it("leaves an absence standing when the person punches on a later day", async () => {
+    const branch = makeBranch();
+    const user = makeUser('u1', branch);
+    store.users.set(user.id, user);
+    const yesterday = new Date(Date.now() - 86_400_000);
+    store.flags.push({
+      id: 'f-absent',
+      user_id: user.id,
+      kind: 'WATCHED',
+      resolved_at: null,
+      context_json: { shift_min: 480, date: todayInBeirut(yesterday) },
+      created_at: new Date(),
+    });
+
+    const sent: unknown[] = [];
+    await punchEmployee({
+      userId: 'u1',
+      kind: 'IN',
+      lat: 33.8962,
+      lng: 35.4827,
+      accuracy: 10,
+      deviceFp: 'fp',
+      ip: '1.2.3.4',
+      notifier: { send: async (p) => { sent.push(p); } },
+    });
+    expect(store.flags[0]!.resolved_at).toBeNull();
+    expect(sent.filter((p) => (p as { template: string }).template === 'watched_resolved')).toHaveLength(0);
   });
 
   it('does not fire notifier when no WATCHED flag exists', async () => {
@@ -1032,7 +1067,7 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
       user_id: user.id,
       kind: 'WATCHED',
       resolved_at: null,
-      context_json: {},
+      context_json: { date: todayInBeirut() },
       created_at: new Date(),
     });
     mocks.flag.updateMany.mockResolvedValue({ count: 0 });
@@ -1056,8 +1091,8 @@ describe('WATCHED flag resolution (race-safe select-then-claim)', () => {
     const user = makeUser('u1', branch);
     store.users.set(user.id, user);
     store.flags.push(
-      { id: 'f-newer', user_id: user.id, kind: 'WATCHED', resolved_at: null, context_json: {}, created_at: new Date('2026-07-10T10:00:00Z') },
-      { id: 'f-older', user_id: user.id, kind: 'WATCHED', resolved_at: null, context_json: {}, created_at: new Date('2026-07-10T09:00:00Z') },
+      { id: 'f-newer', user_id: user.id, kind: 'WATCHED', resolved_at: null, context_json: { date: todayInBeirut() }, created_at: new Date('2026-07-10T10:00:00Z') },
+      { id: 'f-older', user_id: user.id, kind: 'WATCHED', resolved_at: null, context_json: { date: todayInBeirut() }, created_at: new Date('2026-07-10T09:00:00Z') },
     );
 
     const sent: Array<{ context: { watched: { id: string } } }> = [];
