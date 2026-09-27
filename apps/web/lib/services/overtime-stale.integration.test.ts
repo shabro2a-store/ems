@@ -136,7 +136,7 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
 
   it('deducts nothing and re-queues the day when the overtime grows after the ruling', async () => {
     const { branch, emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     // Session 1: the owner sees 120 minutes over and revokes $4.00.
     const queuedBefore = await pendingFor(emp.id, emp.username);
@@ -184,7 +184,7 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
 
   it('deducts the new amount once the owner rules on it again', async () => {
     const { branch, emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await decide(aSession, emp.id, DAY, 'REVOKED', OVER_1_MIN)).status).toBe(200);
     await workThreeHoursMore(emp.id, branch.id);
 
@@ -207,7 +207,7 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
     // can see. Stamping "whatever the day is at click time" would quietly turn
     // that click into a $10.00 deduction.
     const { branch, emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     const rendered = await listedOvertime(aSession, emp.id);
     expect(rendered[0]!.overtimeMin).toBe(OVER_1_MIN);
@@ -244,7 +244,7 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
 
   it('lands the ruling once it names the figure the day actually has', async () => {
     const { branch, emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await workThreeHoursMore(emp.id, branch.id);
 
     expect((await decide(aSession, emp.id, DAY, 'REVOKED', OVER_2_MIN)).status).toBe(200);
@@ -263,7 +263,7 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
     // Without the token there is nothing to confirm against, so a client must
     // not be able to opt out of the check by omitting it.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     const res = await decide(aSession, emp.id, DAY, 'REVOKED');
     expect(res.status).toBe(400);
@@ -273,7 +273,7 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
 
   it('still undoes a ruling: the row goes and the day returns to pending', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await decide(aSession, emp.id, DAY, 'REVOKED', OVER_1_MIN)).status).toBe(200);
     expect((await payrollRow(aSession, 'ots-emp')).overtime_deduction_cent).toBe(OVER_1_CENT);
 
@@ -293,7 +293,7 @@ describe('an overtime decision does not expand to cover later work (HTTP)', () =
 
   it('treats a row written before the column existed as stale', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await getTestPrisma().overtimeDecision.create({
       data: {
         user_id: emp.id,

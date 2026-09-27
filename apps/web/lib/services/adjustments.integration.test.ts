@@ -31,7 +31,7 @@ describe('adjustments integration', () => {
     const employee = await seedTestUser({ username: 'adj-emp', branch_id: null });
     const admin = await seedTestUser({ username: 'adj-admin', role: Role.ADMIN });
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/adjustments`, {
       method: 'POST',
       headers: {
@@ -71,7 +71,7 @@ describe('adjustments integration', () => {
 
   it('rejects adjustment with missing fields', async () => {
     const admin = await seedTestUser({ username: 'adj-admin2', role: Role.ADMIN });
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/adjustments`, {
       method: 'POST',
       headers: {

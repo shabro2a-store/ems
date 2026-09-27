@@ -27,7 +27,7 @@ describe('GET /api/admin/now', () => {
 
   it('returns empty driversOut and flags initially', async () => {
     const admin = await seedTestUser({ username: 'now-admin', role: Role.ADMIN });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/now`, {
       headers: { Cookie: session.cookies, 'X-CSRF-Token': session.csrf },
       credentials: 'include',
@@ -45,7 +45,7 @@ describe('GET /api/admin/now', () => {
     const admin = await seedTestUser({ username: 'now-admin2', role: Role.ADMIN });
     const trip = await seedTestTrip({ driver_id: driver.id, branch_id: branch.id });
 
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/now`, {
       headers: { Cookie: session.cookies, 'X-CSRF-Token': session.csrf },
       credentials: 'include',
@@ -80,7 +80,7 @@ describe('GET /api/admin/now', () => {
       created_at: oldDate,
     });
 
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/now`, {
       headers: { Cookie: session.cookies, 'X-CSRF-Token': session.csrf },
       credentials: 'include',

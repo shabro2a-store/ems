@@ -27,7 +27,7 @@ describe('the payroll table', () => {
     await seedTestRateChange({ user_id: emp.id, rate_cent: 400, effective_from: new Date('2026-01-01T00:00:00Z') });
     await seedTestRateChange({ user_id: emp.id, rate_cent: 500, effective_from: new Date('2026-09-01T00:00:00Z') });
     await seedTestUser({ username: 'rate-admin', role: Role.ADMIN });
-    const admin = await loginAs('rate-admin', 'change-me');
+    const admin = await loginAs('rate-admin', 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/payroll?month=2026-08`, { headers: { Cookie: admin.cookies } });
     expect(res.status).toBe(200);

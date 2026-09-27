@@ -26,7 +26,7 @@ describe('punch.correct integration', () => {
 
   async function correct(punchId: string, newAt: string) {
     const admin = await seedTestUser({ username: `corr-admin-${Math.random().toString(36).slice(2, 8)}`, role: Role.ADMIN });
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     return fetch(`${BASE_URL}/api/admin/punches/correct`, {
       method: 'POST',
       headers: {
@@ -79,7 +79,7 @@ describe('punch.correct integration', () => {
       lng: 35.4827,
     });
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const newAt = '2026-07-01T09:30:00.000Z';
     const res = await fetch(`${BASE_URL}/api/admin/punches/correct`, {
       method: 'POST',
@@ -143,7 +143,7 @@ describe('punch.correct integration', () => {
       },
     });
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const newAt = '2026-07-12T16:30:00.000Z';
     const res = await fetch(`${BASE_URL}/api/admin/punches/correct`, {
       method: 'POST',
@@ -172,7 +172,7 @@ describe('punch.correct integration', () => {
 
   it('returns 404 for unknown punch', async () => {
     const admin = await seedTestUser({ username: 'corr-admin2', role: Role.ADMIN });
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/punches/correct`, {
       method: 'POST',
       headers: {

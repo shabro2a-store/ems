@@ -53,7 +53,7 @@ describe('leave integration', () => {
 
   it('POST /api/me/leave creates LeaveRequest + AuditLog row', async () => {
     const employee = await seedTestUser({ username: 'lv-emp1', branch_id: null });
-    const { cookies, csrf } = await loginAs(employee.username, 'change-me');
+    const { cookies, csrf } = await loginAs(employee.username, 'test-pass-1');
     const start = plusDays(todayInBeirut(), 7);
     const end = plusDays(todayInBeirut(), 9);
 
@@ -71,7 +71,7 @@ describe('leave integration', () => {
   it('admin APPROVE creates one ScheduleOverride per date in range + AuditLog', async () => {
     const employee = await seedTestUser({ username: 'lv-emp2', branch_id: null });
     const admin = await seedTestUser({ username: 'lv-admin2', role: Role.ADMIN });
-    const { cookies, csrf } = await loginAs(employee.username, 'change-me');
+    const { cookies, csrf } = await loginAs(employee.username, 'test-pass-1');
     const start = plusDays(todayInBeirut(), 7);
     const end = plusDays(todayInBeirut(), 9);
 
@@ -82,7 +82,7 @@ describe('leave integration', () => {
     const createBody = create.body as { data?: { id: string } };
     const leaveId = createBody.data!.id;
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const decision = await postJson(`/api/admin/leave/${leaveId}/decision`, {
       cookies: aSession.cookies, csrf: aSession.csrf, body: { decision: 'APPROVED' },
     });
@@ -101,14 +101,14 @@ describe('leave integration', () => {
   it('GET /api/admin/schedules/[userId] includes pendingLeaves', async () => {
     const employee = await seedTestUser({ username: 'lv-emp3', branch_id: null });
     const admin = await seedTestUser({ username: 'lv-admin3', role: Role.ADMIN });
-    const { cookies, csrf } = await loginAs(employee.username, 'change-me');
+    const { cookies, csrf } = await loginAs(employee.username, 'test-pass-1');
     const start = plusDays(todayInBeirut(), 5);
     const end = plusDays(todayInBeirut(), 5);
     await postJson('/api/me/leave', {
       cookies, csrf, body: { kind: 'HOURS_CHANGE', start_date: start, end_date: end, hoursOff: 2 },
     });
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const r = await getJson(`/api/admin/schedules/${employee.id}`, { cookies: aSession.cookies, csrf: aSession.csrf });
     expect(r.status).toBe(200);
     const body = r.body as { data?: { pendingLeaves: unknown[] } };

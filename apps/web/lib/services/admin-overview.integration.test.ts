@@ -68,7 +68,7 @@ describe('admin overview: who counts as off today (HTTP)', () => {
       },
     });
 
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const data = await overview(session);
     const by = new Map(data.people.map((p) => [p.username, p.status]));
 
@@ -100,7 +100,7 @@ describe('admin overview: who counts as off today (HTTP)', () => {
       },
     });
 
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const data = await overview(session);
     const by = new Map(data.people.map((p) => [p.username, p.status]));
     expect(by.get('ov-partial')).toBe('ABSENT');
@@ -154,7 +154,7 @@ describe('admin overview: an overnight shift after midnight (HTTP)', () => {
       at: new Date(startUtc.getTime() - 7 * 60 * 60 * 1000),
     });
 
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const data = await overview(session);
     const by = new Map(data.people.map((p) => [p.username, p]));
 
@@ -193,7 +193,7 @@ describe('admin overview: an overnight shift after midnight (HTTP)', () => {
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: second });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: secondOut });
 
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const data = await overview(session);
     const row = data.people.find((p) => p.username === 'ov-two-sessions');
     expect(row?.hours_today).toBe(2);
@@ -227,7 +227,7 @@ describe('admin overview: a forgotten checkout (HTTP)', () => {
       at: new Date(Date.now() - 40 * 60 * 60 * 1000),
     });
 
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const data = await overview(session);
     const row = data.people.find((p) => p.username === 'ov-forgot');
 

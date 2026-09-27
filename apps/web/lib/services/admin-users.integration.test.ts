@@ -21,7 +21,7 @@ describe('admin-users integration', () => {
   it('POST /api/admin/users creates user + RateChange in same tx', async () => {
     const admin = await seedTestUser({ username: 'u-admin1', role: Role.ADMIN });
     const branch = await seedTestBranch();
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/users`, {
       method: 'POST',
@@ -52,7 +52,7 @@ describe('admin-users integration', () => {
   it('PATCH /api/admin/users/:id with new rate creates new RateChange row', async () => {
     const admin = await seedTestUser({ username: 'u-admin2', role: Role.ADMIN });
     const employee = await seedTestUser({ username: 'u-emp2', hourly_rate_cent: 200 });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/users/${employee.id}`, {
       method: 'PATCH',
@@ -81,7 +81,7 @@ describe('admin-users integration', () => {
   it('PATCH /api/admin/users/:id sets and clears expectedMonthlySalaryCent, writing an AuditLog entry', async () => {
     const admin = await seedTestUser({ username: 'u-admin5', role: Role.ADMIN });
     const employee = await seedTestUser({ username: 'u-emp5' });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const setRes = await fetch(`${BASE_URL}/api/admin/users/${employee.id}`, {
       method: 'PATCH',
@@ -128,7 +128,7 @@ describe('admin-users integration', () => {
   it('POST /api/admin/users/:id/reset-password returns temp_password', async () => {
     const admin = await seedTestUser({ username: 'u-admin3', role: Role.ADMIN });
     const employee = await seedTestUser({ username: 'u-emp3' });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/users/${employee.id}/reset-password`, {
       method: 'POST',
@@ -148,7 +148,7 @@ describe('admin-users integration', () => {
   it('POST /api/admin/users/:id/deactivate sets is_active=false', async () => {
     const admin = await seedTestUser({ username: 'u-admin4', role: Role.ADMIN });
     const employee = await seedTestUser({ username: 'u-emp4' });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/users/${employee.id}/deactivate`, {
       method: 'POST',

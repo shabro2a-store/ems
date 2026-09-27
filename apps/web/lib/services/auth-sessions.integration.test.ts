@@ -49,7 +49,7 @@ describe('sessions', () => {
   it('does not accept the refresh token as an access token', async () => {
     const branch = await seedTestBranch();
     await seedTestUser({ username: 'sess-swap', branch_id: branch.id });
-    const s = await loginAs('sess-swap', 'change-me');
+    const s = await loginAs('sess-swap', 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/me/today`, {
       headers: { Cookie: `ems_access=${cookie(s, 'ems_refresh')}` },
     });
@@ -59,14 +59,14 @@ describe('sessions', () => {
   it('still refreshes a live session', async () => {
     const branch = await seedTestBranch();
     await seedTestUser({ username: 'sess-live', branch_id: branch.id });
-    const s = await loginAs('sess-live', 'change-me');
+    const s = await loginAs('sess-live', 'test-pass-1');
     expect((await refresh(cookie(s, 'ems_refresh'))).status).toBe(200);
   });
 
   it('signing out ends the refresh token too, not just the cookies on that phone', async () => {
     const branch = await seedTestBranch();
     await seedTestUser({ username: 'sess-out', branch_id: branch.id });
-    const s = await loginAs('sess-out', 'change-me');
+    const s = await loginAs('sess-out', 'test-pass-1');
     const kept = cookie(s, 'ems_refresh');
     expect((await post(s, '/api/auth/logout')).status).toBe(200);
     expect((await refresh(kept)).status).toBe(401);
@@ -76,8 +76,8 @@ describe('sessions', () => {
     const branch = await seedTestBranch();
     const emp = await seedTestUser({ username: 'sess-reset', branch_id: branch.id });
     await seedTestUser({ username: 'sess-admin', role: Role.ADMIN });
-    const s = await loginAs('sess-reset', 'change-me');
-    const admin = await loginAs('sess-admin', 'change-me');
+    const s = await loginAs('sess-reset', 'test-pass-1');
+    const admin = await loginAs('sess-admin', 'test-pass-1');
     expect((await post(admin, `/api/admin/users/${emp.id}/reset-password`, { password: 'a-new-password' })).status).toBe(200);
     expect((await refresh(cookie(s, 'ems_refresh'))).status).toBe(401);
   });
@@ -86,8 +86,8 @@ describe('sessions', () => {
     const branch = await seedTestBranch();
     const emp = await seedTestUser({ username: 'sess-role', branch_id: branch.id });
     await seedTestUser({ username: 'sess-admin2', role: Role.ADMIN });
-    const s = await loginAs('sess-role', 'change-me');
-    const admin = await loginAs('sess-admin2', 'change-me');
+    const s = await loginAs('sess-role', 'test-pass-1');
+    const admin = await loginAs('sess-admin2', 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/users/${emp.id}`, {
       method: 'PATCH',
       headers: {
@@ -112,8 +112,8 @@ describe('deactivation', () => {
     const branch = await seedTestBranch();
     const emp = await seedTestUser({ username: 'sess-deact', branch_id: branch.id });
     await seedTestUser({ username: 'sess-admin3', role: Role.ADMIN });
-    const s = await loginAs('sess-deact', 'change-me');
-    const admin = await loginAs('sess-admin3', 'change-me');
+    const s = await loginAs('sess-deact', 'test-pass-1');
+    const admin = await loginAs('sess-admin3', 'test-pass-1');
     const kept = cookie(s, 'ems_refresh');
     expect((await post(admin, `/api/admin/users/${emp.id}/deactivate`)).status).toBe(200);
     expect((await refresh(kept)).status).toBe(401);
@@ -146,7 +146,7 @@ describe('login attempts', () => {
   it('refuse a new password shorter than 8 characters', async () => {
     const branch = await seedTestBranch();
     await seedTestUser({ username: 'pw-admin', role: Role.ADMIN });
-    const admin = await loginAs('pw-admin', 'change-me');
+    const admin = await loginAs('pw-admin', 'test-pass-1');
     const res = await post(admin, '/api/admin/users', {
       username: 'pw-short',
       password: 'abc123',

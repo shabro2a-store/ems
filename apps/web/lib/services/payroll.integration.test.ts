@@ -41,7 +41,7 @@ describe('admin payroll integration', () => {
     await seedTestAdjustment({ user_id: emp1.id, kind: 'BONUS', amount_cent: 1000, created_by: admin.id, period: new Date('2026-07-01T00:00:00.000Z') });
     await seedTestAdvance({ user_id: emp1.id, amount_cent: 500, status: 'APPROVED', decided_by: admin.id, decided_at: new Date('2026-07-10T00:00:00Z'), created_at: new Date('2026-07-10T00:00:00Z') });
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/payroll?month=2026-07`, {
       headers: { Cookie: aSession.cookies, 'X-CSRF-Token': aSession.csrf },
     });
@@ -72,7 +72,7 @@ describe('admin payroll integration', () => {
 
   it('returns 400 INVALID_INPUT for invalid month', async () => {
     const admin = await seedTestUser({ username: 'pay-admin2', role: Role.ADMIN });
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/payroll?month=invalid`, {
       headers: { Cookie: aSession.cookies, 'X-CSRF-Token': aSession.csrf },
     });
@@ -90,7 +90,7 @@ describe('admin payroll integration', () => {
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: new Date('2026-07-01T16:00:00Z') });
     await seedTestRateChange({ user_id: emp.id, rate_cent: 200, effective_from: new Date('2026-01-01T00:00:00Z') });
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     async function fetchPayroll() {
       const res = await fetch(`${BASE_URL}/api/admin/payroll?month=2026-07`, {
@@ -155,7 +155,7 @@ describe('admin payroll integration', () => {
   it('returns 403 for non-admin', async () => {
     const branch = await seedTestBranch();
     const employee = await seedTestUser({ username: 'pay-emp3', branch_id: branch.id });
-    const eSession = await loginAs(employee.username, 'change-me');
+    const eSession = await loginAs(employee.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/payroll?month=2026-07`, {
       headers: { Cookie: eSession.cookies, 'X-CSRF-Token': eSession.csrf },
     });

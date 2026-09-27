@@ -21,7 +21,7 @@ describe('notification-prefs integration', () => {
   it('PATCH /api/admin/users/:id/notification-prefs updates both booleans', async () => {
     const admin = await seedTestUser({ username: 'np-admin1', role: Role.ADMIN });
     const target = await seedTestUser({ username: 'np-target1', role: Role.ADMIN });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/users/${target.id}/notification-prefs`, {
       method: 'PATCH',
@@ -45,7 +45,7 @@ describe('notification-prefs integration', () => {
   it('rejects unknown fields', async () => {
     const admin = await seedTestUser({ username: 'np-admin2', role: Role.ADMIN });
     const target = await seedTestUser({ username: 'np-target2', role: Role.ADMIN });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/users/${target.id}/notification-prefs`, {
       method: 'PATCH',
@@ -65,7 +65,7 @@ describe('notification-prefs integration', () => {
   it('rejects when neither field is provided', async () => {
     const admin = await seedTestUser({ username: 'np-admin3', role: Role.ADMIN });
     const target = await seedTestUser({ username: 'np-target3', role: Role.ADMIN });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/users/${target.id}/notification-prefs`, {
       method: 'PATCH',

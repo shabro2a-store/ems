@@ -104,7 +104,7 @@ describe('blocked-time credit integration (HTTP)', () => {
   it('shows on the attention queue and moves no money until it is accepted', async () => {
     const { user } = await seedBlockedDay('bc-emp');
     const admin = await seedTestUser({ username: 'bc-admin', role: Role.ADMIN });
-    const a = await loginAs(admin.username, 'change-me');
+    const a = await loginAs(admin.username, 'test-pass-1');
 
     const ovRes = await fetch(`${BASE_URL}/api/admin/overview`, { headers: { Cookie: a.cookies } });
     const ov = await ovRes.json();
@@ -131,7 +131,7 @@ describe('blocked-time credit integration (HTTP)', () => {
   it('accepting pays the wait, clears the shortfall, and shows as its own line', async () => {
     const { user } = await seedBlockedDay('bc-emp-ok');
     const admin = await seedTestUser({ username: 'bc-admin-ok', role: Role.ADMIN });
-    const a = await loginAs(admin.username, 'change-me');
+    const a = await loginAs(admin.username, 'test-pass-1');
 
     const res = await decide(a.cookies, a.csrf, { userId: user.id, date: DATE, decision: 'ACCEPTED', creditedMin: 120 });
     expect(res.status).toBe(200);
@@ -157,7 +157,7 @@ describe('blocked-time credit integration (HTTP)', () => {
   it('revoking changes no money, because nothing had been credited', async () => {
     const { user } = await seedBlockedDay('bc-emp2');
     const admin = await seedTestUser({ username: 'bc-admin2', role: Role.ADMIN });
-    const a = await loginAs(admin.username, 'change-me');
+    const a = await loginAs(admin.username, 'test-pass-1');
 
     const before = await payrollFor(user.username, a.cookies);
     const res = await decide(a.cookies, a.csrf, { userId: user.id, date: DATE, decision: 'REVOKED', creditedMin: 120 });
@@ -178,7 +178,7 @@ describe('blocked-time credit integration (HTTP)', () => {
   it('refuses a ruling made against a figure the day no longer has', async () => {
     const { user } = await seedBlockedDay('bc-emp3');
     const admin = await seedTestUser({ username: 'bc-admin3', role: Role.ADMIN });
-    const a = await loginAs(admin.username, 'change-me');
+    const a = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/blocked-credit/decision`, {
       method: 'POST',
@@ -198,7 +198,7 @@ describe('blocked-time credit integration (HTTP)', () => {
   it('undo takes back a mis-clicked acceptance and puts the day back on the queue', async () => {
     const { user } = await seedBlockedDay('bc-emp4');
     const admin = await seedTestUser({ username: 'bc-admin4', role: Role.ADMIN });
-    const a = await loginAs(admin.username, 'change-me');
+    const a = await loginAs(admin.username, 'test-pass-1');
 
     expect((await decide(a.cookies, a.csrf, { userId: user.id, date: DATE, decision: 'ACCEPTED', creditedMin: 120 })).status).toBe(200);
     expect((await payrollFor(user.username, a.cookies)).gross_cent).toBe(GROSS_WITH_CREDIT_CENT);

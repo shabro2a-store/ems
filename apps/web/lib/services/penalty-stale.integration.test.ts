@@ -176,7 +176,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
 
   it('starts from a penalty the owner has not seen yet', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     const listed = await listedPenalties(aSession, emp.id);
     expect(listed).toHaveLength(1);
@@ -195,7 +195,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
 
   it('re-queues an acknowledged day at the new figure once a correction moves it', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     // The owner sees 240 docked minutes / $8.00 and lets it stand.
     expect((await ack(aSession, emp.id, PEN_1_MIN)).status).toBe(200);
@@ -221,7 +221,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // the day into a $8.00 one. Docking that would take back money the owner
     // had already decided to give, on an amount he has never seen.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await setCheckout(emp.id, OUT_SMALL);
 
     const before = await listedPenalties(aSession, emp.id);
@@ -252,7 +252,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
 
   it('leaves the queue once the removal is confirmed at the new figure, still docking nothing', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await setCheckout(emp.id, OUT_SMALL);
     expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
     await setCheckout(emp.id, OUT_BIG);
@@ -274,7 +274,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // when are the owner's own record of why that day was forgiven - deleting
     // them with nothing but a boolean makes the reason unrecoverable.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await setCheckout(emp.id, OUT_SMALL);
     expect((await waive(aSession, emp.id, true, SMALL_MIN, 'gave notice, family funeral')).status).toBe(200);
     const granted = (await getTestPrisma().penaltyWaiver.findFirst({ where: { user_id: emp.id } }))!;
@@ -303,7 +303,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // provoking a mid-transaction failure over HTTP would need a fault the
     // suite has no way to inject.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await setCheckout(emp.id, OUT_SMALL);
     expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
     await setCheckout(emp.id, OUT_BIG);
@@ -321,7 +321,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // on a day no screen renders, and a zero waiver would stamp a forgiveness
     // of nothing that sits there covering whatever the day later grows into.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await setCheckout(emp.id, OUT_SMALL);
     expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
 
@@ -347,7 +347,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // Accept means "this penalty stands", which is the opposite of a removal -
     // so the waiver goes, and only then does money start moving.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await setCheckout(emp.id, OUT_SMALL);
     expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
     await setCheckout(emp.id, OUT_BIG);
@@ -368,7 +368,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // never match - but it is still the owner's removal, so the money stays
     // where he put it and no backfill is needed.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await waive(aSession, emp.id, true, PEN_1_MIN)).status).toBe(200);
     await getTestPrisma().penaltyWaiver.updateMany({ where: { user_id: emp.id }, data: { penalty_min: null } });
 
@@ -383,7 +383,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // An ack moves no money, so here the pre-column row simply returns the day
     // to the queue - and the automatic penalty was applying all along.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await ack(aSession, emp.id, PEN_1_MIN)).status).toBe(200);
     await getTestPrisma().penaltyAck.updateMany({ where: { user_id: emp.id }, data: { penalty_min: null } });
 
@@ -396,7 +396,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // Neither screen polls. The row renders 240 min / $8.00, the owner corrects
     // the punch in another tab, then clicks Accept on the row they can see.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     const rendered = await listedPenalties(aSession, emp.id);
     expect(rendered[0]!.penaltyMin).toBe(PEN_1_MIN);
@@ -429,7 +429,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
 
   it('refuses a waiver made against an amount the day no longer has', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await correctTheCheckout(emp.id);
 
     const res = await waive(aSession, emp.id, true, PEN_1_MIN);
@@ -444,7 +444,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // granted is still standing on the other side of it. A guard that dropped
     // the waiver on its way to saying no would be worse than no guard.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await setCheckout(emp.id, OUT_SMALL);
     expect((await waive(aSession, emp.id, true, SMALL_MIN)).status).toBe(200);
     await setCheckout(emp.id, OUT_BIG);
@@ -460,7 +460,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // Without the token there is nothing to confirm against, so a client must
     // not be able to opt out of the check by omitting it.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     const res = await ack(aSession, emp.id);
     expect(res.status).toBe(400);
@@ -470,7 +470,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
 
   it('lands the ruling once it names the figure the day actually has', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     await correctTheCheckout(emp.id);
 
     expect((await ack(aSession, emp.id, PEN_2_MIN)).status).toBe(200);
@@ -490,7 +490,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // The body's number is a comparison token. It has to match, and having
     // matched it is discarded - the row records what the server computed.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/penalties/waive`, {
       method: 'POST',
@@ -514,7 +514,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
     // and starts the deduction - so it keeps the same record. Only the button
     // was hardened first; this is the other half.
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await waive(aSession, emp.id, true, PEN_1_MIN, 'sick note, kept it off')).status).toBe(200);
     const granted = (await getTestPrisma().penaltyWaiver.findFirst({ where: { user_id: emp.id } }))!;
 
@@ -534,7 +534,7 @@ describe('a penalty ruling does not cover an amount the day no longer has (HTTP)
 
   it('still restores a penalty, and re-queues the day when it does', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await waive(aSession, emp.id, true, PEN_1_MIN)).status).toBe(200);
     expect((await payrollRow(aSession, 'pns-emp')).penalties_cent).toBe(0);
 

@@ -54,7 +54,7 @@ describe('GET /api/me/today: the day total (HTTP)', () => {
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date(start.getTime() + 65 * MIN) });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: new Date(start.getTime() + 175 * MIN) });
 
-    const session = await loginAs(emp.username, 'change-me');
+    const session = await loginAs(emp.username, 'test-pass-1');
     const data = await today(session);
 
     expect(data.minutes_today).toBe(115);
@@ -74,7 +74,7 @@ describe('GET /api/me/today: the day total (HTTP)', () => {
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: new Date(start.getTime() + 175 * MIN) });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: new Date(start.getTime() + 180 * MIN) });
 
-    const session = await loginAs(emp.username, 'change-me');
+    const session = await loginAs(emp.username, 'test-pass-1');
     const data = await today(session);
 
     expect(data.in_at).not.toBeNull();
@@ -96,7 +96,7 @@ describe('GET /api/me/today: the day total (HTTP)', () => {
       at: new Date(start.getTime() - 180 * MIN),
     });
 
-    const session = await loginAs(emp.username, 'change-me');
+    const session = await loginAs(emp.username, 'test-pass-1');
     const data = await today(session);
 
     expect(data.minutes_today).toBeGreaterThanOrEqual(180);

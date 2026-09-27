@@ -37,14 +37,14 @@ describe('session renewal', () => {
   it('issues an access token that lives minutes, not hours', async () => {
     const branch = await seedTestBranch();
     await seedTestUser({ username: 'ttl-emp', branch_id: branch.id });
-    const s = await loginAs('ttl-emp', 'change-me');
+    const s = await loginAs('ttl-emp', 'test-pass-1');
     expect(ttlMinutes(cookie(s, 'ems_access'))).toBe(ACCESS_TTL_MIN);
   });
 
   it('renews a page opened after the access token lapsed, instead of sending it to the login form', async () => {
     const branch = await seedTestBranch();
     await seedTestUser({ username: 'resume-page', branch_id: branch.id });
-    const s = await loginAs('resume-page', 'change-me');
+    const s = await loginAs('resume-page', 'test-pass-1');
     const res = await fetch(`${BASE_URL}/employee?tab=pay`, {
       headers: { Cookie: `ems_refresh=${cookie(s, 'ems_refresh')}` },
       redirect: 'manual',
@@ -63,7 +63,7 @@ describe('session renewal', () => {
   it('renews on the way in and carries on to the page asked for', async () => {
     const branch = await seedTestBranch();
     await seedTestUser({ username: 'resume-ok', branch_id: branch.id });
-    const s = await loginAs('resume-ok', 'change-me');
+    const s = await loginAs('resume-ok', 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/auth/resume?next=%2Femployee`, {
       headers: { Cookie: `ems_refresh=${cookie(s, 'ems_refresh')}` },
       redirect: 'manual',
@@ -76,7 +76,7 @@ describe('session renewal', () => {
   it('sends an ended session to the login form, with its cookies cleared', async () => {
     const branch = await seedTestBranch();
     const emp = await seedTestUser({ username: 'resume-ended', branch_id: branch.id });
-    const s = await loginAs('resume-ended', 'change-me');
+    const s = await loginAs('resume-ended', 'test-pass-1');
     await getTestPrisma().user.update({ where: { id: emp.id }, data: { session_version: { increment: 1 } } });
     const res = await fetch(`${BASE_URL}/api/auth/resume?next=%2Femployee`, {
       headers: { Cookie: `ems_refresh=${cookie(s, 'ems_refresh')}` },
@@ -89,7 +89,7 @@ describe('session renewal', () => {
   it('never sends anyone off the site', async () => {
     const branch = await seedTestBranch();
     await seedTestUser({ username: 'resume-evil', branch_id: branch.id });
-    const s = await loginAs('resume-evil', 'change-me');
+    const s = await loginAs('resume-evil', 'test-pass-1');
     for (const next of ['//evil.example', 'https://evil.example/x', '/\\evil.example']) {
       const res = await fetch(`${BASE_URL}/api/auth/resume?next=${encodeURIComponent(next)}`, {
         headers: { Cookie: `ems_refresh=${cookie(s, 'ems_refresh')}` },
@@ -102,7 +102,7 @@ describe('session renewal', () => {
   it('gives a driver the same short token as everyone, clocked in or not', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     await seedTestUser({ username: 'resume-driver', role: Role.DRIVER, branch_id: branch.id });
-    const s = await loginAs('resume-driver', 'change-me');
+    const s = await loginAs('resume-driver', 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
       headers: {

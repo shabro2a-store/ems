@@ -82,7 +82,7 @@ describe('trip integration', () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const driver = await seedTestDriver({ username: 'trip-drv1', branch_id: branch.id });
     await dispatch(driver, branch);
-    const { cookies, csrf } = await loginAs(driver.username, 'change-me');
+    const { cookies, csrf } = await loginAs(driver.username, 'test-pass-1');
     const r = await postTripStart({ cookies, csrf, body: { lat: 33.8962, lng: 35.4827, accuracy: 10 } });
     expect(r.status).toBe(200);
     const body = r.body as { ok: boolean; data?: { trip_id: string } };
@@ -98,7 +98,7 @@ describe('trip integration', () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const driver = await seedTestDriver({ username: 'trip-drv1b', branch_id: branch.id });
     await dispatch(driver, branch);
-    const { cookies, csrf } = await loginAs(driver.username, 'change-me');
+    const { cookies, csrf } = await loginAs(driver.username, 'test-pass-1');
     const r = await postTripStart({ cookies, csrf, body: { lat: 33.8962, lng: 35.4827, accuracy: 10 }, photo: null });
     expect(r.status).toBe(400);
     expect((r.body as { error?: { code: string } }).error?.code).toBe('RECEIPT_REQUIRED');
@@ -112,7 +112,7 @@ describe('trip integration', () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const driver = await seedTestDriver({ username: 'trip-drv1c', branch_id: branch.id });
     await dispatch(driver, branch);
-    const { cookies, csrf } = await loginAs(driver.username, 'change-me');
+    const { cookies, csrf } = await loginAs(driver.username, 'test-pass-1');
     const r = await postTripStart({ cookies, csrf, body: { lat: 33.8962, lng: 35.4827, accuracy: 10 }, photo: fakeReceipt(320, 240) });
     expect(r.status).toBe(400);
     expect((r.body as { error?: { code: string } }).error?.code).toBe('BAD_PHOTO');
@@ -122,7 +122,7 @@ describe('trip integration', () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const driver = await seedTestDriver({ username: 'trip-drv2', branch_id: branch.id });
     await dispatch(driver, branch);
-    const { cookies, csrf } = await loginAs(driver.username, 'change-me');
+    const { cookies, csrf } = await loginAs(driver.username, 'test-pass-1');
     const r1 = await postTripStart({ cookies, csrf, body: { lat: 33.8962, lng: 35.4827, accuracy: 10 } });
     expect(r1.status).toBe(200);
     await dispatch(driver, branch); // rung again for the next order
@@ -135,7 +135,7 @@ describe('trip integration', () => {
   it('driver ends trip with duration_min > 0', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const driver = await seedTestDriver({ username: 'trip-drv3', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(driver.username, 'change-me');
+    const { cookies, csrf } = await loginAs(driver.username, 'test-pass-1');
     const outAt = new Date(Date.now() - 30 * 60_000);
     await getTestPrisma().trip.create({
       data: { driver_id: driver.id, branch_id: branch.id, out_at: outAt, out_lat: 33.8962, out_lng: 35.4827 },
@@ -153,7 +153,7 @@ describe('trip integration', () => {
   it('driver end trip from outside geofence returns 422', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 50 });
     const driver = await seedTestDriver({ username: 'trip-drv4', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(driver.username, 'change-me');
+    const { cookies, csrf } = await loginAs(driver.username, 'test-pass-1');
     await getTestPrisma().trip.create({
       data: { driver_id: driver.id, branch_id: branch.id, out_at: new Date(), out_lat: 33.8962, out_lng: 35.4827 },
     });
@@ -167,7 +167,7 @@ describe('trip integration', () => {
     const branch = await seedTestBranch();
     const { seedTestUser } = await import('../test-helpers/db');
     const employee = await seedTestUser({ username: 'trip-emp', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(employee.username, 'change-me');
+    const { cookies, csrf } = await loginAs(employee.username, 'test-pass-1');
     const r = await postTripStart({ cookies, csrf, body: { lat: 33.8962, lng: 35.4827, accuracy: 10 } });
     expect(r.status).toBe(403);
   });

@@ -24,7 +24,7 @@ describe('POST /api/admin/overtime/decision', () => {
 
   it('rejects a non-admin', async () => {
     const emp = await seedTestUser({ username: 'ot_emp', role: 'EMPLOYEE' });
-    const session = await loginAs('ot_emp', 'change-me');
+    const session = await loginAs('ot_emp', 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/overtime/decision`, {
       method: 'POST',
       headers: {
@@ -41,7 +41,7 @@ describe('POST /api/admin/overtime/decision', () => {
   it('records a decision and is idempotent', async () => {
     const emp = await seedTestUser({ username: 'ot_emp2', role: 'EMPLOYEE' });
     const adminUser = await seedTestUser({ username: 'ot_admin', role: 'ADMIN' });
-    const admin = await loginAs('ot_admin', 'change-me');
+    const admin = await loginAs('ot_admin', 'test-pass-1');
     // No punches at all, so the day's overtime is zero - and a ruling has to
     // name the amount it is being made against.
     const body = JSON.stringify({ userId: emp.id, date: DAY, decision: 'REVOKED', overtimeMin: 0 });
@@ -90,7 +90,7 @@ describe('POST /api/admin/overtime/decision', () => {
   it('changing the decision updates the same row instead of adding a second one', async () => {
     const emp = await seedTestUser({ username: 'ot_emp3', role: 'EMPLOYEE' });
     const adminUser = await seedTestUser({ username: 'ot_admin2', role: 'ADMIN' });
-    const admin = await loginAs('ot_admin2', 'change-me');
+    const admin = await loginAs('ot_admin2', 'test-pass-1');
     const baseHeaders = {
       'Content-Type': 'application/json',
       Cookie: admin.cookies,
@@ -133,7 +133,7 @@ describe('POST /api/admin/overtime/decision', () => {
   it('rejects a date that is shaped right but names no real calendar day', async () => {
     const emp = await seedTestUser({ username: 'ot_emp4', role: 'EMPLOYEE' });
     await seedTestUser({ username: 'ot_admin3', role: 'ADMIN' });
-    const admin = await loginAs('ot_admin3', 'change-me');
+    const admin = await loginAs('ot_admin3', 'test-pass-1');
     const baseHeaders = {
       'Content-Type': 'application/json',
       Cookie: admin.cookies,

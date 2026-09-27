@@ -112,7 +112,7 @@ export interface UserOverrides {
 
 export async function seedTestUser(overrides: UserOverrides = {}) {
   const prisma = getTestPrisma();
-  const password = overrides.password ?? 'change-me';
+  const password = overrides.password ?? 'test-pass-1';
   const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
   const hourlyRateCent = overrides.hourly_rate_cent ?? 200;
 

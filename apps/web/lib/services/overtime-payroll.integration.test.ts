@@ -105,7 +105,7 @@ describe('revoked overtime on the payroll surfaces (HTTP)', () => {
 
   it('shows the deduction as its own line on the admin table, and the row still adds up', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
 
     const before = await adminPayrollRow(aSession, 'otp-emp');
     expect(before.gross_cent).toBe(GROSS_CENT);
@@ -130,7 +130,7 @@ describe('revoked overtime on the payroll surfaces (HTTP)', () => {
 
   it('totals the deduction across the table', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
 
     const res = await fetch(`${BASE_URL}/api/admin/payroll?month=${MONTH}`, {
@@ -142,10 +142,10 @@ describe('revoked overtime on the payroll surfaces (HTTP)', () => {
 
   it('shows the employee why their take-home dropped', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
 
-    const eSession = await loginAs(emp.username, 'change-me');
+    const eSession = await loginAs(emp.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/me/payroll?month=${MONTH}`, {
       headers: { Cookie: eSession.cookies, 'X-CSRF-Token': eSession.csrf },
     });
@@ -165,7 +165,7 @@ describe('revoked overtime on the payroll surfaces (HTTP)', () => {
 
   it('lists a decided day so it can still be found after it leaves the queue', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
 
     const res = await fetch(`${BASE_URL}/api/admin/overtime?userId=${emp.id}&month=${MONTH}`, {
@@ -183,7 +183,7 @@ describe('revoked overtime on the payroll surfaces (HTTP)', () => {
 
   it('undoes a mis-clicked Revoke: the day goes back to pending and the pay comes back', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
     expect((await adminPayrollRow(aSession, 'otp-emp')).overtime_deduction_cent).toBe(OVERTIME_CENT);
 
@@ -216,10 +216,10 @@ describe('revoked overtime on the payroll surfaces (HTTP)', () => {
 
   it('refuses the undo to a non-admin', async () => {
     const { emp, admin } = await setup();
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
 
-    const eSession = await loginAs(emp.username, 'change-me');
+    const eSession = await loginAs(emp.username, 'test-pass-1');
     const res = await decide(eSession, emp.id, DAY, 'PENDING');
     expect(res.status).toBe(403);
     const rows = await getTestPrisma().overtimeDecision.findMany({ where: { user_id: emp.id } });

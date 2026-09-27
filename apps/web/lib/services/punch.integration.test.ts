@@ -26,7 +26,7 @@ describe('punch integration (HTTP)', () => {
   it('Check 5: writes all 5 evidence fields per punch', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-c5', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -56,7 +56,7 @@ describe('punch integration (HTTP)', () => {
   it('Check 6: audit log entry per punch', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-c6', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -86,7 +86,7 @@ describe('punch integration (HTTP)', () => {
   it('Check 7: idempotency-Key returns cached response on replay', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-c7', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
     const key = `c7-${Date.now()}-${Math.random()}`;
     const body = JSON.stringify({ kind: 'IN', lat: 33.89621, lng: 35.48271, accuracy: 12, deviceFp: 'test-fp-c7' });
 
@@ -131,7 +131,7 @@ describe('punch integration (HTTP)', () => {
   it('Check 8: 6th rapid punch attempt returns 429', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-c8', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const statuses: number[] = [];
     for (let i = 0; i < 6; i++) {
@@ -155,7 +155,7 @@ describe('punch integration (HTTP)', () => {
   it('Check 9: geofence rejection (outside radius)', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 50 });
     const user = await seedTestUser({ username: 'emp-c9', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -175,7 +175,7 @@ describe('punch integration (HTTP)', () => {
   it('Check 10: low GPS accuracy rejected', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200, gps_accuracy_max_m: 100 });
     const user = await seedTestUser({ username: 'emp-c10', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -197,7 +197,7 @@ describe('punch integration (HTTP)', () => {
     const employee = await seedTestUser({ username: 'emp-c11', branch_id: branch.id });
     const admin = await seedTestUser({ username: 'admin-c11', role: Role.ADMIN });
 
-    const eSession = await loginAs(employee.username, 'change-me');
+    const eSession = await loginAs(employee.username, 'test-pass-1');
     const inRes = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
       headers: {
@@ -210,7 +210,7 @@ describe('punch integration (HTTP)', () => {
     });
     expect(inRes.status).toBe(200);
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const nowRes = await fetch(`${BASE_URL}/api/admin/now`, {
       method: 'GET',
       headers: {
@@ -236,7 +236,7 @@ describe('punch integration (HTTP)', () => {
   it('Check 12: /api/me/today returns current session', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200 });
     const user = await seedTestUser({ username: 'emp-c12', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const inRes = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -273,7 +273,7 @@ describe('punch integration (HTTP)', () => {
     // always in the past relative to "now", whatever day the suite runs on.
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: new Date(`${month}-01T04:00:00.000Z`) });
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${month}-01T12:00:00.000Z`) });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     // Punch in today too, so the test also proves an open session does not
     // inflate hours_month (same basis the old earned_month_cent used).
@@ -317,7 +317,7 @@ describe('punch integration (HTTP)', () => {
     const user = await seedTestUser({ username: 'emp-c13', branch_id: branch.id });
     const today = new Date(`${todayInBeirut(new Date())}T00:00:00.000Z`);
     await seedDayOffOverride(user.id, today);
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -337,7 +337,7 @@ describe('punch integration (HTTP)', () => {
   it('Check 14: server-side geofence bypass test (high accuracy rejected)', async () => {
     const branch = await seedTestBranch({ name: 'Hamra', lat: 33.8962, lng: 35.4827, gps_radius_m: 200, gps_accuracy_max_m: 100 });
     const user = await seedTestUser({ username: 'emp-c14', branch_id: branch.id });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -366,7 +366,7 @@ describe('punch integration (HTTP)', () => {
     // turns into by the evening.
     const openAt = new Date(Date.now() - 30 * 60_000);
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: openAt });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -403,7 +403,7 @@ describe('punch integration (HTTP)', () => {
       kind: 'IN',
       at: new Date(`${todayInBeirut(new Date())}T00:00:00.000Z`),
     });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -429,7 +429,7 @@ describe('punch integration (HTTP)', () => {
     const yesterday = new Date(Date.now() - 26 * 3_600_000);
     await seedTestSchedule({ user_id: user.id, weekday: beirutWeekday(yesterday), shift_min: 480 });
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: yesterday });
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
@@ -464,7 +464,7 @@ describe('punch integration (HTTP)', () => {
   });
 
   async function punchOut(username: string, deviceFp: string) {
-    const { cookies, csrf } = await loginAs(username, 'change-me');
+    const { cookies, csrf } = await loginAs(username, 'test-pass-1');
     return fetch(`${BASE_URL}/api/me/punch`, {
       method: 'POST',
       headers: {

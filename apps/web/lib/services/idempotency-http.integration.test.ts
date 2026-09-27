@@ -22,7 +22,7 @@ describe('the same request twice at once', () => {
   it('writes one bonus, not two', async () => {
     const emp = await seedTestUser({ username: 'idem-emp' });
     await seedTestUser({ username: 'idem-admin', role: Role.ADMIN });
-    const admin = await loginAs('idem-admin', 'change-me');
+    const admin = await loginAs('idem-admin', 'test-pass-1');
     const send = () =>
       fetch(`${BASE_URL}/api/admin/adjustments`, {
         method: 'POST',

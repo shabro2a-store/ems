@@ -21,7 +21,7 @@ describe('admin-branches integration', () => {
   it('PATCH updates branch fields', async () => {
     const admin = await seedTestUser({ username: 'b-admin1', role: Role.ADMIN });
     const branch = await seedTestBranch({ name: 'Hamra', gps_radius_m: 50 });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/branches/${branch.id}`, {
       method: 'PATCH',
@@ -46,7 +46,7 @@ describe('admin-branches integration', () => {
   it('rejects out-of-range radius', async () => {
     const admin = await seedTestUser({ username: 'b-admin2', role: Role.ADMIN });
     const branch = await seedTestBranch();
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/branches/${branch.id}`, {
       method: 'PATCH',
@@ -64,7 +64,7 @@ describe('admin-branches integration', () => {
   it('rejects out-of-range accuracy', async () => {
     const admin = await seedTestUser({ username: 'b-admin3', role: Role.ADMIN });
     const branch = await seedTestBranch();
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/branches/${branch.id}`, {
       method: 'PATCH',
@@ -82,7 +82,7 @@ describe('admin-branches integration', () => {
   it('rejects out-of-range trip threshold', async () => {
     const admin = await seedTestUser({ username: 'b-admin4', role: Role.ADMIN });
     const branch = await seedTestBranch();
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     const res = await fetch(`${BASE_URL}/api/admin/branches/${branch.id}`, {
       method: 'PATCH',
@@ -100,7 +100,7 @@ describe('admin-branches integration', () => {
   it('PATCH updates lat/lng from GPS capture (record-location flow)', async () => {
     const admin = await seedTestUser({ username: 'b-admin5', role: Role.ADMIN });
     const branch = await seedTestBranch({ name: 'Capture Target' });
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
 
     // Simulate the coords a browser would capture from navigator.geolocation
     const capturedFix = { lat: 33.89382, lng: 35.50176 }; // Beirut-ish

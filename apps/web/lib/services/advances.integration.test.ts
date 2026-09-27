@@ -64,7 +64,7 @@ describe('advances integration', () => {
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${currentMonth()}-01T20:00:00Z`) });
     await seedTestRateChange({ user_id: user.id, rate_cent: 600, effective_from: new Date('2026-01-01T00:00:00Z') });
 
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
     const r = await postJson<{ ok: boolean; data?: { id: string; status: string }; error?: { code: string } }>(
       '/api/me/advances',
       { cookies, csrf, body: { amountCent: 5000, reason: 'rent' } },
@@ -87,7 +87,7 @@ describe('advances integration', () => {
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${currentMonth()}-01T10:00:00Z`) });
     await seedTestRateChange({ user_id: user.id, rate_cent: 200, effective_from: new Date('2026-01-01T00:00:00Z') });
 
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
     const r = await postJson<{ ok: boolean; error?: { code: string } }>(
       '/api/me/advances',
       { cookies, csrf, body: { amountCent: 999999 } },
@@ -104,7 +104,7 @@ describe('advances integration', () => {
     await seedTestPunch({ user_id: employee.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${currentMonth()}-01T20:00:00Z`) });
     await seedTestRateChange({ user_id: employee.id, rate_cent: 600, effective_from: new Date('2026-01-01T00:00:00Z') });
 
-    const eSession = await loginAs(employee.username, 'change-me');
+    const eSession = await loginAs(employee.username, 'test-pass-1');
     const createRes = await postJson<{ ok: boolean; data?: { id: string } }>(
       '/api/me/advances',
       { cookies: eSession.cookies, csrf: eSession.csrf, body: { amountCent: 5000 } },
@@ -112,7 +112,7 @@ describe('advances integration', () => {
     expect(createRes.status).toBe(200);
     const advanceId = createRes.body.data!.id;
 
-    const aSession = await loginAs(admin.username, 'change-me');
+    const aSession = await loginAs(admin.username, 'test-pass-1');
     const pendingRes = await getJson<{ ok: boolean; data: { advances: Array<{ id: string }> } }>(
       '/api/admin/advances',
       { cookies: aSession.cookies, csrf: aSession.csrf },
@@ -150,7 +150,7 @@ describe('advances integration', () => {
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${currentMonth()}-02T08:00:00Z`) });
     await seedTestRateChange({ user_id: user.id, rate_cent: 600, effective_from: new Date('2026-01-01T00:00:00Z') });
 
-    const { cookies, csrf } = await loginAs(user.username, 'change-me');
+    const { cookies, csrf } = await loginAs(user.username, 'test-pass-1');
     const statuses: number[] = [];
     for (let i = 0; i < 6; i++) {
       const r = await fetch(`${BASE_URL}/api/me/advances`, {

@@ -37,7 +37,7 @@ describe('editing the weekly hours', () => {
     await seedTestSchedule({ user_id: emp.id, weekday: 1, shift_min: 480 });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'IN', at: scheduledToUtc('2026-08-03', '08:00') });
     await seedTestPunch({ user_id: emp.id, branch_id: branch.id, kind: 'OUT', at: scheduledToUtc('2026-08-03', '16:00') });
-    const admin = await loginAs('sched-admin', 'change-me');
+    const admin = await loginAs('sched-admin', 'test-pass-1');
     expect(await penaltiesFor(admin, emp.id, '2026-08')).toEqual([]);
 
     const put = await fetch(`${BASE_URL}/api/admin/schedules/${emp.id}`, {

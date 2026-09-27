@@ -23,7 +23,7 @@ describe('admin-flags integration', () => {
     await seedTestFlag({ kind: 'MISSED_CHECKOUT', user_id: employee.id, branch_id: branch.id, context_json: {} });
     await seedTestFlag({ kind: 'TRIP_OVER_THRESHOLD', user_id: employee.id, branch_id: branch.id, context_json: {} });
 
-    const session = await loginAs(admin.username, 'change-me');
+    const session = await loginAs(admin.username, 'test-pass-1');
     const res = await fetch(`${BASE_URL}/api/admin/now`, {
       headers: { Cookie: session.cookies, 'X-CSRF-Token': session.csrf },
       credentials: 'include',
