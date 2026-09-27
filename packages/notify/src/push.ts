@@ -27,6 +27,23 @@ function ensureConfigured(): boolean {
   return true;
 }
 
+// The browsers' push services. A subscription's endpoint is a URL this server
+// POSTs to, so one pointing anywhere else would have the server call addresses
+// only it can reach - the database, the cloud metadata service.
+const PUSH_SERVICE_HOSTS = ['fcm.googleapis.com', 'push.services.mozilla.com', 'push.apple.com', 'notify.windows.com'];
+
+export function isPushServiceEndpoint(endpoint: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' || url.port !== '' || url.username !== '' || url.password !== '') return false;
+  const host = url.hostname.toLowerCase();
+  return PUSH_SERVICE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+}
+
 export function vapidPublicKey(): string | null {
   return process.env.VAPID_PUBLIC_KEY ?? null;
 }
@@ -66,6 +83,11 @@ export async function sendPushToUser(
   const subs = await db.pushSubscription.findMany({ where: { user_id: userId } });
   await Promise.all(
     subs.map(async (s) => {
+      // Stored before endpoints were checked on the way in: never called.
+      if (!isPushServiceEndpoint(s.endpoint)) {
+        await db.pushSubscription.delete({ where: { endpoint: s.endpoint } }).catch(() => {});
+        return;
+      }
       try {
         await webpush.sendNotification(
           { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },

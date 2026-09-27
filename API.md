@@ -162,7 +162,8 @@ Summary `{ pending, upcoming: [...] }`; request body
   trip in the same write (`TripReceipt`, `Trip.receipt_taken_at`). The server accepts a JPEG
   of at most 4 MB with a short side of at least 480px (`receiptImage.ts`). A JSON body — the
   screen from before receipts — is refused. → `200 { trip_id, out_at }`. Errors:
-  `RECEIPT_REQUIRED` 400 (no photo / JSON body), `BAD_PHOTO` 400 (not a readable JPEG),
+  `RECEIPT_REQUIRED` 400 (no photo / JSON body), `BAD_PHOTO` 400 (not a readable JPEG) or 413
+  (a body over 4 MB + 64 KB - refused as it streams in, never read whole),
   `NOT_DISPATCHED` 409 (no ring), `OPEN_TRIP_EXISTS` 409, geofence 422, `NOT_DRIVER` 403.
   Requires the driver to have been **rung by the caller** in the last 30 min (an unconsumed
   `DriverCall`); starting the trip consumes that ring.
@@ -186,7 +187,10 @@ acknowledged (dismiss the alarm).
 ### GET /api/me/push/key  ·  POST /api/me/push/subscribe  *(subscribe: CSRF)*
 Web Push setup for the driver's device. `GET key` → `{ publicKey }` (null when push is
 unconfigured server-side). `POST subscribe` `{ endpoint, keys: { p256dh, auth } }` stores the
-device subscription (upsert by endpoint). → `{ subscribed: true }`.
+device subscription (upsert by endpoint). → `{ subscribed: true }`. The endpoint must be an
+`https` URL on a browser push service (Google, Mozilla, Apple, Microsoft), else `400` - the server
+POSTs to it, so any other address would have it call hosts only it can reach. The sender skips
+and deletes any stored endpoint that fails the same check.
 
 ### POST /api/me/password  *(CSRF, ADMIN only)*
 Change your own password. **Admin only** — employees/drivers/callers get `403 FORBIDDEN`

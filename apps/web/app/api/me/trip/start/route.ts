@@ -7,7 +7,8 @@ import { getClientIp } from '@/lib/auth/cookies';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { consumeTripRateLimit } from '@/lib/services/rateLimitTrip';
 import { startTrip, type ReceiptInput } from '@/lib/services/trip';
-import { inspectReceiptJpeg } from '@/lib/services/receiptImage';
+import { inspectReceiptJpeg, RECEIPT_MAX_BYTES } from '@/lib/services/receiptImage';
+import { readBodyLimited } from '@/lib/readLimited';
 
 // Multipart now, not JSON: the receipt photo travels with the trip start, in
 // the one request, so a trip cannot be started without it. The coordinates
@@ -23,6 +24,9 @@ const RECEIPT_MESSAGE: Record<string, string> = {
   TOO_SMALL: 'The receipt photo is too small to read. Hold the phone closer and take it again.',
   TOO_LARGE: 'The receipt photo is too large. Take it again.',
 };
+
+// The photo plus the three coordinates and the multipart framing around them.
+const TRIP_START_MAX_BYTES = RECEIPT_MAX_BYTES + 64 * 1024;
 
 const RECEIPT_REQUIRED_MESSAGE =
   'Take a photo of the order receipt to go out. If you do not see the camera, reload the app.';
@@ -66,10 +70,13 @@ export async function POST(req: Request) {
     return jsonError('RECEIPT_REQUIRED', RECEIPT_REQUIRED_MESSAGE, 400);
   }
 
+  const raw = await readBodyLimited(req, TRIP_START_MAX_BYTES);
+  if (raw === 'TOO_LARGE') return jsonError('BAD_PHOTO', RECEIPT_MESSAGE.TOO_LARGE!, 413);
+
   let body: z.infer<typeof Body>;
   let receipt: ReceiptInput | undefined;
   try {
-    const form = await req.formData();
+    const form = await new Response(raw, { headers: { 'content-type': contentType } }).formData();
     body = Body.parse({ lat: form.get('lat'), lng: form.get('lng'), accuracy: form.get('accuracy') });
     const photo = form.get('photo');
     if (photo instanceof Blob) {

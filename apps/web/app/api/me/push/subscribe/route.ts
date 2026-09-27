@@ -3,9 +3,10 @@ import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
+import { isPushServiceEndpoint } from 'notify';
 
 const Body = z.object({
-  endpoint: z.string().url(),
+  endpoint: z.string().url().max(2048).refine(isPushServiceEndpoint),
   keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }),
 });
 
