@@ -6,6 +6,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..');
 
 export default defineConfig({
+  // The same JSX transform Next uses, so a test can render a component.
+  esbuild: { jsx: 'automatic' },
   test: {
     environment: 'node',
     include: [

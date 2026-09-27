@@ -77,7 +77,12 @@ self.addEventListener('notificationclick', (event) => {
     (async () => {
       const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const c of all) {
-        if (c.url.includes('/driver') && 'focus' in c) {
+        // Any field page, not only Trips: the siren now runs on every tab a
+        // driver can open, and matching /driver alone opened a second window
+        // for somebody who was reading their payslip.
+        const path = new URL(c.url).pathname;
+        const field = path === '/driver' || path.startsWith('/driver/') || path === '/employee' || path.startsWith('/employee/');
+        if (field && 'focus' in c) {
           // Tell the page the driver answered from the notification, so it acks
           // and stops the repeater instead of waiting for them to find the
           // button. The page holds the CSRF token; a service worker does not.

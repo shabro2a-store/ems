@@ -490,7 +490,9 @@ an "Open in app" deep link) — all actions happen in the web app.
   name + live flag count, renders `AdminNav`. Nav is **5 tabs**: Dashboard · Employees · Branches ·
   Punches · Payroll. (Approvals/flags live in the dashboard; schedules in Employees; adjustments in Payroll.)
 - **Field shell**: `components/field/FieldShell.tsx` — mobile top bar (brand + Password + Logout)
-  and a bottom tab nav (Home/Trip · Advances · Leave · Pay), role-aware. Wraps `/employee/*` and `/driver/*`.
+  and a bottom tab nav (Home/Trip · Advances · Leave · Pay), role-aware. Wraps `/employee/*` and `/driver/*`
+  through one route-group layout (`app/(app)/(field)/layout.tsx`), so it stays mounted
+  between tabs; for a driver it also mounts `DriverAlarm`, so the siren rings on every tab.
 
 ---
 

@@ -66,6 +66,8 @@ export default function DriverAlarm() {
   const siren = useRef<HTMLAudioElement | null>(null);
   const keepAlive = useRef<HTMLAudioElement | null>(null);
   const vibrateTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Read inside arm(), which is one stable callback bound to window events.
+  const ringingNow = useRef(false);
 
   // Hold the page alive and audio unlocked for the rest of the shift.
   const arm = useCallback(() => {
@@ -87,10 +89,18 @@ export default function DriverAlarm() {
         }
       })
       .catch(() => setArmed(false));
-    // Prime the siren element in the same gesture so its first play() later
-    // needs no permission of its own.
     s.volume = 1;
-    s.load();
+    if (ringingNow.current) {
+      // A ring is standing: this gesture is the one that may start the siren.
+      // The ringing screen asks for exactly this tap, and it used to unlock
+      // only the silent loop - the siren stayed quiet until the next ring.
+      if (s.paused) s.play().then(() => setArmed(true)).catch(() => setArmed(false));
+      return;
+    }
+    // Otherwise prime the siren in this gesture so its first play() later needs
+    // no permission of its own - but never while it is sounding: load() resets
+    // the element, and this runs on every touch, focus and return to the app.
+    if (s.paused) s.load();
   }, []);
 
   useEffect(() => setIos(isIos()), []);
@@ -147,6 +157,7 @@ export default function DriverAlarm() {
 
   // Siren + vibration for as long as the ring stands.
   useEffect(() => {
+    ringingNow.current = ringing;
     const s = siren.current;
     if (!ringing || !s) return;
 

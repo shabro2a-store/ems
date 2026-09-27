@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
 import { BrandMark } from '@/components/BrandMark';
+import DriverAlarm from '@/components/field/DriverAlarm';
 
 interface Tab {
   href: string;
@@ -63,7 +64,13 @@ export default function FieldShell({ children }: { children: React.ReactNode }) 
         </div>
       </header>
 
-      <main className="mx-auto max-w-md px-4 py-4">{children}</main>
+      <main className="mx-auto max-w-md space-y-4 px-4 py-4">
+        {/* On every tab, not only Trips: a driver reading their payslip can
+            still be rung. It needs the page kept alive and audio unlocked, so
+            it stays mounted for as long as the shell does. */}
+        {driver && <DriverAlarm />}
+        <div>{children}</div>
+      </main>
 
       {/* The tab bar sits above the phone's home bar, and the active tab is
           marked by an accent bar as well as its colour. */}

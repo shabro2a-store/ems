@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiGet, apiSend, apiSendForm, errorMessage, formatBeirutTime } from '@/lib/api';
 import { Card, CardBody, StatTile, Alert } from '@/components/ui';
-import DriverAlarm from '@/components/field/DriverAlarm';
 import EnableAlerts from '@/components/field/EnableAlerts';
 import ReceiptCamera from '@/components/field/ReceiptCamera';
 
@@ -172,7 +171,6 @@ export default function DriverHomeClient({ username, branch }: { username: strin
 
   return (
     <div className="space-y-4">
-      <DriverAlarm />
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Hi {username} 🚚</h1>
         <p className="text-sm text-muted">{branch.name}</p>
