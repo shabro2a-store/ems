@@ -45,18 +45,17 @@ interface Totals {
 }
 interface Branch { id: string; name: string }
 
-function currentMonth(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
 export default function AdminPayrollPage() {
-  const [month, setMonth] = useState(currentMonth());
+  // Empty until the server names the month it is paying: the browser's clock
+  // is not the one the lock runs on.
+  const [month, setMonth] = useState('');
   // An earlier month has been paid, so nothing on top of the record may move:
   // no bonuses, no deductions, no waiving a penalty or ruling on overtime. The
   // punches themselves stay correctable on the Punches screen - fixing what
   // actually happened is not the same as changing what was paid on top of it.
-  const closed = month < currentMonth();
+  // The server says which it is; closed until it has.
+  const [open, setOpen] = useState<boolean | null>(null);
+  const closed = open !== true;
   const [branchId, setBranchId] = useState('all');
   const [rows, setRows] = useState<Row[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
@@ -77,8 +76,13 @@ export default function AdminPayrollPage() {
   async function load() {
     setLoading(true);
     setErr(null);
-    const r = await apiGet<{ rows: Row[]; totals: Totals; branches: Branch[] }>(`/api/admin/payroll?month=${month}&branchId=${branchId}`);
+    setOpen(null);
+    const r = await apiGet<{ rows: Row[]; totals: Totals; branches: Branch[]; month: string; open: boolean }>(
+      `/api/admin/payroll?${month ? `month=${month}&` : ''}branchId=${branchId}`,
+    );
     if (r.ok) {
+      if (!month) setMonth(r.data.month);
+      setOpen(r.data.open);
       setRows(r.data.rows);
       setTotals(r.data.totals);
       setBranches(r.data.branches);
@@ -140,7 +144,7 @@ export default function AdminPayrollPage() {
         }
       />
 
-      {closed && (
+      {open === false && (
         <div className="mb-3">
           <Alert tone="warning">
             🔒 <b>{month} is closed.</b> It has already been paid, so bonuses, deductions and

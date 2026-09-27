@@ -3,6 +3,7 @@ import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { payoutForUser, payrollRoster } from '@/lib/services/payout';
 import { monthEndRates } from '@/lib/services/payrollRates';
+import { currentPayMonth, isMonthOpen } from '@/lib/services/periodLock';
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -16,8 +17,10 @@ export async function GET(req: Request) {
   if (me.role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
   const url = new URL(req.url);
-  const month = url.searchParams.get('month');
-  if (!month || !MONTH_RE.test(month)) {
+  // No month: the one the server is paying now - the page's first load, which
+  // must not guess from the browser's clock.
+  const month = url.searchParams.get('month') ?? currentPayMonth();
+  if (!MONTH_RE.test(month)) {
     return jsonError('INVALID_INPUT', 'month query param must be YYYY-MM', 400);
   }
   const branchParam = url.searchParams.get('branchId');
@@ -108,7 +111,10 @@ export async function GET(req: Request) {
     },
   );
 
-  return NextResponse.json({ ok: true, data: { rows, totals, month, branchId: branchId ?? 'all', branches } });
+  // Whether bonuses, deductions and rulings are still taken for this month -
+  // the same rule every write route enforces, so the page never has to guess.
+  const open = isMonthOpen(month);
+  return NextResponse.json({ ok: true, data: { rows, totals, month, open, branchId: branchId ?? 'all', branches } });
 }
 
 export const dynamic = 'force-dynamic';

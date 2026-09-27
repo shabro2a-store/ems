@@ -370,8 +370,11 @@ Photos are wiped by the worker a week after the trip (`Trip.receipt_taken_at` st
   says per trip whether its `receipt` is `available | wiped | none`.
 
 ### Pay & approvals
-- **GET /api/admin/payroll?month=YYYY-MM&branchId=** → `{ rows[], totals, month,
-  branchId, branches }`. Each row + `totals` include `gross_cent`, `adjustments_cent`,
+- **GET /api/admin/payroll?month=YYYY-MM&branchId=** → `{ rows[], totals, month, open,
+  branchId, branches }`. `month` may be left out: it is then the month the server is paying
+  now (`currentPayMonth`, which runs 24h15m into the next). `open` says whether bonuses,
+  deductions and rulings are still taken for it - the page locks from this, never from the
+  browser's clock. Each row + `totals` include `gross_cent`, `adjustments_cent`,
   `penalties_cent`, `overtime_deduction_cent`, `advances_cent`, `net_cent` — every
   line `net_cent` is built from, so the table reconciles. Rows also carry
   `blocked_credit_cent` / `blocked_credit_min` (and `totals` the cent figure): a memo line
