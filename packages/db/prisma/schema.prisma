@@ -357,6 +357,8 @@ model Trip {
   back_lng             Float?
   over_threshold       Boolean   @default(false)
   threshold_alerted_at DateTime?
+  // When the "out too long" alert went (driverStale): it goes once per trip.
+  stale_alerted_at     DateTime?
   // Closed by the system rather than by a BACK the driver pressed - see
   // tripClose.ts. An open trip blocks every driver punch and nothing but the
   // driver's own geofenced BACK used to close one, so a forgotten press was an

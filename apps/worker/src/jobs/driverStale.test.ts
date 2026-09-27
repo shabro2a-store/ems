@@ -6,6 +6,7 @@ type TripRow = {
   branch_id: string;
   out_at: Date;
   back_at: Date | null;
+  stale_alerted_at?: Date | null;
 };
 type BranchRow = { id: string; name: string; trip_threshold_min: number };
 type UserRow = { id: string; username: string };
@@ -42,6 +43,12 @@ function makeDb() {
             driver: store.users.get(t.driver_id),
             branch: store.branches.get(t.branch_id),
           }));
+      },
+      updateMany: async ({ where, data }: { where: { id: string; stale_alerted_at: null }; data: { stale_alerted_at: Date } }) => {
+        const t = store.trips.find((x) => x.id === where.id && !x.stale_alerted_at);
+        if (!t) return { count: 0 };
+        t.stale_alerted_at = data.stale_alerted_at;
+        return { count: 1 };
       },
     },
   };
@@ -91,5 +98,22 @@ describe('runDriverStale', () => {
     const db = makeDb();
     const r = await runDriverStale({ db: db as never, notifier });
     expect(r.notified).toBe(0);
+  });
+});
+
+/*
+ * #43: the job runs every 30 minutes and alerted on every run while the trip
+ * stayed open - a stranded driver was a message every half hour, all night.
+ */
+describe('a driver out too long', () => {
+  it('is reported once, not on every run', async () => {
+    store.users.set('d1', { id: 'd1', username: 'sami' });
+    store.branches.set('b1', { id: 'b1', name: 'Hamra', trip_threshold_min: 30 });
+    const out = new Date('2026-09-28T10:00:00Z');
+    store.trips.push({ id: 't1', driver_id: 'd1', branch_id: 'b1', out_at: out, back_at: null });
+    for (const h of [5, 5.5, 6, 9]) {
+      await runDriverStale({ db: makeDb() as never, now: new Date(out.getTime() + h * 3_600_000), notifier: notifier as never });
+    }
+    expect(store.notifications.filter((n) => n.template === 'driver.stale')).toHaveLength(1);
   });
 });
