@@ -15,7 +15,7 @@ const BASE_URL = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:3000';
 
 interface Person {
   username: string;
-  status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT';
+  status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT' | 'LEFT';
   since_min: number;
   hours_today: number;
 }
@@ -236,5 +236,29 @@ describe('admin overview: a forgotten checkout (HTTP)', () => {
     expect(data.kpis.present).toBe(0);
     expect(data.kpis.hoursToday).toBe(0);
     expect(data.kpis.laborTodayCent).toBe(0);
+  });
+
+  /*
+   * #37: somebody who worked today and has clocked out was shown - and counted -
+   * as Absent, because the board only knew "in right now" or "not here".
+   */
+  it('shows somebody who worked today and went home as left, not absent', async () => {
+    const branch = await seedTestBranch();
+    const weekday = beirutWeekday(new Date());
+    const { startUtc } = todayInBeirutDateRange(todayInBeirut());
+    const elapsed = Date.now() - startUtc.getTime();
+    const worker = await seedTestUser({ username: 'ov-left', branch_id: branch.id });
+    const admin = await seedTestUser({ username: 'ov-admin6', role: Role.ADMIN });
+    await seedTestSchedule({ user_id: worker.id, weekday, shift_min: 480 });
+    // Both punches earlier today, whatever time this runs.
+    await seedTestPunch({ user_id: worker.id, branch_id: branch.id, kind: 'IN', at: new Date(startUtc.getTime() + elapsed / 4) });
+    await seedTestPunch({ user_id: worker.id, branch_id: branch.id, kind: 'OUT', at: new Date(startUtc.getTime() + elapsed / 2) });
+
+    const session = await loginAs(admin.username, 'test-pass-1');
+    const data = await overview(session);
+    const row = data.people.find((p) => p.username === 'ov-left');
+    expect(row?.status).toBe('LEFT');
+    expect(row?.hours_today).toBeGreaterThan(0);
+    expect(data.kpis.absent).toBe(0);
   });
 });

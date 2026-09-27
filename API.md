@@ -239,7 +239,8 @@ chars). Ends every other session of the admin's; this one is re-issued.
   - `people[].status` is `DAY_OFF` whenever the day resolves to **zero** required
     minutes — a `DAY_OFF` override, an `HOURS_CHANGE` override for the whole
     shift, or a weekday with no hours set — and only `ABSENT` when hours were
-    owed and no punch exists. Same resolution payroll uses (`requiredMinFor`).
+    owed and no punch exists. Same resolution payroll uses (`requiredMinFor`). `LEFT` is
+    somebody who worked today and has clocked out - not absent, not counted in `absent`.
   - The day window comes from `todayInBeirutDateRange`, which resolves both ends from
     the calendar date. Deriving the end as `start + 24h` collapsed the range to nothing
     on Beirut's 25-hour fall-back day (2026-10-24) and lost an hour before the

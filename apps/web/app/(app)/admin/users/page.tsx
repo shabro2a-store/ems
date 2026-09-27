@@ -22,7 +22,7 @@ interface User {
   day_start_hour: number | null;
 }
 interface Branch { id: string; name: string; deleted_at?: string | null }
-interface Status { status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT'; since_min: number; over: boolean }
+interface Status { status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT' | 'LEFT'; since_min: number; over: boolean; hours_today?: number }
 
 const ROLE_TONE: Record<Role, 'primary' | 'warning' | 'neutral' | 'success'> = { EMPLOYEE: 'primary', DRIVER: 'warning', ADMIN: 'neutral', CALLER: 'success' };
 // Roles paid hourly (show/edit a rate). Callers and admin are not.
@@ -351,6 +351,7 @@ function StatusChip({ st }: { st: Status }) {
   if (st.status === 'IN') return <Badge tone="success">In · {fmt(st.since_min)}</Badge>;
   if (st.status === 'ON_TRIP') return <Badge tone="warning">On trip{st.over ? ' · over' : ''}</Badge>;
   if (st.status === 'DAY_OFF') return <Badge tone="neutral">Day off</Badge>;
+  if (st.status === 'LEFT') return <Badge tone="neutral">Left{st.hours_today !== undefined ? ` · ${st.hours_today}h today` : ''}</Badge>;
   return <Badge tone="danger">Absent</Badge>;
 }
 function fmt(min: number) { const h = Math.floor(min / 60); return h ? `${h}h ${min % 60}m` : `${min}m`; }

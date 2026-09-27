@@ -53,7 +53,7 @@ function flagReason(kind: string, ctx: unknown): string {
 // "needs attention" queue. Supports ?branchId=<id> to scope everything to one branch
 // (omit or 'all' for every branch).
 
-type Status = 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT';
+type Status = 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT' | 'LEFT';
 
 export async function GET(req: Request) {
   const me = await identity();
@@ -230,6 +230,10 @@ export async function GET(req: Request) {
         status = 'IN';
         sinceMin = Math.max(0, Math.floor((now - openInAt.getTime()) / 60_000));
         present += 1;
+      } else if (minutes > 0) {
+        // Worked today and has clocked out. Not absent - they came - and not
+        // in: the board used to have only those two, and called them Absent.
+        status = 'LEFT';
       } else if (requiredMinToday(u.id) === 0) {
         status = 'DAY_OFF';
       } else {

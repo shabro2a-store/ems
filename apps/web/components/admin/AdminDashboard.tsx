@@ -10,7 +10,7 @@ interface Person {
   username: string;
   role: string;
   branch_name: string | null;
-  status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT';
+  status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT' | 'LEFT';
   since_min: number;
   over: boolean;
   hours_today: number;
@@ -56,6 +56,7 @@ const STATUS: Record<Person['status'], { label: (p: Person) => string; tone: 'su
   ON_TRIP: { label: (p) => `On trip · ${dur(p.since_min)}${p.over ? ' over' : ''}`, tone: 'warning' },
   DAY_OFF: { label: () => 'Day off', tone: 'neutral' },
   ABSENT: { label: () => 'Absent', tone: 'danger' },
+  LEFT: { label: () => 'Left', tone: 'neutral' },
 };
 
 export default function AdminDashboard() {
