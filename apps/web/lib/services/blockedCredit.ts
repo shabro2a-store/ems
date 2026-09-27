@@ -10,6 +10,8 @@ import {
   type WorkInterval,
   dayStartHourFor,
   workingDaysOf,
+  type WeeklyHours,
+  weeklyHoursFrom,
 } from './coverage';
 
 /**
@@ -250,7 +252,7 @@ export function grantedIntervals(items: BlockedCreditItem[]): WorkInterval[] {
  */
 export function coverageWithBlockedCredit(args: {
   punches: PunchLite[];
-  shiftMinByWeekday: Map<number, number>;
+  shiftMinByWeekday: WeeklyHours;
   overridesByDate: Map<string, OverrideLite>;
   rateCentAt: (at: Date) => number;
   attempts: BlockedAttemptLite[];
@@ -347,7 +349,7 @@ export async function blockedCreditForUser(
       orderBy: { at: 'asc' },
       select: { kind: true, at: true },
     }),
-    db.schedule.findMany({ where: { user_id: userId }, select: { weekday: true, shift_min: true } }),
+    db.schedule.findMany({ where: { user_id: userId }, select: { weekday: true, shift_min: true, effective_from: true } }),
     db.scheduleOverride.findMany({
       where: { user_id: userId, date: { gte: start, lt: end } },
       select: { date: true, kind: true, shift_min: true },
@@ -364,8 +366,9 @@ export async function blockedCreditForUser(
     }),
   ]);
 
-  const shiftMinByWeekday = new Map<number, number>();
-  for (const s of schedules) shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
+  // The hours in force on each day judged - not today's - so an edit never
+  // re-judges a day already paid.
+  const shiftMinByWeekday = weeklyHoursFrom(schedules);
 
   const overridesByDate = new Map<string, OverrideLite>();
   for (const o of overrides) {
@@ -488,7 +491,7 @@ async function allBlockedCredits(
     }),
     db.schedule.findMany({
       where: { user_id: { in: ids } },
-      select: { user_id: true, weekday: true, shift_min: true },
+      select: { user_id: true, weekday: true, shift_min: true, effective_from: true },
     }),
     db.scheduleOverride.findMany({
       where: { user_id: { in: ids }, date: { gte: start, lt: end } },
@@ -525,8 +528,7 @@ async function allBlockedCredits(
     const attempts = blocked.attemptsByUser.get(id);
     if (!attempts || attempts.length === 0) continue;
 
-    const shiftMinByWeekday = new Map<number, number>();
-    for (const s of schedulesBy.get(id) ?? []) shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
+    const shiftMinByWeekday = weeklyHoursFrom(schedulesBy.get(id) ?? []);
 
     const overridesByDate = new Map<string, OverrideLite>();
     for (const o of overridesBy.get(id) ?? []) {

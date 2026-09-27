@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { todayInBeirut, todayInBeirutDateRange, beirutWeekday, workingDayHistoryFrom } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, scheduleRowOn, workingDayHistoryFrom } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
@@ -27,10 +27,15 @@ export async function runMissedCheckout(
   // time, so a check-in can still be open from further back. Scanning every
   // weekday's shift_min is the only way a still-open check-in keeps getting
   // re-flagged (once per day, via the guard below) for as long as it stays open.
-  const schedules = await db.schedule.findMany({
-    where: { shift_min: { gt: 0 } },
+  // Every row, not only non-zero ones: a weekday switched off is a 0 row that
+  // supersedes the older hours, and must be seen to do so. One pass per person,
+  // judged against the row in force on the day their open shift is filed under.
+  const allRows = await db.schedule.findMany({
     include: { user: { include: { branch: true } } },
   });
+  const rowsByUser = new Map<string, typeof allRows>();
+  for (const r of allRows) rowsByUser.set(r.user_id, [...(rowsByUser.get(r.user_id) ?? []), r]);
+  const schedules = [...rowsByUser.values()].map((rows) => rows[0]!);
 
   let flags_created = 0;
   let notified = 0;
@@ -45,8 +50,6 @@ export async function runMissedCheckout(
   );
 
   for (const s of schedules) {
-    if (s.shift_min == null) continue;
-    const shiftMin = s.shift_min;
 
     const lastIn = await db.punch.findFirst({
       where: { user_id: s.user_id, kind: 'IN' },
@@ -78,7 +81,9 @@ export async function runMissedCheckout(
     // The weekday of the LABEL, not of the punch: a shift starting 23:58 can be
     // filed on the following date, and this has to read the same schedule row
     // payroll will.
-    if (beirutWeekday(new Date(`${inDate}T12:00:00.000Z`)) !== s.weekday) continue;
+    const inForce = scheduleRowOn(rowsByUser.get(s.user_id) ?? [], inDate);
+    if (!inForce || inForce.shift_min <= 0) continue;
+    const shiftMin = inForce.shift_min;
 
     // An override for that specific date beats the weekly pattern, exactly as
     // it does for payroll - judging four hours of approved time off against

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { prisma } from '@/lib/db/prisma';
-import { todayInBeirut, todayInBeirutDateRange, beirutWeekday, workingDayHistoryFrom } from 'time';
+import { todayInBeirut, todayInBeirutDateRange, beirutWeekday, scheduleRowOn, workingDayHistoryFrom } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
 import { pendingOvertimeNotices } from '@/lib/services/overtime';
 import { grantedCreditMinutesByDate, pendingBlockedCreditNotices } from '@/lib/services/blockedCredit';
@@ -122,7 +122,7 @@ export async function GET(req: Request) {
       }),
       prisma.schedule.findMany({
         where: { weekday: todayWeekday },
-        select: { user_id: true, shift_min: true },
+        select: { user_id: true, weekday: true, shift_min: true, effective_from: true },
       }),
       prisma.flag.findMany({
         where: { created_at: { gte: startUtc, lt: endUtc }, resolved_at: null },
@@ -174,7 +174,15 @@ export async function GET(req: Request) {
   }
   const openTripByDriver = new Map(openTrips.map((t) => [t.driver_id, t]));
   const overrideByUser = new Map(todayOverrides.map((o) => [o.user_id, o]));
-  const shiftMinByUser = new Map(todaySchedules.map((s) => [s.user_id, s.shift_min]));
+  // Today's weekday can hold several rows per person - the hours in force
+  // today are the latest that has taken effect.
+  const scheduleRowsByUser = new Map<string, typeof todaySchedules>();
+  for (const s of todaySchedules) scheduleRowsByUser.set(s.user_id, [...(scheduleRowsByUser.get(s.user_id) ?? []), s]);
+  const shiftMinByUser = new Map<string, number>();
+  for (const [uid, rows] of scheduleRowsByUser) {
+    const inForce = scheduleRowOn(rows, todayStr);
+    if (inForce) shiftMinByUser.set(uid, inForce.shift_min);
+  }
   const requiredMinToday = (userId: string): number =>
     requiredMinFor(overrideByUser.get(userId), shiftMinByUser.get(userId));
 

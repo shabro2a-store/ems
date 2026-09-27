@@ -296,7 +296,9 @@ chars). Ends every other session of the admin's; this one is re-issued.
 - **PATCH /api/admin/users/[id]/notification-prefs** *(CSRF)* `{ dailySummary?, routinePings? }`.
 - **GET /api/admin/schedules/[userId]** → `{ weeklySchedule, overrides, pendingLeaves }`.
 - **PUT /api/admin/schedules/[userId]** *(CSRF)* `{ weeklySchedule: [{ weekday 0-6,
-  shift_hours 0-24 }] }` (full replace).
+  shift_hours 0-24 }] }`. Applies **from today**: each weekday that changes gets a row dated
+  today (a weekday left out becomes 0); earlier rows stay, so past days keep the hours they
+  were judged against. GET returns the week in force today.
 
 ### Branches
 - **GET /api/admin/branches** → `{ branches: [...] }`.

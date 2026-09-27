@@ -110,7 +110,7 @@ const mocks = vi.hoisted(() => ({
   blockedPunchAttempt: { create: vi.fn(), count: vi.fn() },
   auditLog: { create: vi.fn() },
   flag: { findFirst: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
-  schedule: { findUnique: vi.fn() },
+  schedule: { findMany: vi.fn() },
   $transaction: vi.fn(),
   // The punch write holds a per-user advisory lock; the fake has nothing to
   // lock, so it only has to exist and resolve.
@@ -243,8 +243,10 @@ beforeEach(() => {
   // The self-resolve path asks what the arrival's day owed, then closes the
   // session inside a transaction. Default: nothing scheduled, so requiredMin is
   // 0 and only the elapsed/day-boundary conditions decide staleness.
-  mocks.schedule.findUnique.mockImplementation(async ({ where }: { where: { user_id_weekday: { user_id: string; weekday: number } } }) => {
-    return store.schedules.find((s) => s.user_id === where.user_id_weekday.user_id && s.weekday === where.user_id_weekday.weekday) ?? null;
+  mocks.schedule.findMany.mockImplementation(async ({ where }: { where: { user_id: string; weekday: number } }) => {
+    return store.schedules
+      .filter((s) => s.user_id === where.user_id && s.weekday === where.weekday)
+      .map((s) => ({ effective_from: new Date('1970-01-01T00:00:00.000Z'), ...s }));
   });
 
   mocks.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(mocks));

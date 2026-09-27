@@ -446,22 +446,20 @@ export async function payoutForUser(
   // A driver's trips, read on the same widened window as the punches and then
   // filed by the shift they happened in - a trip at 00:30 on the 1st during a
   // shift that started the night before is the previous month's, and a query
-  // on the calendar month would never see it. Only for drivers: the query is
-  // not free and everybody else's answer is zero by definition.
-  const isDriver = user?.role === 'DRIVER';
-  const [trips, tripRateChanges] = isDriver
-    ? await Promise.all([
-        db.trip.findMany({
-          where: { driver_id: userId, out_at: { gte: pairFrom, lt: pairTo } },
-          select: { out_at: true, back_at: true, denied_at: true },
-        }),
-        db.tripRateChange.findMany({
-          where: { user_id: userId, effective_from: { lt: end } },
-          orderBy: { effective_from: 'asc' },
-          select: { user_id: true, rate_cent: true, effective_from: true },
-        }),
-      ])
-    : [[], []];
+  // on the calendar month would never see it. Whatever the person's role is
+  // NOW: gating on it wiped every trip a driver had been paid for the moment
+  // the owner made them an employee. Someone who never drove has none.
+  const [trips, tripRateChanges] = await Promise.all([
+    db.trip.findMany({
+      where: { driver_id: userId, out_at: { gte: pairFrom, lt: pairTo } },
+      select: { out_at: true, back_at: true, denied_at: true },
+    }),
+    db.tripRateChange.findMany({
+      where: { user_id: userId, effective_from: { lt: end } },
+      orderBy: { effective_from: 'asc' },
+      select: { user_id: true, rate_cent: true, effective_from: true },
+    }),
+  ]);
   return computePayoutFromRows({
     userId,
     punches: punches as PunchRow[],
@@ -515,8 +513,7 @@ export async function accruedEarningsThisMonth(
   );
   // A driver's trips are earned too, for the same reason blocked credit is:
   // the cap has to be the month payroll is about to pay, or it lends against
-  // less than they are owed.
-  if (user?.role !== 'DRIVER') return earned;
+  // less than they are owed. Any role: see payoutForUser.
   const [trips, tripRates] = await Promise.all([
     db.trip.findMany({
       where: { driver_id: userId, out_at: { gte: pairFrom, lt: pairTo } },
@@ -588,7 +585,7 @@ export async function payrollRoster(
         lt: new Date(end.getTime() + PAIR_LOOKAROUND_MS),
       },
     },
-    select: { user_id: true, at: true },
+    select: { user_id: true, at: true, branch_id: true },
   });
   // Membership uses each user's own branch boundary, so a night shift that a
   // 6am branch calls the 31st is in that month here too.
@@ -608,17 +605,11 @@ export async function payrollRoster(
   // are not symmetric - including somebody who worked nothing shows a payslip
   // of zero, while excluding somebody drops a month of their pay off the screen
   // entirely.
-  const worked = new Set(
-    arrivals
-      .filter((a) => {
-        const hour = hourByUser.get(a.user_id) ?? 0;
-        return (
-          inBeirut(a.at).date.slice(0, 7) === month ||
-          shiftDateOf(a.at, hour).slice(0, 7) === month
-        );
-      })
-      .map((a) => a.user_id),
-  );
+  const inMonth = arrivals.filter((a) => {
+    const hour = hourByUser.get(a.user_id) ?? 0;
+    return inBeirut(a.at).date.slice(0, 7) === month || shiftDateOf(a.at, hour).slice(0, 7) === month;
+  });
+  const worked = new Set(inMonth.map((a) => a.user_id));
   // Neither date sees a night chain: once one 00:02 start puts a night worker a
   // date ahead, the last night of the previous month is the 1st's working day.
   // Only the rule can say, so it is asked - of the few arrivals on that last
@@ -632,15 +623,23 @@ export async function payrollRoster(
     });
     const labels = workingDaysOf(history as PunchLite[], hourByUser.get(a.user_id) ?? 0);
     const i = history.findIndex((p) => p.kind === 'IN' && p.at.getTime() === a.at.getTime());
-    if (i >= 0 && labels[i]?.slice(0, 7) === month) worked.add(a.user_id);
+    if (i >= 0 && labels[i]?.slice(0, 7) === month) {
+      worked.add(a.user_id);
+      inMonth.push(a);
+    }
   }
   const workedIds = [...worked];
+  const branchWorked = monthBranches(inMonth);
 
-  return db.user.findMany({
+  // Whoever worked the month is on it whatever their role is now - a driver
+  // made a caller still worked the days they worked. The role filter only
+  // picks which of today's staff get a zero row.
+  const candidates = await db.user.findMany({
     where: {
-      role: { in: ['EMPLOYEE', 'DRIVER'] },
-      ...(branchId ? { branch_id: branchId } : {}),
-      OR: [{ is_active: true, deleted_at: null }, { id: { in: workedIds } }],
+      OR: [
+        { is_active: true, deleted_at: null, role: { in: ['EMPLOYEE', 'DRIVER'] } },
+        { id: { in: workedIds } },
+      ],
     },
     select: {
       id: true,
@@ -653,6 +652,38 @@ export async function payrollRoster(
       deleted_at: true,
       branch: { select: { name: true } },
     },
-    orderBy: [{ branch: { name: 'asc' } }, { username: 'asc' }],
   });
+
+  // And under the branch where they worked that month, not where they are now:
+  // moving somebody took their past months' pay to the new branch's payroll.
+  const rows = candidates.map((u) => ({ ...u, branch_id: branchWorked.get(u.id) ?? u.branch_id }));
+  const ids = [...new Set(rows.map((u) => u.branch_id).filter((b): b is string => b !== null))];
+  const names = new Map(
+    (await db.branch.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })).map((b) => [b.id, b.name]),
+  );
+  return rows
+    .map((u) => ({ ...u, branch: u.branch_id ? { name: names.get(u.branch_id) ?? u.branch?.name ?? '' } : null }))
+    .filter((u) => !branchId || u.branch_id === branchId)
+    .sort((a, b) => (a.branch?.name ?? '').localeCompare(b.branch?.name ?? '') || a.username.localeCompare(b.username));
+}
+
+/**
+ * The branch each person worked the month at: where most of their arrivals
+ * were, the latest breaking a tie. Only history decides it, so a later move
+ * leaves the month where it was.
+ */
+function monthBranches(arrivals: Array<{ user_id: string; at: Date; branch_id: string }>): Map<string, string> {
+  const tally = new Map<string, Map<string, { n: number; last: number }>>();
+  for (const a of arrivals) {
+    const byBranch = tally.get(a.user_id) ?? new Map<string, { n: number; last: number }>();
+    const t = byBranch.get(a.branch_id) ?? { n: 0, last: 0 };
+    byBranch.set(a.branch_id, { n: t.n + 1, last: Math.max(t.last, a.at.getTime()) });
+    tally.set(a.user_id, byBranch);
+  }
+  const out = new Map<string, string>();
+  for (const [userId, byBranch] of tally) {
+    const [best] = [...byBranch.entries()].sort((x, y) => y[1].n - x[1].n || y[1].last - x[1].last);
+    if (best) out.set(userId, best[0]);
+  }
+  return out;
 }

@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { todayInBeirut, weekInForce } from 'time';
 
 /**
  * What a person owns that makes deleting them destroy a record.
@@ -99,8 +100,10 @@ export async function userHistory(db: PrismaClient, userId: string): Promise<Use
  *    under their old name with a genuinely new account, which is what the owner
  *    means by "he needs a new one if he comes back". `name` keeps the human
  *    label so payroll history still reads as a person.
- *  - the schedule goes, so the absence detector stops flagging somebody who is
- *    not coming, and the telegram/push wiring goes with it
+ *  - the schedule owes nothing from today, so the absence detector stops
+ *    flagging somebody who is not coming - but its history stays, because the
+ *    months they worked are still judged against the hours they had - and the
+ *    telegram/push wiring goes
  *
  * RateChange is deliberately kept: it is what prices their old punches, and
  * without it every month they worked would silently reprice to zero.
@@ -116,7 +119,16 @@ export async function retireUser(
 ): Promise<void> {
   await db.$transaction(async (tx) => {
     await tx.pushSubscription.deleteMany({ where: { user_id: user.id } });
-    await tx.schedule.deleteMany({ where: { user_id: user.id } });
+    const today = todayInBeirut(now);
+    const effectiveFrom = new Date(`${today}T00:00:00.000Z`);
+    const rows = await tx.schedule.findMany({ where: { user_id: user.id } });
+    for (const r of weekInForce(rows, today).filter((w) => w.shift_min > 0)) {
+      await tx.schedule.upsert({
+        where: { user_id_weekday_effective_from: { user_id: user.id, weekday: r.weekday, effective_from: effectiveFrom } },
+        create: { user_id: user.id, weekday: r.weekday, shift_min: 0, effective_from: effectiveFrom },
+        update: { shift_min: 0 },
+      });
+    }
     await tx.scheduleOverride.deleteMany({ where: { user_id: user.id, date: { gte: now } } });
 
     await tx.user.update({

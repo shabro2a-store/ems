@@ -55,10 +55,13 @@ function resetStore() {
 function makeDb() {
   return {
     schedule: {
-      findMany: async ({ where }: { where: { shift_min?: { gt: number } } }) => {
-        return store.schedules
-          .filter((s) => !where.shift_min || (s.shift_min != null && s.shift_min > where.shift_min.gt))
-          .map((s) => ({ ...s, user: store.users.get(s.user_id)! }));
+      // Every row: the job resolves which one is in force for the day it judges.
+      findMany: async () => {
+        return store.schedules.map((s) => ({
+          effective_from: new Date('1970-01-01T00:00:00.000Z'),
+          ...s,
+          user: store.users.get(s.user_id)!,
+        }));
       },
     },
     punch: {

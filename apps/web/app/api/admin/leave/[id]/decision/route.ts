@@ -41,6 +41,14 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     if (result.code === 'NOT_FOUND') return jsonError('NOT_FOUND', 'Leave request not found', 404);
     if (result.code === 'ALREADY_DECIDED') return jsonError('ALREADY_DECIDED', 'Already decided', 409);
     if (result.code === 'INVALID_INPUT') return jsonError('INVALID_INPUT', 'Invalid decision', 400);
+    if (result.code === 'MONTH_CLOSED') {
+      return jsonError(
+        'MONTH_CLOSED',
+        `This leave includes days in ${result.closedMonth}, which is closed and paid. It can only be ` +
+          'refused now - ask for a new request covering the days that are still open.',
+        409,
+      );
+    }
   }
 
   const okResult = result as { ok: true; id: string; status: 'APPROVED' | 'REJECTED'; overrides_created: number };

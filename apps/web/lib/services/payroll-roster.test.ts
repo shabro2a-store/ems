@@ -43,7 +43,7 @@ function fakeDb(users: UserRow[], punches: PunchRow[]) {
           id?: { in: string[] };
           role?: { in: string[] };
           branch_id?: string;
-          OR?: [{ is_active: boolean; deleted_at: null }, { id: { in: string[] } }];
+          OR?: [{ is_active: boolean; deleted_at: null; role?: { in: string[] } }, { id: { in: string[] } }];
         };
       }) => {
         // payrollRoster asks twice: first for each arriving user's branch
@@ -52,14 +52,19 @@ function fakeDb(users: UserRow[], punches: PunchRow[]) {
           const ids = new Set(where.id?.in ?? []);
           return users.filter((u) => ids.has(u.id)).map((u) => ({ id: u.id, branch: null }));
         }
+        // Today's staff by role, plus anyone who worked the month whatever
+        // their role; the roster files them by branch itself.
         const worked = new Set(where.OR[1].id.in);
+        const staffRoles = where.OR[0].role?.in;
         return users
-          .filter((u) => (where.role ? where.role.in.includes(u.role) : true))
-          .filter((u) => (where.branch_id ? u.branch_id === where.branch_id : true))
-          .filter((u) => (u.is_active && u.deleted_at === null) || worked.has(u.id))
+          .filter(
+            (u) =>
+              (u.is_active && u.deleted_at === null && (!staffRoles || staffRoles.includes(u.role))) || worked.has(u.id),
+          )
           .map((u) => ({ ...u, hourly_rate_cent: 300, expected_monthly_salary_cent: null, branch: null }));
       },
     },
+    branch: { findMany: async () => [] },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }

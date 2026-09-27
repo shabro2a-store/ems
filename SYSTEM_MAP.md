@@ -85,7 +85,10 @@ cuid PKs, money = Int cents.
   real punch carries. Written **only** past `verifyWithinGeofence`, which is what makes it
   evidence rather than a claim — see the blocked-time credit in §4.
 - **RateChange** — point-in-time hourly rate history (payroll uses the rate in effect at each shift).
-- **Schedule** — one row per (user, weekday 0=Sun..6=Sat): `shift_min`, the hours owed that day.
+- **Schedule** — rows per (user, weekday 0=Sun..6=Sat, `effective_from`): `shift_min`, the hours owed
+  that day from that date on. A day is judged against the row in force on it (`scheduleRowOn`),
+  so an edit — which adds rows dated today, a weekday switched off being a 0 — never re-judges
+  a day already paid. Retiring someone adds 0 rows; the history stays.
 - **ScheduleOverride** — one per (user, date): DAY_OFF or HOURS_CHANGE. DAY_OFF blocks punching.
 - **LeaveRequest** — kind, start/end date, optional `off_min`, status. Approval → ScheduleOverride rows.
 - **Trip** — driver, branch, out_at/lat/lng, back_at/lat/lng?, over_threshold, threshold_alerted_at.
@@ -431,7 +434,12 @@ Full request/response detail is in [API.md](API.md). Summary:
   Pending requests count, and **approving re-checks the cap** against the month the advance
   comes out of (`EXCEEDS_ACCRUED_EARNINGS` 409, naming what was earned and advanced).
   Rejecting is never blocked, and approval only changes a request that is still pending.
-- **Leave**: approval upserts one ScheduleOverride per date in range.
+- **Leave**: approval upserts one ScheduleOverride per date in range. Approval is refused
+  (`MONTH_CLOSED`) when the range touches a closed month; refusing is always allowed.
+- **A closed month does not move.** Besides the lock on rulings, everything payroll reads for a
+  past month is history: the weekly hours in force then, trips counted whatever the person's
+  role is now, and the payroll list includes whoever worked the month, filed under the branch
+  where most of their arrivals were. Only a punch correction — deliberately — changes it.
 - **Time (`time`)**: Beirut day boundaries, weekday Sun=0..Sat=6, schedule wall-clock → UTC.
   Day boundaries are always resolved from the **calendar date**, never by adding or
   subtracting 24 hours from an instant — a Beirut day is 23 or 25 hours long twice a year.

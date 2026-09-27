@@ -1,5 +1,5 @@
 import type { PrismaClient, Punch } from '@prisma/client';
-import { SHIFT_GAP_MIN, workingDayHistoryFrom } from 'time';
+import { SHIFT_GAP_MIN, scheduleRowOn, workingDayHistoryFrom } from 'time';
 import { requiredMinFor, workingDaysOf, weekdayOfWorkingDay, type PunchLite } from './coverage';
 
 /**
@@ -189,16 +189,18 @@ export async function requiredMinForArrival(
   // not written yet - fall back to the rule's own answer for a lone arrival.
   const date = (i >= 0 ? labels[i] : null) ?? workingDaysOf([{ kind: 'IN', at: arrivalAt }], dayStartHour)[0]!;
   const [schedule, override] = await Promise.all([
-    db.schedule.findUnique({
-      where: { user_id_weekday: { user_id: userId, weekday: weekdayOfWorkingDay(date) } },
-      select: { shift_min: true },
+    // Every row for that weekday, and the one in force on the date: the hours
+    // it was scheduled for then, not the hours set since.
+    db.schedule.findMany({
+      where: { user_id: userId, weekday: weekdayOfWorkingDay(date) },
+      select: { weekday: true, shift_min: true, effective_from: true },
     }),
     db.scheduleOverride.findUnique({
       where: { user_id_date: { user_id: userId, date: new Date(`${date}T00:00:00.000Z`) } },
       select: { kind: true, shift_min: true },
     }),
   ]);
-  return requiredMinFor(override, schedule?.shift_min ?? null);
+  return requiredMinFor(override, scheduleRowOn(schedule, date)?.shift_min ?? null);
 }
 
 /**

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: {} }));
 
-import type { PrismaClient } from '@prisma/client';
+import { fakeDb, type Row } from '../test-helpers/fakePrisma';
 import { scheduledToUtc } from 'time';
 import { payoutForUser } from './payout';
 import { requestAdvance, decideAdvance } from './advances';
@@ -14,57 +14,6 @@ import { advancePayMonth } from './advanceMonth';
  * #21 - the month: an advance counted in the month it was REQUESTED, so one
  * approved after that month's pay was settled was never taken back at all.
  */
-
-type Row = Record<string, unknown> & { id: string };
-type Where = Record<string, unknown>;
-
-function matches(row: Row, where: Where | undefined): boolean {
-  if (!where) return true;
-  return Object.entries(where).every(([key, cond]) => {
-    if (key === 'OR') return (cond as Where[]).some((w) => matches(row, w));
-    if (key === 'AND') return (cond as Where[]).every((w) => matches(row, w));
-    const value = row[key];
-    if (cond === null || typeof cond !== 'object' || cond instanceof Date) {
-      return cond instanceof Date ? value instanceof Date && value.getTime() === cond.getTime() : value === cond;
-    }
-    const c = cond as { gte?: Date; gt?: Date; lt?: Date; lte?: Date; in?: unknown[] };
-    if (c.in) return c.in.includes(value);
-    if (value === null || value === undefined) return false;
-    const v = (value as Date).getTime();
-    return (
-      (c.gte === undefined || v >= c.gte.getTime()) &&
-      (c.gt === undefined || v > c.gt.getTime()) &&
-      (c.lt === undefined || v < c.lt.getTime()) &&
-      (c.lte === undefined || v <= c.lte.getTime())
-    );
-  });
-}
-
-function fakeDb(tables: Record<string, Row[]>): PrismaClient {
-  const model = (name: string) => {
-    const rows = (tables[name] ??= []);
-    return {
-      findMany: async ({ where }: { where?: Where } = {}) => rows.filter((r) => matches(r, where)),
-      findUnique: async ({ where }: { where: Where }) => rows.find((r) => matches(r, where)) ?? null,
-      findFirst: async ({ where }: { where?: Where } = {}) => rows.find((r) => matches(r, where)) ?? null,
-      aggregate: async ({ where }: { where?: Where }) => ({
-        _sum: { amount_cent: rows.filter((r) => matches(r, where)).reduce((s, r) => s + (r.amount_cent as number), 0) || null },
-      }),
-      count: async ({ where }: { where?: Where } = {}) => rows.filter((r) => matches(r, where)).length,
-      create: async ({ data }: { data: Record<string, unknown> }) => {
-        const row = { id: `${name}${rows.length + 1}`, created_at: new Date(), ...data } as Row;
-        rows.push(row);
-        return row;
-      },
-      updateMany: async ({ where, data }: { where: Where; data: Row }) => {
-        const hit = rows.filter((r) => matches(r, where));
-        hit.forEach((r) => Object.assign(r, data));
-        return { count: hit.length };
-      },
-    };
-  };
-  return new Proxy({}, { get: (_t, k: string) => model(k) }) as unknown as PrismaClient;
-}
 
 const USER = 'u1';
 const rate = { id: 'r1', user_id: USER, rate_cent: 1000, effective_from: new Date('2026-01-01T00:00:00Z') };

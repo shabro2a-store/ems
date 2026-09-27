@@ -308,3 +308,40 @@ export function assignWorkingDays(
 
   return labels;
 }
+
+/**
+ * The weekly-hours row in force on a Beirut date: for that date's weekday, the
+ * latest row whose effective_from is on or before it.
+ *
+ * The weekly hours used to have no history - an edit deleted the old rows - so
+ * every past day, paid months included, was judged against whatever the hours
+ * were today. Raising Monday from 8h to 9h in October docked each September
+ * Monday an hour, in a month nobody could waive any more. An edit now adds rows
+ * from the day it is made, and every reader asks this for the day it judges.
+ * `effective_from` is a date marker at UTC midnight, like every date column.
+ */
+export function scheduleRowOn<T extends { weekday: number; effective_from: Date }>(
+  rows: T[],
+  date: string,
+): T | undefined {
+  const weekday = beirutWeekday(new Date(`${date}T12:00:00.000Z`));
+  const day = new Date(`${date}T00:00:00.000Z`).getTime();
+  let best: T | undefined;
+  for (const r of rows) {
+    if (r.weekday !== weekday || r.effective_from.getTime() > day) continue;
+    if (!best || r.effective_from > best.effective_from) best = r;
+  }
+  return best;
+}
+
+/** For every weekday that has one, the row in force on `date` - the week as it stands that day. */
+export function weekInForce<T extends { weekday: number; effective_from: Date }>(rows: T[], date: string): T[] {
+  const day = new Date(`${date}T00:00:00.000Z`).getTime();
+  const best = new Map<number, T>();
+  for (const r of rows) {
+    if (r.effective_from.getTime() > day) continue;
+    const b = best.get(r.weekday);
+    if (!b || r.effective_from > b.effective_from) best.set(r.weekday, r);
+  }
+  return [...best.values()].sort((a, b) => a.weekday - b.weekday);
+}

@@ -277,11 +277,16 @@ model Schedule {
   user      User   @relation(fields: [user_id], references: [id])
   weekday   Int
   shift_min Int
+  // The day this row takes effect. The hours on any date are the latest row
+  // for its weekday that had taken effect by then (scheduleRowOn); an edit adds
+  // rows from the day it is made, so past days keep the hours they were judged
+  // against. A weekday switched off is a row with shift_min 0.
+  effective_from DateTime @default(dbgenerated("'1970-01-01'::date")) @db.Date
   // Raw SQL CHECK in migration:
   //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_weekday_chk CHECK (weekday BETWEEN 0 AND 6);
   //   ALTER TABLE "Schedule" ADD CONSTRAINT schedule_shift_min_chk CHECK ("shift_min" IS NULL OR ("shift_min" >= 0 AND "shift_min" <= 1440));
 
-  @@unique([user_id, weekday])
+  @@unique([user_id, weekday, effective_from])
 }
 
 model ScheduleOverride {

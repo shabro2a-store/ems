@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { beirutWeekday, inBeirut, workingDayHistoryFrom } from 'time';
+import { beirutWeekday, inBeirut, scheduleRowOn, workingDayHistoryFrom } from 'time';
 import type { Notifier } from 'notify';
 import { prisma as defaultPrisma } from '../db/prisma';
 import { resolveRequiredMin } from './requiredMin';
@@ -152,13 +152,14 @@ export async function runAutoCloseAbandoned(
       (arrivalIdx >= 0 ? dayLabels[arrivalIdx] : null) ??
       resolveWorkingDays([{ kind: 'IN', at: lastIn.at }], dayStart)[0]!;
     const [schedule, override] = await Promise.all([
-      db.schedule.findUnique({
+      db.schedule.findMany({
         // From the LABEL, not the arrival instant: under the rest rule a shift
         // starting at 23:58 can be filed on the following date, and the weekday
         // must be the one the day is filed under or this reads a different
-        // day's hours than payroll does.
-        where: { user_id_weekday: { user_id: u.id, weekday: beirutWeekday(new Date(`${inDate}T12:00:00.000Z`)) } },
-        select: { shift_min: true },
+        // day's hours than payroll does. Every row for it, then the one in
+        // force on that date.
+        where: { user_id: u.id, weekday: beirutWeekday(new Date(`${inDate}T12:00:00.000Z`)) },
+        select: { weekday: true, shift_min: true, effective_from: true },
       }),
       db.scheduleOverride.findUnique({
         where: { user_id_date: { user_id: u.id, date: new Date(`${inDate}T00:00:00.000Z`) } },
@@ -171,7 +172,7 @@ export async function runAutoCloseAbandoned(
     // See systemCheckoutAt: a zero-length checkout is invisible to every guard
     // that asks for an OUT strictly after the IN, so the session would stay
     // open and this job would write another one every ten minutes forever.
-    const requiredMin = resolveRequiredMin(override, schedule?.shift_min ?? null);
+    const requiredMin = resolveRequiredMin(override, scheduleRowOn(schedule, inDate)?.shift_min ?? null);
     const closeAt = systemCheckoutAt(lastIn.at, requiredMin);
     const openMin = Math.floor((now.getTime() - lastIn.at.getTime()) / 60_000);
 

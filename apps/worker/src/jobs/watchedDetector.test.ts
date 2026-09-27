@@ -10,7 +10,7 @@ type FlagRow = {
   notified_at: Date | null;
   resolved_at: Date | null;
 };
-type ScheduleRow = { id: string; user_id: string; weekday: number; shift_min: number | null };
+type ScheduleRow = { id: string; user_id: string; weekday: number; shift_min: number | null; effective_from?: Date };
 type UserRow = {
   id: string;
   day_start_hour?: number | null;
@@ -58,10 +58,10 @@ function makeDb() {
       findMany: async () => store.branches.map((b) => ({ ...b })),
     },
     schedule: {
-      findMany: async ({ where }: { where: { weekday: number; shift_min?: { gt: number } } }) => {
+      findMany: async ({ where }: { where: { weekday: number } }) => {
         return store.schedules
           .filter((s) => s.weekday === where.weekday)
-          .filter((s) => !where.shift_min || (s.shift_min != null && s.shift_min > where.shift_min.gt))
+          .map((s) => ({ effective_from: new Date('1970-01-01T00:00:00.000Z'), ...s }))
           .map((s) => {
             // Prisma's include hands back the real branch row, day_start_hour
             // and all - the job resolves the boundary from the USER now, so the
@@ -154,6 +154,24 @@ describe('runWatchedDetector', () => {
     expect(store.flags[0]!.context_json).toEqual({ shift_min: 480, date: '2026-07-12' });
   });
 
+  it('judges the day against the hours in force then, not a change made before or after', async () => {
+    // Sundays were 8h until 1 July, when the owner switched them off. The
+    // Sunday judged (12 July) owed nothing - the old row must not flag it.
+    store.users.set('u1', {
+      id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's1', user_id: 'u1', weekday: 0, shift_min: 480 });
+    store.schedules.push({ id: 's2', user_id: 'u1', weekday: 0, shift_min: 0, effective_from: new Date('2026-07-01T00:00:00.000Z') });
+    // And the other way: raised to 8h only from 13 July, after the day judged.
+    store.users.set('u2', {
+      id: 'u2', username: 'emp2', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },
+    });
+    store.schedules.push({ id: 's3', user_id: 'u2', weekday: 0, shift_min: 0 });
+    store.schedules.push({ id: 's4', user_id: 'u2', weekday: 0, shift_min: 480, effective_from: new Date('2026-07-13T00:00:00.000Z') });
+
+    const r = await runWatchedDetector({ db: makeDb() as never, now: AFTER_MIDNIGHT });
+    expect(r.flags_created).toBe(0);
+  });
   it('does not flag when a punch exists in that Beirut day', async () => {
     store.users.set('u1', {
       id: 'u1', username: 'emp1', is_active: true, role: 'EMPLOYEE', branch_id: 'b1', branch: { id: 'b1', name: 'Hamra' },

@@ -7,6 +7,7 @@ import {
   type OverrideLite,
   type PunchLite,
   dayStartHourFor,
+  weeklyHoursFrom,
 } from './coverage';
 import { coverageWithBlockedCredit, loadBlockedCreditInputs } from './blockedCredit';
 
@@ -190,7 +191,7 @@ export async function penaltiesForUser(
     }),
     db.schedule.findMany({
       where: { user_id: userId },
-      select: { weekday: true, shift_min: true },
+      select: { weekday: true, shift_min: true, effective_from: true },
     }),
     db.scheduleOverride.findMany({
       where: { user_id: userId, date: { gte: start, lt: end } },
@@ -212,8 +213,9 @@ export async function penaltiesForUser(
     loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
   ]);
 
-  const shiftMinByWeekday = new Map<number, number>();
-  for (const s of schedules) shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
+  // The hours in force on each day judged - not today's - so an edit never
+  // re-judges a day already paid.
+  const shiftMinByWeekday = weeklyHoursFrom(schedules);
 
   const overridesByDate = new Map<string, OverrideLite>();
   for (const o of overrides) {
@@ -316,7 +318,7 @@ export async function pendingPenaltyNotices(
     }),
     db.schedule.findMany({
       where: { user_id: { in: ids } },
-      select: { user_id: true, weekday: true, shift_min: true },
+      select: { user_id: true, weekday: true, shift_min: true, effective_from: true },
     }),
     db.scheduleOverride.findMany({
       where: { user_id: { in: ids }, date: { gte: start, lt: end } },
@@ -371,10 +373,7 @@ export async function pendingPenaltyNotices(
 
   const notices: PenaltyNotice[] = [];
   for (const u of users) {
-    const shiftMinByWeekday = new Map<number, number>();
-    for (const s of schedulesBy.get(u.id) ?? []) {
-      shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
-    }
+    const shiftMinByWeekday = weeklyHoursFrom(schedulesBy.get(u.id) ?? []);
     const overridesByDate = new Map<string, OverrideLite>();
     for (const o of overridesBy.get(u.id) ?? []) {
       if (o.kind !== 'DAY_OFF' && o.kind !== 'HOURS_CHANGE') continue;

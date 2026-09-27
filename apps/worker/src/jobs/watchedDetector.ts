@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { beirutWeekday, previousBeirutDate, todayInBeirut, workingDayHistoryFrom } from 'time';
+import { beirutWeekday, previousBeirutDate, scheduleRowOn, todayInBeirut, workingDayHistoryFrom } from 'time';
 import { prisma as defaultPrisma } from '../db/prisma';
 import type { Notifier } from 'notify';
 import { resolveRequiredMin } from './requiredMin';
@@ -57,10 +57,17 @@ export async function runWatchedDetector(
   let users_scanned = 0;
 
   {
-    const mine = await db.schedule.findMany({
-      where: { weekday: wd, shift_min: { gt: 0 } },
+    // Every row for the weekday, then the one in force on the day judged: a
+    // later change must not decide whether an earlier day was owed.
+    const weekdayRows = await db.schedule.findMany({
+      where: { weekday: wd },
       include: { user: { include: { branch: true } } },
     });
+    const rowsByUser = new Map<string, typeof weekdayRows>();
+    for (const r of weekdayRows) rowsByUser.set(r.user_id, [...(rowsByUser.get(r.user_id) ?? []), r]);
+    const mine = [...rowsByUser.values()]
+      .map((rows) => scheduleRowOn(rows, judged))
+      .filter((r): r is (typeof weekdayRows)[number] => r !== undefined && r.shift_min > 0);
     if (mine.length === 0) return { flags_created, users_scanned, skipped_off };
     users_scanned += mine.length;
 

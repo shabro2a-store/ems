@@ -1,7 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
-import { todayInBeirut, beirutWeekday } from 'time';
+import { todayInBeirut, scheduleRowOn } from 'time';
 import { writeAuditLog } from './audit';
+import { isMonthOpen } from './periodLock';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -66,7 +67,8 @@ export interface DecideLeaveInput {
 
 export type DecideLeaveResult =
   | { ok: true; id: string; status: 'APPROVED' | 'REJECTED'; overrides_created: number }
-  | { ok: false; code: 'NOT_FOUND' | 'ALREADY_DECIDED' | 'INVALID_INPUT' };
+  | { ok: false; code: 'NOT_FOUND' | 'ALREADY_DECIDED' | 'INVALID_INPUT' }
+  | { ok: false; code: 'MONTH_CLOSED'; closedMonth: string };
 
 export async function decideLeave(
   input: DecideLeaveInput,
@@ -82,6 +84,16 @@ export async function decideLeave(
   const now = new Date();
   let overridesCreated = 0;
 
+  // Approving writes a day off onto each date, which changes what that day
+  // owed - and a day in a settled month was paid against what it owed then.
+  // Refusing is always allowed; approving waits for the open days only.
+  if (input.decision === 'APPROVED') {
+    for (let d = new Date(leave.start_date); d.getTime() <= leave.end_date.getTime(); d.setUTCDate(d.getUTCDate() + 1)) {
+      const month = d.toISOString().slice(0, 7);
+      if (!isMonthOpen(month, now)) return { ok: false, code: 'MONTH_CLOSED', closedMonth: month };
+    }
+  }
+
   await db.$transaction(async (tx) => {
     if (input.decision === 'APPROVED') {
       const dates: string[] = [];
@@ -96,19 +108,18 @@ export async function decideLeave(
       // required minutes. Only load it when there is a subtraction to do, and
       // load it once: a request can span many dates, each landing on a
       // different weekday.
-      const shiftMinByWeekday = new Map<number, number>();
-      if (leave.kind === 'HOURS_CHANGE') {
-        const schedules = await tx.schedule.findMany({
-          where: { user_id: leave.user_id },
-          select: { weekday: true, shift_min: true },
-        });
-        for (const s of schedules) shiftMinByWeekday.set(s.weekday, s.shift_min ?? 0);
-      }
+      // The hours in force on each date of the leave, not today's.
+      const schedules = leave.kind === 'HOURS_CHANGE'
+        ? await tx.schedule.findMany({
+            where: { user_id: leave.user_id },
+            select: { weekday: true, shift_min: true, effective_from: true },
+          })
+        : [];
 
       for (const dateStr of dates) {
         const dateOnly = new Date(`${dateStr}T00:00:00.000Z`);
         const shiftMin = leave.kind === 'HOURS_CHANGE'
-          ? Math.max(0, (shiftMinByWeekday.get(beirutWeekday(dateOnly)) ?? 0) - (leave.off_min ?? 0))
+          ? Math.max(0, (scheduleRowOn(schedules, dateStr)?.shift_min ?? 0) - (leave.off_min ?? 0))
           : null;
 
         await tx.scheduleOverride.upsert({

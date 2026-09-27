@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
+import { weekInForce, todayInBeirut } from 'time';
 
 const Body = z.object({
   weeklySchedule: z.array(
@@ -23,7 +24,7 @@ export async function GET(_req: Request, ctx: { params: { userId: string } }) {
   const role = h.get('x-user-role');
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
-  const [weeklySchedule, overrides, pendingLeaves] = await Promise.all([
+  const [rows, overrides, pendingLeaves] = await Promise.all([
     prisma.schedule.findMany({
       where: { user_id: ctx.params.userId },
       orderBy: { weekday: 'asc' },
@@ -38,6 +39,10 @@ export async function GET(_req: Request, ctx: { params: { userId: string } }) {
     }),
   ]);
 
+  // The hours in force today, one per weekday - the older rows are history
+  // that past days are still judged against. A weekday that is off is left
+  // out, as it always was.
+  const weeklySchedule = weekInForce(rows, todayInBeirut()).filter((r) => r.shift_min > 0);
   return NextResponse.json({ ok: true, data: { weeklySchedule, overrides, pendingLeaves } });
 }
 
@@ -57,17 +62,25 @@ export async function PUT(req: Request, ctx: { params: { userId: string } }) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
 
-  const before = await prisma.schedule.findMany({ where: { user_id: ctx.params.userId } });
+  // A change applies from today. Past days keep the hours they were judged
+  // against - deleting and rewriting the rows used to re-judge every day ever
+  // worked, paid months included, against the new hours. Only the weekdays
+  // that actually change get a row, and a weekday switched off gets a 0.
+  const today = todayInBeirut();
+  const effectiveFrom = new Date(`${today}T00:00:00.000Z`);
+  const rows = await prisma.schedule.findMany({ where: { user_id: ctx.params.userId } });
+  const before = weekInForce(rows, today);
+  const wanted = new Map(body.weeklySchedule.map((s) => [s.weekday, Math.round(s.shift_hours * 60)]));
 
   await prisma.$transaction(async (tx) => {
-    await tx.schedule.deleteMany({ where: { user_id: ctx.params.userId } });
-    if (body.weeklySchedule.length > 0) {
-      await tx.schedule.createMany({
-        data: body.weeklySchedule.map((s) => ({
-          user_id: ctx.params.userId,
-          weekday: s.weekday,
-          shift_min: Math.round(s.shift_hours * 60),
-        })),
+    for (let weekday = 0; weekday <= 6; weekday++) {
+      const shiftMin = wanted.get(weekday) ?? 0;
+      const current = before.find((r) => r.weekday === weekday)?.shift_min ?? 0;
+      if (shiftMin === current) continue;
+      await tx.schedule.upsert({
+        where: { user_id_weekday_effective_from: { user_id: ctx.params.userId, weekday, effective_from: effectiveFrom } },
+        create: { user_id: ctx.params.userId, weekday, shift_min: shiftMin, effective_from: effectiveFrom },
+        update: { shift_min: shiftMin },
       });
     }
   });
@@ -77,8 +90,8 @@ export async function PUT(req: Request, ctx: { params: { userId: string } }) {
     action: 'schedule.update',
     entity: 'User',
     entityId: ctx.params.userId,
-    before: { schedule: before.map((s) => ({ weekday: s.weekday, shift_min: s.shift_min })) },
-    after: { schedule: body.weeklySchedule },
+    before: { schedule: before.filter((s) => s.shift_min > 0).map((s) => ({ weekday: s.weekday, shift_min: s.shift_min })) },
+    after: { schedule: body.weeklySchedule, effective_from: today },
   });
 
   return NextResponse.json({ ok: true, data: { weeklySchedule: body.weeklySchedule } });

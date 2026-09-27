@@ -74,10 +74,12 @@ function makeDb() {
       },
     },
     schedule: {
-      findUnique: async ({ where }: { where: { user_id_weekday: { user_id: string; weekday: number } } }) =>
-        store.schedules.find(
-          (s) => s.user_id === where.user_id_weekday.user_id && s.weekday === where.user_id_weekday.weekday,
-        ) ?? null,
+      // Every row for the weekday; the job picks the one in force. Rows without
+      // a date of their own have been in force since forever.
+      findMany: async ({ where }: { where: { user_id: string; weekday: number } }) =>
+        store.schedules
+          .filter((s) => s.user_id === where.user_id && s.weekday === where.weekday)
+          .map((s) => ({ effective_from: new Date('1970-01-01T00:00:00.000Z'), ...s })),
     },
     scheduleOverride: {
       findUnique: async ({ where }: { where: { user_id_date: { user_id: string; date: Date } } }) =>

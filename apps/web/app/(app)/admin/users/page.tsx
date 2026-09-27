@@ -577,7 +577,8 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
         <div className="space-y-3">
           <p className="text-sm text-muted">
             Hours owed per day, not start and end times. A night shift counts on the day it{' '}
-            <b className="text-content">starts</b>.
+            <b className="text-content">starts</b>. A change applies <b className="text-content">from today</b> -
+            days already worked keep the hours they had.
           </p>
 
           {/* One fixed-height row per day. The hours box is disabled rather than

@@ -53,11 +53,10 @@ function fakeDb(punches: Row[], shiftMinByWeekday = new Map<number, number>()): 
     rateChange: { findMany: async () => [rate] },
     user: { findUnique: async () => user, findMany: async () => [user] },
     schedule: {
-      findMany: async () => [...shiftMinByWeekday].map(([weekday, shift_min]) => ({ weekday, shift_min })),
-      findUnique: async ({ where }: { where: { user_id_weekday: { weekday: number } } }) => {
-        const shift_min = shiftMinByWeekday.get(where.user_id_weekday.weekday);
-        return shift_min === undefined ? null : { shift_min };
-      },
+      findMany: async ({ where }: { where?: { weekday?: number } } = {}) =>
+        [...shiftMinByWeekday]
+          .filter(([weekday]) => where?.weekday === undefined || weekday === where.weekday)
+          .map(([weekday, shift_min]) => ({ weekday, shift_min, effective_from: new Date('1970-01-01T00:00:00.000Z') })),
     },
   };
   const empty = { findMany: async () => [], findUnique: async () => null, findFirst: async () => null };

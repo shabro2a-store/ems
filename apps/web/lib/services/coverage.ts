@@ -1,4 +1,4 @@
-import { shiftDateOf, beirutWeekday, assignWorkingDays, REST_RULE_FROM, SHIFT_GAP_MIN } from 'time';
+import { shiftDateOf, beirutWeekday, assignWorkingDays, scheduleRowOn, REST_RULE_FROM, SHIFT_GAP_MIN } from 'time';
 
 export interface PunchLite {
   kind: 'IN' | 'OUT';
@@ -181,6 +181,26 @@ export function centsForLastMinutes(intervals: WorkInterval[], minutes: number):
 }
 
 /**
+ * A person's weekly hours: either a plain weekday -> minutes map (the same on
+ * every date - what the pure tests describe), or the minutes in force on a
+ * given date, which is what the database now holds (see scheduleRowOn). Payroll
+ * passes the dated one, so a past day is judged against the hours it was
+ * actually scheduled for, not the ones set since.
+ */
+export type WeeklyHours = Map<number, number> | ((date: string) => number | undefined);
+
+export function hoursOn(hours: WeeklyHours, date: string): number | undefined {
+  return typeof hours === 'function' ? hours(date) : hours.get(weekdayOfWorkingDay(date));
+}
+
+/** The dated WeeklyHours for one person's schedule rows. */
+export function weeklyHoursFrom(
+  rows: Array<{ weekday: number; shift_min: number; effective_from: Date }>,
+): (date: string) => number | undefined {
+  return (date) => scheduleRowOn(rows, date)?.shift_min;
+}
+
+/**
  * How many minutes each day owed, how many were actually covered, and what the
  * covered ones earned. Pure - no DB. A shift belongs to the Beirut day the
  * employee checked IN, so an overnight shift needs no special casing: it is
@@ -193,7 +213,7 @@ export function centsForLastMinutes(intervals: WorkInterval[], minutes: number):
  */
 export function computeCoverage(args: {
   punches: PunchLite[];
-  shiftMinByWeekday: Map<number, number>;
+  shiftMinByWeekday: WeeklyHours;
   overridesByDate: Map<string, OverrideLite>;
   rateCentAt: (at: Date) => number;
   // Minutes owed with no punch behind them, already priced by their producer.
@@ -279,7 +299,7 @@ export function computeCoverage(args: {
       // starts at 23:58 can be filed on the following date, and reading the
       // weekday off the punch would look up a different day's hours than the
       // day it is filed under.
-      args.shiftMinByWeekday.get(weekdayOfWorkingDay(date)),
+      hoursOn(args.shiftMinByWeekday, date),
     );
 
     days.push({

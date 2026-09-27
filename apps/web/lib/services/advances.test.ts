@@ -39,6 +39,9 @@ const mocks = vi.hoisted(() => ({
   penaltyWaiver: { findMany: vi.fn() },
   blockedPunchAttempt: { findMany: vi.fn() },
   blockedCreditDecision: { findMany: vi.fn() },
+  // Trips count for everybody who has any, whatever their role now.
+  trip: { findMany: vi.fn(async () => []) },
+  tripRateChange: { findMany: vi.fn(async () => []) },
 }));
 
 vi.mock('@/lib/db/prisma', () => ({

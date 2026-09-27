@@ -107,7 +107,7 @@ beforeEach(() => {
   });
 
   mocks.schedule.findMany.mockImplementation(async ({ where }: { where: { user_id: string } }) => {
-    return store.schedules.filter((s) => s.user_id === where.user_id);
+    return store.schedules.filter((s) => s.user_id === where.user_id).map((s) => ({ effective_from: new Date('1970-01-01T00:00:00.000Z'), ...s }));
   });
 
   mocks.auditLog.create.mockImplementation(async ({ data }: { data: { actor_id: string; action: string; entity: string; entity_id: string } }) => {
