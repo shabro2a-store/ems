@@ -199,6 +199,29 @@ export const REST_RULE_FROM = new Date('2026-09-08T00:00:00+03:00');
  */
 export const WORKING_DAY_HISTORY_FROM = new Date(REST_RULE_FROM.getTime() - 2 * 86_400_000);
 
+/**
+ * From when a long break inside one calendar day stays on that day.
+ *
+ * Before it, a return after more than SHIFT_GAP_MIN opened a new working day
+ * and - its date being taken - took the NEXT date, and every later day after
+ * it until a day off: out at noon and back at 17:00 on Monday filed Tuesday's
+ * shift as Wednesday, and the week was judged against the wrong weekdays.
+ * The start of a pay month, so a month already paid keeps its labels.
+ */
+export const SPLIT_DAY_RULE_FROM = new Date('2026-10-01T00:00:00+03:00');
+
+/**
+ * A return this close to midnight on a taken date is a night shift starting,
+ * most of which lies on the next date - the case the collision rule exists
+ * for (dani at 23:58, aaref at 23:53). Earlier returns are a split day.
+ */
+export const NIGHT_START_WINDOW_MIN = 4 * 60;
+
+function minutesToBeirutMidnight(at: Date): number {
+  const [h, m] = inBeirut(at).hhmm.split(':').map(Number);
+  return 24 * 60 - (h! * 60 + m!);
+}
+
 export function workingDayHistoryFrom(from: Date): Date {
   return from < WORKING_DAY_HISTORY_FROM ? from : WORKING_DAY_HISTORY_FROM;
 }
@@ -242,6 +265,11 @@ export interface WorkingDayOpts {
    * night-worker history the cutover exists to leave alone.
    */
   legacyDayOf?: (at: Date) => string;
+  /**
+   * Arrivals before this keep the old collision answer for a long break inside
+   * one day (the next date). Omit to apply the split-day rule throughout.
+   */
+  splitDayRuleFrom?: Date;
 }
 
 export function assignWorkingDays(
@@ -252,6 +280,7 @@ export function assignWorkingDays(
   const gapMin = o.gapMin ?? SHIFT_GAP_MIN;
   const cutover = o.restRuleFrom ?? null;
   const legacyDayOf = o.legacyDayOf ?? null;
+  const splitDayFrom = o.splitDayRuleFrom ?? null;
   const order = punches
     .map((p, i) => ({ p, i }))
     .sort((a, b) => a.p.at.getTime() - b.p.at.getTime() || a.i - b.i);
@@ -298,10 +327,18 @@ export function assignWorkingDays(
       labels[i] = currentDay; // they never went home: same working day
     } else {
       let date = inBeirut(p.at).date;
-      while (claimed.has(date)) date = shiftCalendarDate(date, 1);
-      claimed.add(date);
-      currentDay = date;
-      labels[i] = date;
+      const splitDay =
+        date === currentDay &&
+        (splitDayFrom === null || p.at >= splitDayFrom) &&
+        minutesToBeirutMidnight(p.at) > NIGHT_START_WINDOW_MIN;
+      if (splitDay) {
+        labels[i] = currentDay; // a long break, but still the same day's work
+      } else {
+        while (claimed.has(date)) date = shiftCalendarDate(date, 1);
+        claimed.add(date);
+        currentDay = date;
+        labels[i] = date;
+      }
     }
     openSince = p.at;
   }

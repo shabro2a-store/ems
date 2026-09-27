@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assignWorkingDays, SHIFT_GAP_MIN, shiftDateOf } from './index';
+import { assignWorkingDays, SHIFT_GAP_MIN, SPLIT_DAY_RULE_FROM, shiftDateOf } from './index';
 
 /*
  * Every case here is a real one, taken from the shop's own punches. Beirut is
@@ -103,14 +103,62 @@ describe('a break is not a new day', () => {
   });
 
   it('holds to the minute on either side of the line', () => {
-    const noon = new Date('2026-09-10T12:00+03:00');
+    // Out at 20:00, back after midnight: the rest alone decides.
+    const out = new Date('2026-09-10T20:00+03:00');
     const backAfter = (min: number): P[] => [
-      b('IN', '2026-09-10T08:00'),
-      b('OUT', '2026-09-10T12:00'),
-      { kind: 'IN', at: new Date(noon.getTime() + min * 60_000) },
+      b('IN', '2026-09-10T12:00'),
+      b('OUT', '2026-09-10T20:00'),
+      { kind: 'IN', at: new Date(out.getTime() + min * 60_000) },
     ];
     expect(days(backAfter(SHIFT_GAP_MIN - 1))[2]).toBe('2026-09-10'); // 4h14m: same day
     expect(days(backAfter(SHIFT_GAP_MIN))[2]).toBe('2026-09-11'); // 4h15m: new day
+  });
+});
+
+/*
+ * Money #26. A long break inside one calendar day - out at noon, back at 17:00
+ * - is longer than the 4h15m rest, so the afternoon opened a new working day;
+ * the day's date was taken, so it took the NEXT one. Tuesday's own shift then
+ * found Tuesday taken and became Wednesday, and so on until a day off: a week
+ * judged against the wrong weekdays' hours. A return on the same calendar date
+ * now stays on it - unless it is a night shift starting (from 20:00), which is
+ * what the collision rule is for.
+ */
+describe('a long break inside one day', () => {
+  it('does not push the rest of the week a day forward', () => {
+    const punches: P[] = [
+      b('IN', '2026-10-05T08:00'), b('OUT', '2026-10-05T12:00'),
+      b('IN', '2026-10-05T17:00'), b('OUT', '2026-10-05T21:00'),
+      b('IN', '2026-10-06T08:00'), b('OUT', '2026-10-06T17:00'),
+      b('IN', '2026-10-07T08:00'), b('OUT', '2026-10-07T17:00'),
+    ];
+    expect(days(punches)).toEqual([
+      '2026-10-05', '2026-10-05', '2026-10-05', '2026-10-05',
+      '2026-10-06', '2026-10-06',
+      '2026-10-07', '2026-10-07',
+    ]);
+  });
+
+  it('still sends a night shift starting on a taken date to the next one', () => {
+    const punches: P[] = [
+      b('IN', '2026-10-05T08:00'), b('OUT', '2026-10-05T14:00'),
+      b('IN', '2026-10-05T20:00'), b('OUT', '2026-10-06T04:00'),
+    ];
+    expect(days(punches)).toEqual(['2026-10-05', '2026-10-05', '2026-10-06', '2026-10-06']);
+  });
+
+  it('leaves days before the change as they were paid', () => {
+    const punches: P[] = [
+      b('IN', '2026-09-21T08:00'), b('OUT', '2026-09-21T12:00'),
+      b('IN', '2026-09-21T17:00'), b('OUT', '2026-09-21T21:00'),
+      b('IN', '2026-10-05T08:00'), b('OUT', '2026-10-05T12:00'),
+      b('IN', '2026-10-05T17:00'), b('OUT', '2026-10-05T21:00'),
+    ];
+    expect(assignWorkingDays(punches, { splitDayRuleFrom: SPLIT_DAY_RULE_FROM })).toEqual([
+      '2026-09-21', '2026-09-21', '2026-09-22', '2026-09-22',
+      '2026-10-05', '2026-10-05', '2026-10-05', '2026-10-05',
+    ]);
+    expect(SPLIT_DAY_RULE_FROM.toISOString()).toBe(new Date('2026-10-01T00:00:00+03:00').toISOString());
   });
 });
 

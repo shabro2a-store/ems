@@ -1,4 +1,4 @@
-import { assignWorkingDays, shiftDateOf, REST_RULE_FROM } from 'time';
+import { assignWorkingDays, shiftDateOf, REST_RULE_FROM, SPLIT_DAY_RULE_FROM } from 'time';
 
 /**
  * The working-day boundary that applies to one person: theirs, or midnight.
@@ -36,5 +36,6 @@ export function resolveWorkingDays(
   return assignWorkingDays(punches, {
     restRuleFrom: REST_RULE_FROM,
     legacyDayOf: (at) => shiftDateOf(at, dayStartHour),
+    splitDayRuleFrom: SPLIT_DAY_RULE_FROM,
   });
 }

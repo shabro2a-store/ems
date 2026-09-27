@@ -1,4 +1,4 @@
-import { shiftDateOf, beirutWeekday, assignWorkingDays, scheduleRowOn, REST_RULE_FROM, SHIFT_GAP_MIN } from 'time';
+import { shiftDateOf, beirutWeekday, assignWorkingDays, scheduleRowOn, REST_RULE_FROM, SHIFT_GAP_MIN, SPLIT_DAY_RULE_FROM } from 'time';
 
 export interface PunchLite {
   kind: 'IN' | 'OUT';
@@ -81,6 +81,7 @@ export function workingDaysOf(punches: PunchLite[], dayStartHour: number): Array
     // The clock boundary, for anything that happened before the changeover.
     // History keeps the answer it was paid against.
     legacyDayOf: (at) => shiftDateOf(at, dayStartHour),
+    splitDayRuleFrom: SPLIT_DAY_RULE_FROM,
   });
 }
 
