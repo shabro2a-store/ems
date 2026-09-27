@@ -174,6 +174,11 @@ export async function runAutoCloseAbandoned(
     // open and this job would write another one every ten minutes forever.
     const requiredMin = resolveRequiredMin(override, scheduleRowOn(schedule, inDate)?.shift_min ?? null);
     const closeAt = systemCheckoutAt(lastIn.at, requiredMin);
+    // A shift owed more than the 20h threshold (24h, say) closes at arrival +
+    // its hours, still ahead at the threshold. Not closed yet, then: a checkout
+    // in the future is invisible to every "is this open" query and would lock
+    // the employee out until it came true. Mirrors abandonedSessionClose.
+    if (closeAt.getTime() >= now.getTime()) continue;
     const openMin = Math.floor((now.getTime() - lastIn.at.getTime()) / 60_000);
 
     const wrote = await db.$transaction(async (tx) => {

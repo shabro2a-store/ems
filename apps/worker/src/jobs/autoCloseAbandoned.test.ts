@@ -237,6 +237,28 @@ describe('runAutoCloseAbandoned', () => {
     expect((await runAutoCloseAbandoned({ db: db as never, now: pastThreshold })).closed).toBe(1);
   });
 
+  /*
+   * Money #24: at the 20h threshold a 24h shift's checkout (arrival + 24h) is
+   * still four hours away. The web rule waits for it; this copy wrote it at
+   * once - a checkout in the future, invisible to every "is this session
+   * open" query, so the employee was locked out until it came true.
+   */
+  it('does not write a checkout that is still in the future', async () => {
+    seedEmployee({ 0: 24 * 60 });
+    punchIn(CHECK_IN);
+    const db = makeDb();
+
+    const at21h = new Date(CHECK_IN.getTime() + 21 * 60 * 60_000);
+    expect((await runAutoCloseAbandoned({ db: db as never, now: at21h })).closed).toBe(0);
+    expect(store.punches.filter((p) => p.kind === 'OUT')).toHaveLength(0);
+
+    const at25h = new Date(CHECK_IN.getTime() + 25 * 60 * 60_000);
+    expect((await runAutoCloseAbandoned({ db: db as never, now: at25h })).closed).toBe(1);
+    const out = store.punches.find((p) => p.kind === 'OUT')!;
+    expect(out.at.getTime()).toBe(CHECK_IN.getTime() + 24 * 60 * 60_000);
+    expect(out.at.getTime()).toBeLessThan(at25h.getTime());
+  });
+
   it('honours a date override the same way payroll does', async () => {
     seedEmployee({ 0: 480 });
     store.overrides.push({
