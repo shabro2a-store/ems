@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiGet, apiSend } from '@/lib/api';
-import { EmptyState, Spinner } from '@/components/ui';
+import { apiGet, apiSend, errorMessage } from '@/lib/api';
+import { Alert, EmptyState, Spinner } from '@/components/ui';
 import { BrandMark } from '@/components/BrandMark';
 
 interface Driver {
@@ -40,6 +40,10 @@ export default function CallerBoard() {
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => 0);
   const [justRang, setJustRang] = useState<Record<string, number>>({});
+  // The board keeps showing its last answer when a poll fails, so it has to
+  // say so - otherwise a lost connection looks exactly like a quiet shop.
+  const [offline, setOffline] = useState(false);
+  const [ringError, setRingError] = useState<string | null>(null);
   const startedAt = useRef(0);
 
   const load = useCallback(async () => {
@@ -48,6 +52,7 @@ export default function CallerBoard() {
       setBranch(r.data.branch);
       setDrivers(r.data.drivers);
     }
+    setOffline(!r.ok);
     setLoading(false);
   }, []);
 
@@ -69,7 +74,14 @@ export default function CallerBoard() {
   async function ring(d: Driver) {
     if (!d.available) return;
     setJustRang((p) => ({ ...p, [d.id]: Date.now() }));
-    await apiSend('/api/caller/ring', { body: { driverId: d.id } });
+    setRingError(null);
+    const r = await apiSend('/api/caller/ring', { body: { driverId: d.id } });
+    if (!r.ok) {
+      // Never leave "Ringing…" on a card whose phone was not rung.
+      setJustRang((p) => { const n = { ...p }; delete n[d.id]; return n; });
+      setRingError(`${d.name} was not rung: ${errorMessage(r)}`);
+      return;
+    }
     load();
     // clear the local "ringing…" flash after a few seconds
     setTimeout(() => setJustRang((p) => { const n = { ...p }; delete n[d.id]; return n; }), 6000);
@@ -101,6 +113,16 @@ export default function CallerBoard() {
         <h1 className="text-xl font-semibold tracking-tight">Drivers</h1>
         <p className="text-sm text-muted">Tap a driver to ring their phone. Green is free to take an order.</p>
       </div>
+      {offline && !loading && (
+        <div className="mb-4">
+          <Alert tone="warning">Not updating - this board may be out of date. Check the connection; it keeps retrying.</Alert>
+        </div>
+      )}
+      {ringError && (
+        <div className="mb-4">
+          <Alert tone="danger">{ringError}</Alert>
+        </div>
+      )}
 
       {loading ? (
         <div className="grid place-items-center py-16 text-muted"><Spinner /></div>

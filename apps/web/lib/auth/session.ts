@@ -1,9 +1,5 @@
 import { formatInTimeZone } from 'date-fns-tz';
-import {
-  SESSION_TTL_EMPLOYEE_MIN,
-  SESSION_TTL_DRIVER_CHECKED_IN_MIN,
-  SHOP_TZ,
-} from './constants';
+import { ACCESS_TTL_MIN, SHOP_TZ } from './constants';
 
 export type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER';
 
@@ -19,13 +15,11 @@ export function todayInBeirut(now: Date = new Date()): string {
   return formatInTimeZone(now, SHOP_TZ, 'yyyy-MM-dd');
 }
 
-export function sessionExpiryFor(
-  user: SessionUser,
-  hasOpenPunch: boolean,
-  now: Date,
-): Date {
-  if (user.role === 'DRIVER' && hasOpenPunch) {
-    return addMinutes(now, SESSION_TTL_DRIVER_CHECKED_IN_MIN);
-  }
-  return addMinutes(now, SESSION_TTL_EMPLOYEE_MIN);
+/**
+ * When an access token issued now expires. The same for everyone: the client
+ * renews it, so nobody needs a long one - including a driver on a long shift,
+ * who used to be handed twelve hours at the punch because nothing renewed.
+ */
+export function accessExpiry(now: Date): Date {
+  return addMinutes(now, ACCESS_TTL_MIN);
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { apiGet, apiSend, centsToUsd, csrfFromCookie, errorMessage, formatBeirutTime } from '@/lib/api';
+import { apiFetch, apiGet, apiSend, centsToUsd, csrfFromCookie, errorMessage, formatBeirutTime } from '@/lib/api';
 import { PageHeader, Card, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile } from '@/components/ui';
 import { PayrollCards } from '@/components/admin/PayrollCards';
 
@@ -101,10 +101,10 @@ export default function AdminPayrollPage() {
     setDownloading(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/admin/reports/payroll?month=${month}&branchId=${branchId}`, {
-        credentials: 'include',
-        headers: { 'X-CSRF-Token': csrfFromCookie() },
-      });
+      const url = `/api/admin/reports/payroll?month=${month}&branchId=${branchId}`;
+      const res = await apiFetch(url, () =>
+        fetch(url, { credentials: 'include', headers: { 'X-CSRF-Token': csrfFromCookie() } }),
+      );
       if (!res.ok) { setErr('Could not generate PDF.'); return; }
       const blob = await res.blob();
       const a = document.createElement('a');

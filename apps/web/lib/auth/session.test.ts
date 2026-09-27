@@ -1,39 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { sessionExpiryFor, addMinutes, todayInBeirut } from './session';
-import {
-  SESSION_TTL_EMPLOYEE_MIN,
-  SESSION_TTL_DRIVER_CHECKED_IN_MIN,
-} from './constants';
-
-const EMP_MIN = SESSION_TTL_EMPLOYEE_MIN;
-const DRV_CHECKED_IN = SESSION_TTL_DRIVER_CHECKED_IN_MIN;
+import { accessExpiry, addMinutes, todayInBeirut } from './session';
+import { ACCESS_TTL_MIN } from './constants';
 
 describe('session', () => {
-  describe('employee path', () => {
-    it('expiry is 2h after "last activity" (now)', () => {
+  describe('access token lifetime', () => {
+    it('is the same short window for everyone - the client renews it', () => {
       const now = new Date('2026-07-09T12:00:00.000Z');
-      const exp = sessionExpiryFor({ role: 'EMPLOYEE' }, false, now);
-      expect(exp.getTime()).toBe(addMinutes(now, EMP_MIN).getTime());
-    });
-
-    it('still gets the standard TTL even with an open punch - the open-punch override is DRIVER-only', () => {
-      const now = new Date('2026-07-09T12:00:00.000Z');
-      const exp = sessionExpiryFor({ role: 'EMPLOYEE' }, true, now);
-      expect(exp.getTime()).toBe(addMinutes(now, EMP_MIN).getTime());
-    });
-  });
-
-  describe('driver path', () => {
-    it('gets the standard TTL when there is no open punch', () => {
-      const now = new Date('2026-07-09T12:00:00.000Z');
-      const exp = sessionExpiryFor({ role: 'DRIVER' }, false, now);
-      expect(exp.getTime()).toBe(addMinutes(now, EMP_MIN).getTime());
-    });
-
-    it('gets a 12h session while checked in - long enough to cover a full shift, since nothing ever refreshes it', () => {
-      const now = new Date('2026-07-09T12:00:00.000Z');
-      const exp = sessionExpiryFor({ role: 'DRIVER' }, true, now);
-      expect(exp.getTime()).toBe(addMinutes(now, DRV_CHECKED_IN).getTime());
+      expect(accessExpiry(now).getTime()).toBe(addMinutes(now, ACCESS_TTL_MIN).getTime());
+      expect(ACCESS_TTL_MIN).toBeLessThanOrEqual(15);
     });
   });
 

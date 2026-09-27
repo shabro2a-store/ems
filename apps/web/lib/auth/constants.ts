@@ -13,13 +13,13 @@ export const LOGIN_ADDRESS_WINDOW_MS = 60_000;
 export const PASSWORD_MIN_LENGTH = 8;
 export const ADVANCE_RATE_LIMIT_PER_MIN = 5;
 export const IDEMPOTENCY_TTL_HOURS = 24;
-export const SESSION_TTL_EMPLOYEE_MIN = 120;
-// There is no token-refresh call anywhere in the client, so this is not a
-// rolling/sliding window - it is the entire session length, set once when the
-// driver punches IN (POST /api/me/punch re-issues the access cookie) and reset
-// to SESSION_TTL_EMPLOYEE_MIN when they punch OUT. It must therefore comfortably
-// outlast any real shift on its own.
-export const SESSION_TTL_DRIVER_CHECKED_IN_MIN = 720;
+// How long an access token lives. Short on purpose: the middleware cannot
+// read the database, so this is how long an ended session (sign-out, reset,
+// retirement) can keep working. The client renews it on a 401 with the
+// refresh token (7 days, sliding), which is checked against session_version -
+// so staying signed in costs nothing, and ending a session takes minutes.
+export const ACCESS_TTL_MIN = 15;
+export const REFRESH_TTL_DAYS = 7;
 export const CSRF_COOKIE_NAME = 'csrf';
 export const ACCESS_COOKIE_NAME = 'ems_access';
 export const REFRESH_COOKIE_NAME = 'ems_refresh';

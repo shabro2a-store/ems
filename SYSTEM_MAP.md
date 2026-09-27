@@ -32,8 +32,8 @@ check `/api/health`'s `uptime_s` if in doubt.
   middleware accepts only an access token, and a refresh is refused once the version has
   moved on — sign-out (everywhere), a password reset or change, a role change and
   retirement all bump it. Access tokens are not checked against it (the middleware cannot
-  reach the database), so an ended session keeps its current access token until it
-  expires: up to 2h, or 12h for a checked-in driver.
+  reach the database), which is why they live only `ACCESS_TTL_MIN` (15 min): an ended
+  session stops within that.
 - **Middleware** verifies the access JWT and injects `x-user-id` / `x-user-role` /
   `x-user-branch-id` headers (clients cannot spoof them). Any `/api/me/*` or `/api/admin/*`
   without a valid session → `401`. Each route re-checks the role.
@@ -51,18 +51,16 @@ check `/api/health`'s `uptime_s` if in doubt.
   self-service password change.
 - **Admin protection**: the admin account cannot be created via the app, promoted/demoted,
   or deactivated (fail-closed with 403). `password_hash` is never returned to the client.
-- Session TTL: employee 120 min; a **checked-in driver** gets 12h (720 min,
-  `SESSION_TTL_DRIVER_CHECKED_IN_MIN`), comfortably outlasting any real shift; a driver
-  not checked in gets the standard 120 min. The switch happens at the **punch**, not at
-  login: `POST /api/me/punch` re-issues the access cookie for a DRIVER — the long TTL on
-  IN, the standard one on OUT. It has to, because a driver signs in *before* they can
-  punch, so at login the answer to "is this driver checked in" is always no. No other
-  role's expiry moves. **This is not a rolling session** — nothing in the app ever calls
-  `POST /api/auth/refresh` (it exists and works, but no client code invokes it), so the
-  expiry is fixed at the last punch and does not extend as the driver keeps working; the
-  access cookie's own lifetime tracks the token's expiry so it cannot end the session
-  early. `mustChangePassword` is returned when the
-  password equals the seed default `change-me`.
+- **Staying signed in**: the access token lasts 15 min for everyone; the refresh token 7 days,
+  renewed each time it is used. `lib/api.ts` answers a 401 by renewing once (one renewal
+  shared by every request that lapsed together, the same Idempotency-Key and the new CSRF
+  token on the repeat) and repeating the request; a refused renewal sends the person to
+  `/login` instead of leaving the screen frozen on its last data. A page opened after the
+  access token lapsed (`/admin`, `/employee`, `/driver`, `/caller`) is rewritten by the
+  middleware to `/api/auth/resume`, which renews and redirects back to the same page — so
+  somebody signed in within the week is never shown the login form. There is no longer a
+  12h driver session re-issued at the punch; renewal covers a shift of any length.
+  `mustChangePassword` is returned when the password equals the seed default `change-me`.
 
 ---
 

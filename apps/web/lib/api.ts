@@ -32,9 +32,48 @@ export function errorMessage(err: ApiErr | { code?: string; message?: string } |
   return e?.message || e?.code || 'Something went wrong.';
 }
 
+// ---- staying signed in ----
+//
+// The access token lives a quarter of an hour. A request that comes back 401
+// renews the session once - one renewal shared by every request that lapsed
+// together - and is sent again. If the renewal is refused the session really
+// has ended (signed out elsewhere, reset, retired), and the only honest thing
+// to show is the sign-in page: before this, every screen simply froze on what
+// it last had.
+
+let renewing: Promise<boolean> | null = null;
+
+function renewSession(): Promise<boolean> {
+  renewing ??= fetch('/api/auth/refresh', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'X-CSRF-Token': csrfFromCookie() },
+  })
+    .then((r) => r.ok)
+    .catch(() => false)
+    .finally(() => {
+      renewing = null;
+    });
+  return renewing;
+}
+
+/**
+ * fetch, but a lapsed session is renewed and the request repeated. `send` is
+ * called again for the repeat, so it can read the CSRF token the renewal just
+ * rotated. Sign-in, sign-out and renewal themselves are left alone - a wrong
+ * password is a 401 too.
+ */
+export async function apiFetch(url: string, send: () => Promise<Response>): Promise<Response> {
+  const res = await send();
+  if (res.status !== 401 || url.startsWith('/api/auth/')) return res;
+  if (await renewSession()) return send();
+  if (typeof window !== 'undefined') window.location.assign('/login');
+  return res;
+}
+
 export async function apiGet<T = unknown>(url: string): Promise<ApiResult<T>> {
   try {
-    const res = await fetch(url, { credentials: 'include' });
+    const res = await apiFetch(url, () => fetch(url, { credentials: 'include' }));
     return (await res.json()) as ApiResult<T>;
   } catch {
     return { ok: false, error: { code: 'NETWORK', message: 'Network error — check your connection.' } };
@@ -50,18 +89,23 @@ interface SendOpts {
 
 export async function apiSend<T = unknown>(url: string, opts: SendOpts = {}): Promise<ApiResult<T>> {
   const { method = 'POST', body, idempotent = false, idemPrefix = 'web' } = opts;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-CSRF-Token': csrfFromCookie(),
-  };
-  if (idempotent) headers['Idempotency-Key'] = idemKey(idemPrefix);
-  try {
-    const res = await fetch(url, {
+  // One key for the request, repeats included: it is the same request.
+  const key = idempotent ? idemKey(idemPrefix) : null;
+  const send = () => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': csrfFromCookie(),
+    };
+    if (key) headers['Idempotency-Key'] = key;
+    return fetch(url, {
       method,
       credentials: 'include',
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+  };
+  try {
+    const res = await apiFetch(url, send);
     return (await res.json()) as ApiResult<T>;
   } catch {
     return { ok: false, error: { code: 'NETWORK', message: 'Network error — check your connection.' } };
@@ -78,10 +122,14 @@ interface SendFormOpts {
 // Content-Type header: the browser writes the multipart boundary itself.
 export async function apiSendForm<T = unknown>(url: string, opts: SendFormOpts): Promise<ApiResult<T>> {
   const { form, idempotent = false, idemPrefix = 'web' } = opts;
-  const headers: Record<string, string> = { 'X-CSRF-Token': csrfFromCookie() };
-  if (idempotent) headers['Idempotency-Key'] = idemKey(idemPrefix);
+  const key = idempotent ? idemKey(idemPrefix) : null;
+  const send = () => {
+    const headers: Record<string, string> = { 'X-CSRF-Token': csrfFromCookie() };
+    if (key) headers['Idempotency-Key'] = key;
+    return fetch(url, { method: 'POST', credentials: 'include', headers, body: form });
+  };
   try {
-    const res = await fetch(url, { method: 'POST', credentials: 'include', headers, body: form });
+    const res = await apiFetch(url, send);
     return (await res.json()) as ApiResult<T>;
   } catch {
     return { ok: false, error: { code: 'NETWORK', message: 'Network error — check your connection.' } };

@@ -64,6 +64,9 @@ export default function AdminDashboard() {
   const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [updated, setUpdated] = useState<Date | null>(null);
+  // True while the last poll failed: the figures on screen are the last ones
+  // that arrived, and the header must not keep calling them live.
+  const [stale, setStale] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -76,6 +79,7 @@ export default function AdminDashboard() {
       setOv(r.data);
       setUpdated(new Date());
     }
+    setStale(!r.ok);
   }, []);
 
   const loadAux = useCallback(async () => {
@@ -161,8 +165,12 @@ export default function AdminDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-muted">
-            <span className="h-1.5 w-1.5 rounded-full bg-success" />
-            {updated ? `Updated ${formatBeirutTime(updated.toISOString())}` : 'Live'}
+            <span className={`h-1.5 w-1.5 rounded-full ${stale ? 'bg-danger' : 'bg-success'}`} />
+            {stale
+              ? `Not updating${updated ? ` - last ${formatBeirutTime(updated.toISOString())}` : ''}`
+              : updated
+                ? `Updated ${formatBeirutTime(updated.toISOString())}`
+                : 'Live'}
           </span>
           <Select value={branchId} onChange={(e) => setBranchId(e.target.value)} className="w-auto">
             <option value="all">All branches</option>

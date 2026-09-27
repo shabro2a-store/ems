@@ -1,13 +1,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { cookies, headers } from 'next/headers';
+import { headers } from 'next/headers';
 import { inBeirut } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
-import { getClientIp, setAccessCookie } from '@/lib/auth/cookies';
-import { signToken, verifyToken } from '@/lib/auth/jwt';
-import { ACCESS_COOKIE_NAME } from '@/lib/auth/constants';
-import { sessionExpiryFor } from '@/lib/auth/session';
+import { getClientIp } from '@/lib/auth/cookies';
 import { consumePunchRateLimit } from '@/lib/services/rateLimit';
 import {
   readIdempotentResponse,
@@ -79,30 +76,6 @@ function systemClosedTripMessage(closedAt: Date): string {
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
-}
-
-// A driver has to be signed in before they can punch, so "is this driver
-// checked in" is always false at login - the only place the session length used
-// to be decided. The punch is the moment that answer changes, so the access
-// cookie is re-issued here: the checked-in TTL on the way in, the standard one
-// on the way out. DRIVER only, and only after the punch actually succeeded.
-async function reissueDriverSession(
-  role: string | null,
-  userId: string,
-  branchId: string | null,
-  kind: 'IN' | 'OUT',
-): Promise<void> {
-  if (role !== 'DRIVER') return;
-  // Only for a session that is still current: re-issuing a revoked one would
-  // hand a driver the owner has just signed out a fresh twelve hours.
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { session_version: true } });
-  const current = cookies().get(ACCESS_COOKIE_NAME)?.value;
-  const token = current ? await verifyToken(current, 'access') : null;
-  if (!user || !token || token.sv !== user.session_version) return;
-  const now = new Date();
-  const exp = sessionExpiryFor({ role: 'DRIVER' }, kind === 'IN', now);
-  const fresh = await signToken({ sub: userId, role: 'DRIVER', branchId, sv: user.session_version }, exp, 'access');
-  setAccessCookie(fresh, exp);
 }
 
 export async function POST(req: Request) {
@@ -180,8 +153,6 @@ export async function POST(req: Request) {
     };
     return NextResponse.json(response, { status: mapped.status });
   }
-
-  await reissueDriverSession(h.get('x-user-role'), userId, h.get('x-user-branch-id'), body.kind);
 
   // Both closes can land on one punch: a driver who forgot BACK last night and
   // forgot to clock out too. One `notice` field feeds one banner on the phone,

@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME, CSRF_COOKIE_NAME } from './constants';
+import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME, CSRF_COOKIE_NAME, REFRESH_TTL_DAYS } from './constants';
 
 // How long the browser keeps the access cookie. The token's own exp is the real
 // session length, but a cookie that dies first ends the session early anyway -
@@ -40,28 +40,13 @@ export function setAuthCookies(
     path: '/',
   };
   store.set(ACCESS_COOKIE_NAME, accessToken, { ...baseAttrs, maxAge: accessCookieMaxAge(accessExpiresAt) });
-  store.set(REFRESH_COOKIE_NAME, refreshToken, { ...baseAttrs, maxAge: 60 * 60 * 24 * 7 });
+  store.set(REFRESH_COOKIE_NAME, refreshToken, { ...baseAttrs, maxAge: 60 * 60 * 24 * REFRESH_TTL_DAYS });
   store.set(CSRF_COOKIE_NAME, csrfToken, {
     httpOnly: false,
     secure: isHttps,
     sameSite: 'lax',
     path: '/',
-    maxAge: 60 * 60 * 24 * 7,
-  });
-}
-
-/**
- * Replace only the access cookie, keeping the refresh and CSRF cookies as they
- * are. Used when the session length changes mid-session - a driver punching in
- * or out - where rotating the CSRF token would be churn with no benefit.
- */
-export function setAccessCookie(accessToken: string, expiresAt: Date): void {
-  cookies().set(ACCESS_COOKIE_NAME, accessToken, {
-    httpOnly: true,
-    secure: serveOverHttps(),
-    sameSite: 'lax',
-    path: '/',
-    maxAge: accessCookieMaxAge(expiresAt),
+    maxAge: 60 * 60 * 24 * REFRESH_TTL_DAYS,
   });
 }
 
