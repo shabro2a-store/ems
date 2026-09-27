@@ -9,6 +9,7 @@ import { consumeTripRateLimit } from '@/lib/services/rateLimitTrip';
 import { startTrip, type ReceiptInput } from '@/lib/services/trip';
 import { inspectReceiptJpeg, RECEIPT_MAX_BYTES } from '@/lib/services/receiptImage';
 import { readBodyLimited } from '@/lib/readLimited';
+import { writeAuditLog } from '@/lib/services/audit';
 
 // Multipart now, not JSON: the receipt photo travels with the trip start, in
 // the one request, so a trip cannot be started without it. The coordinates
@@ -118,6 +119,7 @@ export async function POST(req: Request) {
     return NextResponse.json(response, { status: mapped.status });
   }
 
+  await writeAuditLog({ actorId: userId, action: 'trip.start', entity: 'Trip', entityId: result.trip_id });
   const response = { ok: true, data: { trip_id: result.trip_id, out_at: result.out_at.toISOString() } };
   await storeIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname, status_code: 200, response_json: response });
   return NextResponse.json(response, { status: 200 });

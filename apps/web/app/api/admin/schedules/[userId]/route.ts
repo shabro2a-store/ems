@@ -85,15 +85,15 @@ export async function PUT(req: Request, ctx: { params: { userId: string } }) {
         update: { shift_min: shiftMin },
       });
     }
-  });
-
-  await writeAuditLog({
-    actorId: adminId,
-    action: 'schedule.update',
-    entity: 'User',
-    entityId: ctx.params.userId,
-    before: { schedule: before.filter((s) => s.shift_min > 0).map((s) => ({ weekday: s.weekday, shift_min: s.shift_min })) },
-    after: { schedule: body.weeklySchedule, effective_from: today },
+    await writeAuditLog({
+      actorId: adminId,
+      action: 'schedule.update',
+      entity: 'User',
+      entityId: ctx.params.userId,
+      before: { schedule: before.filter((s) => s.shift_min > 0).map((s) => ({ weekday: s.weekday, shift_min: s.shift_min })) },
+      after: { schedule: body.weeklySchedule, effective_from: today },
+      db: tx,
+    });
   });
 
   return NextResponse.json({ ok: true, data: { weeklySchedule: body.weeklySchedule } });

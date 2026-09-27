@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { endTrip } from '@/lib/services/trip';
+import { writeAuditLog } from '@/lib/services/audit';
 
 const Body = z.object({
   lat: z.number().min(-90).max(90),
@@ -67,6 +68,7 @@ export async function POST(req: Request) {
     return NextResponse.json(response, { status: mapped.status });
   }
 
+  await writeAuditLog({ actorId: userId, action: 'trip.end', entity: 'Trip', entityId: result.trip_id, after: { duration_min: result.duration_min } });
   const response = { ok: true, data: { trip_id: result.trip_id, back_at: result.back_at.toISOString(), duration_min: result.duration_min } };
   await storeIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname, status_code: 200, response_json: response });
   return NextResponse.json(response, { status: 200 });

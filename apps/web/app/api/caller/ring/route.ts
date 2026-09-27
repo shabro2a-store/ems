@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { ringDriver } from '@/lib/services/caller';
+import { writeAuditLog } from '@/lib/services/audit';
 
 const Body = z.object({ driverId: z.string().min(1) });
 
@@ -40,6 +41,7 @@ export async function POST(req: Request) {
     }
     return jsonError('NOT_FOUND', 'Driver not found', 404);
   }
+  await writeAuditLog({ actorId: callerId, action: 'call.ring', entity: 'DriverCall', entityId: result.id, after: { driver_id: body.driverId } });
   return NextResponse.json({ ok: true, data: { rang: true } });
 }
 

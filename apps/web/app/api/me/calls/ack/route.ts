@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
+import { writeAuditLog } from '@/lib/services/audit';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -15,10 +16,13 @@ export async function POST(req: Request) {
   if (!userId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 
-  await prisma.driverCall.updateMany({
+  const acked = await prisma.driverCall.updateMany({
     where: { driver_id: userId, acknowledged_at: null },
     data: { acknowledged_at: new Date() },
   });
+  if (acked.count > 0) {
+    await writeAuditLog({ actorId: userId, action: 'call.ack', entity: 'User', entityId: userId, after: { calls: acked.count } });
+  }
   return NextResponse.json({ ok: true, data: { acknowledged: true } });
 }
 

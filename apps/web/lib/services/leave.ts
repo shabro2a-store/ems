@@ -146,16 +146,15 @@ export async function decideLeave(
       where: { id: input.leaveId },
       data: { status: input.decision, decided_by: input.adminId, decided_at: now },
     });
-  });
-
-  await writeAuditLog({
-    actorId: input.adminId,
-    action: input.decision === 'APPROVED' ? 'leave.approved' : 'leave.rejected',
-    entity: 'LeaveRequest',
-    entityId: input.leaveId,
-    before: { status: 'PENDING' },
-    after: { status: input.decision, overrides_created: overridesCreated },
-    db,
+    await writeAuditLog({
+      actorId: input.adminId,
+      action: input.decision === 'APPROVED' ? 'leave.approved' : 'leave.rejected',
+      entity: 'LeaveRequest',
+      entityId: input.leaveId,
+      before: { status: 'PENDING' },
+      after: { status: input.decision, overrides_created: overridesCreated },
+      db: tx,
+    });
   });
 
   return { ok: true, id: input.leaveId, status: input.decision, overrides_created: overridesCreated };

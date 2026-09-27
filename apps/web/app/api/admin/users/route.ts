@@ -138,15 +138,15 @@ export async function POST(req: Request) {
         data: { user_id: u.id, rate_cent: body.tripRateCent!, effective_from: new Date() },
       });
     }
+    await writeAuditLog({
+      actorId: adminId,
+      action: 'user.create',
+      entity: 'User',
+      entityId: u.id,
+      after: { username: u.username, role: u.role, branch_id: u.branch_id, hourly_rate_cent: u.hourly_rate_cent },
+      db: tx,
+    });
     return u;
-  });
-
-  await writeAuditLog({
-    actorId: adminId,
-    action: 'user.create',
-    entity: 'User',
-    entityId: user.id,
-    after: { username: user.username, role: user.role, branch_id: user.branch_id, hourly_rate_cent: user.hourly_rate_cent },
   });
 
   // The password is not sent back: the owner typed it, and this answer is kept

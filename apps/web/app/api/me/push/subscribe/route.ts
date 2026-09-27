@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { isPushServiceEndpoint } from 'notify';
+import { writeAuditLog } from '@/lib/services/audit';
 
 const Body = z.object({
   endpoint: z.string().url().max(2048).refine(isPushServiceEndpoint),
@@ -29,10 +30,18 @@ export async function POST(req: Request) {
     return jsonError('INVALID_INPUT', 'Invalid subscription', 400);
   }
 
-  await prisma.pushSubscription.upsert({
+  const sub = await prisma.pushSubscription.upsert({
     where: { endpoint: body.endpoint },
     create: { user_id: userId, endpoint: body.endpoint, p256dh: body.keys.p256dh, auth: body.keys.auth },
     update: { user_id: userId, p256dh: body.keys.p256dh, auth: body.keys.auth },
+    select: { id: true },
+  });
+  await writeAuditLog({
+    actorId: userId,
+    action: 'push.subscribe',
+    entity: 'PushSubscription',
+    entityId: sub.id,
+    after: { host: new URL(body.endpoint).hostname },
   });
   return NextResponse.json({ ok: true, data: { subscribed: true } });
 }

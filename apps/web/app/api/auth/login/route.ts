@@ -79,6 +79,14 @@ export async function POST(req: Request) {
   let live = user && user.is_active ? user : null;
   const ok = await verifyPassword(body.password, live?.password_hash ?? NO_SUCH_USER_HASH);
   if (!live || !ok) {
+    // Unknown names too: a run of them is what guessing looks like.
+    await writeAuditLog({
+      actorId: user?.id ?? 'anonymous',
+      action: 'auth.login_failed',
+      entity: 'User',
+      entityId: user?.id ?? body.username,
+      after: { username: body.username, ip },
+    });
     return jsonError('UNAUTHORIZED', 'Invalid credentials', 401);
   }
 
@@ -104,6 +112,7 @@ export async function POST(req: Request) {
   }
 
   await issueSession(prisma, live);
+  await writeAuditLog({ actorId: live.id, action: 'auth.login', entity: 'User', entityId: live.id, after: { ip } });
 
   return NextResponse.json({
     ok: true,

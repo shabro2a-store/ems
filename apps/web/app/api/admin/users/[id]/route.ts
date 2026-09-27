@@ -126,34 +126,34 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         data: { user_id: updated.id, rate_cent: body.tripRateCent, effective_from: new Date() },
       });
     }
+    await writeAuditLog({
+      actorId: adminId,
+      action: 'user.update',
+      entity: 'User',
+      entityId: updated.id,
+      before: {
+        username: before.username,
+        role: before.role,
+        branch_id: before.branch_id,
+        hourly_rate_cent: before.hourly_rate_cent,
+        trip_rate_cent: before.trip_rate_cent,
+        expected_monthly_salary_cent: before.expected_monthly_salary_cent,
+        can_roam_branches: before.can_roam_branches,
+        day_start_hour: before.day_start_hour,
+      },
+      after: {
+        username: updated.username,
+        role: updated.role,
+        branch_id: updated.branch_id,
+        hourly_rate_cent: updated.hourly_rate_cent,
+        trip_rate_cent: updated.trip_rate_cent,
+        expected_monthly_salary_cent: updated.expected_monthly_salary_cent,
+        can_roam_branches: updated.can_roam_branches,
+        day_start_hour: updated.day_start_hour,
+      },
+      db: tx,
+    });
     return updated;
-  });
-
-  await writeAuditLog({
-    actorId: adminId,
-    action: 'user.update',
-    entity: 'User',
-    entityId: user.id,
-    before: {
-      username: before.username,
-      role: before.role,
-      branch_id: before.branch_id,
-      hourly_rate_cent: before.hourly_rate_cent,
-      trip_rate_cent: before.trip_rate_cent,
-      expected_monthly_salary_cent: before.expected_monthly_salary_cent,
-      can_roam_branches: before.can_roam_branches,
-      day_start_hour: before.day_start_hour,
-    },
-    after: {
-      username: user.username,
-      role: user.role,
-      branch_id: user.branch_id,
-      hourly_rate_cent: user.hourly_rate_cent,
-      trip_rate_cent: user.trip_rate_cent,
-      expected_monthly_salary_cent: user.expected_monthly_salary_cent,
-      can_roam_branches: user.can_roam_branches,
-      day_start_hour: user.day_start_hour,
-    },
   });
 
   const { password_hash: _pwh, ...safeUser } = user;

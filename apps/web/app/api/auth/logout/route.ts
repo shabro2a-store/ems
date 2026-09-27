@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { clearAuthCookies } from '@/lib/auth/cookies';
+import { writeAuditLog } from '@/lib/services/audit';
 import { verifyToken } from '@/lib/auth/jwt';
 import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '@/lib/auth/constants';
 import { requestCookie } from '@/lib/auth/requestCookie';
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
       where: { id: who.sub, session_version: who.sv },
       data: { session_version: { increment: 1 } },
     });
+    await writeAuditLog({ actorId: who.sub, action: 'auth.logout', entity: 'User', entityId: who.sub });
   }
   clearAuthCookies();
   return NextResponse.json({ ok: true, data: { loggedOut: true } });

@@ -150,6 +150,10 @@ cuid PKs, money = Int cents.
   `context_json` carries the detail the dashboard renders as the flag's reason.
 - **AuditLog** — append-only: a trigger refuses UPDATE and DELETE for every role, the app's own
   included (it connects as the DB owner, whom a REVOKE would not reach). actor/action/entity/before/after.
+  Besides every admin mutation it records sign-in (`auth.login`, `auth.login_failed` - unknown
+  names too - and `auth.logout`), rings (`call.ring`, `call.ack`), trips (`trip.start`,
+  `trip.end`), `push.subscribe` and the Telegram bind/unbind. Where a change runs in a
+  transaction, its audit row is written in the same one.
 - **IdempotencyKey** — (key,user)→scope + cached response (`status_code` 0 = claimed,
   still working), 24h TTL. **RateLimitBucket** — token bucket store.
 
