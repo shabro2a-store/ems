@@ -310,18 +310,22 @@ export function tripsOnCurrentWorkingDay(args: {
   trips: TripRow[];
   now: Date;
   dayStartHour?: number;
-}): { date: string; count: number } {
+}): { date: string; count: number; paid: number } {
   const dayStart = args.dayStartHour ?? 0;
   const { date } = currentShiftDayMinutes({ punches: args.punches, now: args.now, dayStartHour: dayStart });
-  if (date === '') return { date, count: 0 };
+  if (date === '') return { date, count: 0, paid: 0 };
   const dayOf = tripDayResolver(args.punches, dayStart);
   let count = 0;
+  // Back already, so tripPay pays it - what today's labour cost can count.
+  let paid = 0;
   for (const t of args.trips) {
     if (t.out_at > args.now) continue;
     if (t.denied_at) continue;
-    if (dayOf(t.out_at) === date) count += 1;
+    if (dayOf(t.out_at) !== date) continue;
+    count += 1;
+    if (t.back_at !== null) paid += 1;
   }
-  return { date, count };
+  return { date, count, paid };
 }
 
 /**

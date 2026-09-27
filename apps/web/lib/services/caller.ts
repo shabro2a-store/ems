@@ -94,7 +94,9 @@ export async function branchDriverStatuses(
         }),
         db.trip.findMany({
           where: { driver_id: d.id, out_at: { gte: since } },
-          select: { out_at: true, back_at: true },
+          // denied_at so a trip the owner refused is not counted - without it
+          // tripsOnCurrentWorkingDay could not tell and counted every one.
+          select: { out_at: true, back_at: true, denied_at: true },
         }),
       ]);
       const tripsToday = tripsOnCurrentWorkingDay({

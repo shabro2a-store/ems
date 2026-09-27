@@ -277,14 +277,21 @@ describe('decideAdvance', () => {
 });
 
 describe('advancesSummary', () => {
-  it('returns pending count and approved balance', async () => {
+  /*
+   * Money #31: "Approved balance" summed every advance ever approved - months
+   * already paid and settled included - so it only ever grew. It is what comes
+   * out of THIS month's pay.
+   */
+  it('returns the pending count and what comes out of this month', async () => {
+    const now = new Date();
     store.advances.push(
       { id: 'a', user_id: 'u1', amount_cent: 1000, reason: null, status: 'PENDING', decided_by: null, decided_at: null, created_at: new Date('2026-07-01T00:00:00Z') },
       { id: 'b', user_id: 'u1', amount_cent: 3000, reason: null, status: 'PENDING', decided_by: null, decided_at: null, created_at: new Date('2026-07-01T00:00:00Z') },
-      { id: 'c', user_id: 'u1', amount_cent: 4000, reason: null, status: 'APPROVED', decided_by: 'admin', decided_at: new Date(), created_at: new Date('2026-07-01T00:00:00Z') },
+      { id: 'c', user_id: 'u1', amount_cent: 4000, reason: null, status: 'APPROVED', decided_by: 'admin', decided_at: new Date('2026-07-02T00:00:00Z'), created_at: new Date('2026-07-01T00:00:00Z') },
+      { id: 'd', user_id: 'u1', amount_cent: 1500, reason: null, status: 'APPROVED', decided_by: 'admin', decided_at: now, created_at: now },
     );
     const s = await advancesSummary('u1');
     expect(s.pending).toBe(2);
-    expect(s.approved_balance_cent).toBe(4000);
+    expect(s.approved_this_month_cent).toBe(1500);
   });
 });

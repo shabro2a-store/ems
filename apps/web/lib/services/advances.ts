@@ -4,6 +4,7 @@ import { writeAuditLog } from './audit';
 import { accruedEarningsThisMonth, monthRangeUtc } from './payout';
 import { advancePayMonth, approvedAdvancesForMonth } from './advanceMonth';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
+import { currentPayMonth } from './periodLock';
 import { getNotifier, type Notifier } from 'notify';
 
 export interface RequestAdvanceInput {
@@ -168,19 +169,20 @@ function sumCents(rows: Array<{ amount_cent: number }>): number {
 
 export interface AdvanceSummary {
   pending: number;
-  approved_balance_cent: number;
+  /** Approved advances that come out of this month's pay (advancePayMonth). */
+  approved_this_month_cent: number;
 }
 
+// Not every advance ever approved: that figure counted months already paid and
+// settled, and only ever grew.
 export async function advancesSummary(
   userId: string,
   db: PrismaClient = defaultPrisma,
+  now: Date = new Date(),
 ): Promise<AdvanceSummary> {
-  const [pendingCount, approvedSum] = await Promise.all([
+  const [pendingCount, approved] = await Promise.all([
     db.advance.count({ where: { user_id: userId, status: 'PENDING' } }),
-    db.advance.aggregate({
-      where: { user_id: userId, status: 'APPROVED' },
-      _sum: { amount_cent: true },
-    }),
+    approvedAdvancesForMonth(db, userId, currentPayMonth(now)),
   ]);
-  return { pending: pendingCount, approved_balance_cent: approvedSum._sum.amount_cent ?? 0 };
+  return { pending: pendingCount, approved_this_month_cent: sumCents(approved) };
 }

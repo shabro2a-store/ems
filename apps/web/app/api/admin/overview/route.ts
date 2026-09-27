@@ -94,7 +94,7 @@ export async function GET(req: Request) {
       }),
       prisma.user.findMany({
         where: { is_active: true, role: { in: ['EMPLOYEE', 'DRIVER'] } },
-        select: { id: true, username: true, name: true, role: true, branch_id: true, hourly_rate_cent: true, day_start_hour: true },
+        select: { id: true, username: true, name: true, role: true, branch_id: true, hourly_rate_cent: true, trip_rate_cent: true, day_start_hour: true },
       }),
       prisma.punch.findMany({
         where: { at: { gte: workingDayHistoryFrom(punchesFromUtc), lt: endUtc } },
@@ -206,7 +206,18 @@ export async function GET(req: Request) {
         dayStartHour: dayStartHourFor(u),
       });
       hoursMinutes += minutes;
-      laborCent += Math.floor((minutes * u.hourly_rate_cent) / 60);
+      const tripsToday =
+        u.role === 'DRIVER'
+          ? tripsOnCurrentWorkingDay({
+              punches: punchesByUser.get(u.id) ?? [],
+              trips: tripsByDriver.get(u.id) ?? [],
+              now: nowDate,
+              dayStartHour: dayStartHourFor(u),
+            })
+          : null;
+      // A driver's day is paid per trip as well as per hour; leaving the trips
+      // out made the dashboard's labour cost smaller than what payroll pays.
+      laborCent += Math.floor((minutes * u.hourly_rate_cent) / 60) + (tripsToday ? tripsToday.paid * u.trip_rate_cent : 0);
 
       let status: Status;
       let sinceMin = 0;
@@ -236,15 +247,7 @@ export async function GET(req: Request) {
         since_min: sinceMin,
         over,
         hours_today: Math.round((minutes / 60) * 10) / 10,
-        trips_today:
-          u.role === 'DRIVER'
-            ? tripsOnCurrentWorkingDay({
-                punches: punchesByUser.get(u.id) ?? [],
-                trips: tripsByDriver.get(u.id) ?? [],
-                now: nowDate,
-                dayStartHour: dayStartHourFor(u),
-              }).count
-            : null,
+        trips_today: tripsToday ? tripsToday.count : null,
       };
     });
 

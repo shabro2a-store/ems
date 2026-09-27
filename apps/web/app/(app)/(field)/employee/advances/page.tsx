@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { apiGet, apiSend, centsToUsd, errorMessage, formatBeirut } from '@/lib/api';
 import { Card, CardBody, CardHeader, StatTile, Field, Input, Textarea, Button, Badge, Alert, EmptyState } from '@/components/ui';
 
-interface Summary { pending: number; approved_balance_cent: number }
+interface Summary { pending: number; approved_this_month_cent: number }
 interface Advance { id: string; amount_cent: number; reason: string | null; status: 'PENDING' | 'APPROVED' | 'REJECTED'; created_at: string }
 
 const STATUS_TONE = { PENDING: 'warning', APPROVED: 'success', REJECTED: 'danger' } as const;
@@ -47,7 +47,7 @@ export default function EmployeeAdvancesPage() {
 
       <div className="grid grid-cols-2 gap-3">
         <StatTile label="Pending" value={summary?.pending ?? '—'} tone={summary && summary.pending > 0 ? 'warning' : 'neutral'} />
-        <StatTile label="Approved balance" value={summary ? centsToUsd(summary.approved_balance_cent) : '—'} />
+        <StatTile label="Approved this month" value={summary ? centsToUsd(summary.approved_this_month_cent) : '—'} />
       </div>
 
       <Card>

@@ -142,7 +142,8 @@ is the accepted blocked-time credit, and without the line the payslip credits ho
 employee knows they did not clock.
 
 ### GET /api/me/advances  ·  GET /api/me/advances?view=list
-Summary `{ pending, approved_balance_cent }`, or `{ advances: [...] }` (latest 50).
+Summary `{ pending, approved_this_month_cent }` - the approved advances that come out of this
+month's pay, not every one ever approved - or `{ advances: [...] }` (latest 50).
 
 ### POST /api/me/advances  *(CSRF, Idempotent, rate-limited)*
 Body `{ amountCent, reason? }`. Capped at what's earned this month —
@@ -207,7 +208,9 @@ chars). Ends every other session of the admin's; this one is re-issued.
   attention queue: `{ branches, branchId, kpis{ present, absent, driversOut,
   driversOver, tripsToday, hoursToday, laborTodayCent }, people[] (drivers include
   trips_today), attention{ lateDrivers, flags, penalties, overtime, blockedCredits,
-  pendingAdvances, pendingLeaves } }`.
+  pendingAdvances, pendingLeaves } }`. `laborTodayCent` is today's hours at each person's rate
+  plus, for drivers, today's completed, undenied trips at their trip rate. `trips_today` (here
+  and on the caller board) leaves out trips the owner denied.
   - `penalties[]` — `{ user_id, username, date, kind: SHORTFALL, shortfallMin,
     penaltyMin, amount_cent, waived }`. Computed on the fly, last 7 days, excluding any day
     whose waiver or ack still names its current figure. `waived: true` marks a day whose

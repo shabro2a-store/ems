@@ -72,12 +72,12 @@ describe('advances integration', () => {
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);
 
-    const summary = await getJson<{ ok: boolean; data: { pending: number; approved_balance_cent: number } }>(
+    const summary = await getJson<{ ok: boolean; data: { pending: number; approved_this_month_cent: number } }>(
       '/api/me/advances',
       { cookies, csrf },
     );
     expect(summary.body.data.pending).toBe(1);
-    expect(summary.body.data.approved_balance_cent).toBe(0);
+    expect(summary.body.data.approved_this_month_cent).toBe(0);
   });
 
   it('employee request exceeding accrued earnings returns 409 EXCEEDS_ACCRUED_EARNINGS', async () => {
@@ -96,7 +96,7 @@ describe('advances integration', () => {
     expect(r.body.error?.code).toBe('EXCEEDS_ACCRUED_EARNINGS');
   });
 
-  it('admin GETs pending list, approves; approved_balance updates', async () => {
+  it('admin GETs pending list, approves; approved this month updates', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const employee = await seedTestUser({ username: 'adv-emp3', branch_id: branch.id });
     const admin = await seedTestUser({ username: 'adv-admin3', role: Role.ADMIN });
@@ -127,12 +127,12 @@ describe('advances integration', () => {
     expect(decisionRes.status).toBe(200);
     expect(decisionRes.body.data?.status).toBe('APPROVED');
 
-    const summaryRes = await getJson<{ ok: boolean; data: { pending: number; approved_balance_cent: number } }>(
+    const summaryRes = await getJson<{ ok: boolean; data: { pending: number; approved_this_month_cent: number } }>(
       '/api/me/advances',
       { cookies: eSession.cookies, csrf: eSession.csrf },
     );
     expect(summaryRes.body.data.pending).toBe(0);
-    expect(summaryRes.body.data.approved_balance_cent).toBe(5000);
+    expect(summaryRes.body.data.approved_this_month_cent).toBe(5000);
 
     const audit = await getTestPrisma().auditLog.findMany({
       where: { entity: 'Advance', entity_id: advanceId },
