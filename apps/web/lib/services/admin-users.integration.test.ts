@@ -40,9 +40,10 @@ describe('admin-users integration', () => {
       }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json() as { ok: boolean; data?: { user: { id: string }; temp_password: string } };
+    const body = await res.json() as { ok: boolean; data?: { user: { id: string }; temp_password?: string } };
     expect(body.ok).toBe(true);
-    expect(body.data?.temp_password).toBeDefined();
+    // Not sent back (security #4): the owner typed it, and the answer is kept.
+    expect(body.data?.temp_password).toBeUndefined();
 
     const rateChanges = await getTestPrisma().rateChange.findMany({ where: { user_id: body.data!.user.id } });
     expect(rateChanges.length).toBe(1);
