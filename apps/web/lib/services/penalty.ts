@@ -198,7 +198,7 @@ export async function penaltiesForUser(
       select: { date: true, kind: true, shift_min: true },
     }),
     db.rateChange.findMany({
-      where: { user_id: userId, effective_from: { lt: end } },
+      where: { user_id: userId, effective_from: { lt: punchTo } },
       orderBy: { effective_from: 'asc' },
       select: { rate_cent: true, effective_from: true },
     }),
@@ -325,7 +325,7 @@ export async function pendingPenaltyNotices(
       select: { user_id: true, date: true, kind: true, shift_min: true },
     }),
     db.rateChange.findMany({
-      where: { user_id: { in: ids }, effective_from: { lt: end } },
+      where: { user_id: { in: ids }, effective_from: { lt: punchTo } },
       orderBy: { effective_from: 'asc' },
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),

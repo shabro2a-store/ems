@@ -423,8 +423,11 @@ export async function payoutForUser(
       orderBy: { at: 'asc' },
       select: { id: true, user_id: true, kind: true, at: true },
     }),
+    // As far as the punches, not the month: a shift is priced at the rate in
+    // force when it closed, and the night on the seam closes next month. Every
+    // rate lookup beside a widened punch read does the same.
     db.rateChange.findMany({
-      where: { user_id: userId, effective_from: { lt: end } },
+      where: { user_id: userId, effective_from: { lt: pairTo } },
       orderBy: { effective_from: 'asc' },
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),
@@ -455,7 +458,7 @@ export async function payoutForUser(
       select: { out_at: true, back_at: true, denied_at: true },
     }),
     db.tripRateChange.findMany({
-      where: { user_id: userId, effective_from: { lt: end } },
+      where: { user_id: userId, effective_from: { lt: pairTo } },
       orderBy: { effective_from: 'asc' },
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),
@@ -491,7 +494,7 @@ export async function accruedEarningsThisMonth(
       select: { id: true, user_id: true, kind: true, at: true },
     }),
     db.rateChange.findMany({
-      where: { user_id: userId, effective_from: { lt: end } },
+      where: { user_id: userId, effective_from: { lt: pairTo } },
       orderBy: { effective_from: 'asc' },
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),
@@ -520,7 +523,7 @@ export async function accruedEarningsThisMonth(
       select: { out_at: true, back_at: true, denied_at: true },
     }),
     db.tripRateChange.findMany({
-      where: { user_id: userId, effective_from: { lt: end } },
+      where: { user_id: userId, effective_from: { lt: pairTo } },
       orderBy: { effective_from: 'asc' },
       select: { user_id: true, rate_cent: true, effective_from: true },
     }),
