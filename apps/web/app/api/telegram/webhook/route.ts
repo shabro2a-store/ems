@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { writeAuditLog } from '@/lib/services/audit';
 import { webhookSecretUsable } from '@/lib/services/telegramConfig';
+import { TELEGRAM_TIMEOUT_MS } from 'notify';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -13,6 +14,7 @@ async function reply(chatId: number, text: string): Promise<void> {
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(TELEGRAM_TIMEOUT_MS),
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
   }).catch(() => null);
 }

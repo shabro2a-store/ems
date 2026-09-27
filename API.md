@@ -314,6 +314,9 @@ chars). Ends every other session of the admin's; this one is re-issued.
 - **POST /api/admin/users/[id]/deactivate** *(CSRF)* toggles active. Deactivating an
   **admin is rejected (403)**.
 - **PATCH /api/admin/users/[id]/notification-prefs** *(CSRF)* `{ dailySummary?, routinePings? }`.
+  Read by the Telegram sender: `dailySummary` off stops the daily summary; `routinePings` off
+  stops notices that need nothing done (a watched person punched, back from a break, a second
+  shift today). Alerts that need a decision or a look always go.
 - **GET /api/admin/schedules/[userId]** → `{ weeklySchedule, overrides, pendingLeaves }`.
 - **PUT /api/admin/schedules/[userId]** *(CSRF)* `{ weeklySchedule: [{ weekday 0-6,
   shift_hours 0-24 }] }`. Applies **from today**: each weekday that changes gets a row dated

@@ -2,12 +2,35 @@ import { Notifier, NotificationPayload } from './types';
 
 // Lazily resolve the admin chat_id from DB. We don't import Prisma here
 // to keep `notify` package framework-agnostic; the worker passes a lookup fn.
+/** Where the owner's alerts go, and the two switches he has over them. */
+export interface AdminRecipient {
+  chatId: string;
+  dailySummary: boolean;
+  routinePings: boolean;
+}
+
 export interface TelegramNotifierOpts {
   botToken: string;
   webhookSecret: string;
   publicAppUrl: string;
-  resolveRecipient: () => Promise<string | null>;
+  resolveRecipient: () => Promise<AdminRecipient | null>;
+  /** How long one send may take. Sends run inside the punch request. */
+  timeoutMs?: number;
 }
+
+/**
+ * How long a send may hold the request it runs in. A punch alert is sent from
+ * inside the punch, so a Telegram that hangs would hang the employee's
+ * check-in with it.
+ */
+export const TELEGRAM_TIMEOUT_MS = 5_000;
+
+/**
+ * Notices that need nothing done - "routine pings", which the owner can switch
+ * off. Anything that needs a decision or a look (a missed checkout, somebody
+ * stuck at the door, a closed shift, an advance to approve) always goes.
+ */
+export const ROUTINE_TEMPLATES = new Set(['watched_resolved', 'punch.day_continues', 'punch.second_working_day']);
 
 export class TelegramNotifier implements Notifier {
   constructor(private readonly opts: TelegramNotifierOpts) {}
@@ -17,9 +40,15 @@ export class TelegramNotifier implements Notifier {
       // Unknown channel — drop silently. Real notifiers may throw.
       return;
     }
-    const chatId = payload.recipient === 'admin'
-      ? await this.opts.resolveRecipient()
-      : payload.recipient;
+    let chatId: string | null;
+    if (payload.recipient === 'admin') {
+      const admin = await this.opts.resolveRecipient();
+      if (admin && payload.template === 'daily_summary' && !admin.dailySummary) return;
+      if (admin && ROUTINE_TEMPLATES.has(payload.template) && !admin.routinePings) return;
+      chatId = admin?.chatId ?? null;
+    } else {
+      chatId = payload.recipient;
+    }
     if (!chatId) {
       console.warn(`[TelegramNotifier] no chat_id for recipient=${payload.recipient}`);
       return;
@@ -38,6 +67,7 @@ export class TelegramNotifier implements Notifier {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.opts.timeoutMs ?? TELEGRAM_TIMEOUT_MS),
       });
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
@@ -72,12 +102,29 @@ interface Ctx {
   date?: string;
 }
 
+/** Text for Telegram's HTML mode: a name with "&" or "<" otherwise makes it refuse the message. */
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeContext(value: unknown): unknown {
+  if (typeof value === 'string') return escapeHtml(value);
+  if (Array.isArray(value)) return value.map(escapeContext);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, escapeContext(v)]));
+  }
+  return value;
+}
+
 export function renderTemplate(
   template: string,
   context: Record<string, unknown>,
   publicAppUrl: string,
 ): { text: string; deepLink?: string } {
-  const c = context as Ctx;
+  // Every value from the context is escaped once, here; the markup around it
+  // is the template's own. deepLink and flag_id only ever go into URLs.
+  const raw = context as Ctx;
+  const c = { ...(escapeContext(context) as Ctx), deepLink: raw.deepLink, flag_id: raw.flag_id };
   const deepLinkSuffix = c.deepLink ?? (c.flag_id ? `?focus=${c.flag_id}` : '');
 
   switch (template) {
@@ -147,9 +194,35 @@ export function renderTemplate(
       };
     }
 
-    default:
+    case 'punch.blocked':
       return {
-        text: `[${template}] ${JSON.stringify(context).slice(0, 500)}`,
+        text: `⛔ <b>Stuck at the door</b>\n${c.message ?? `${c.user?.username ?? 'An employee'} cannot clock in.`}`,
+        deepLink: `${publicAppUrl}/admin`,
+      };
+
+    case 'punch.auto_close':
+      return {
+        text: `🔒 <b>Shift closed by the system</b>\n${c.message ?? `${c.user?.username ?? 'An employee'} never punched out.`}`,
+        deepLink: `${publicAppUrl}/admin/punches`,
+      };
+
+    case 'punch.second_working_day':
+      return {
+        text: `🔁 <b>Second shift today</b>\n${c.message ?? `${c.user?.username ?? 'An employee'} clocked in again.`}`,
+        deepLink: `${publicAppUrl}/admin/punches`,
+      };
+
+    case 'punch.day_continues':
+      return {
+        text: `↩️ <b>Back from a break</b>\n${c.message ?? `${c.user?.username ?? 'An employee'} clocked in again.`}`,
+        deepLink: `${publicAppUrl}/admin/punches`,
+      };
+
+    default:
+      // Never raw JSON: an alert nobody wrote a template for still reads as a sentence.
+      return {
+        text: `🔔 <b>${escapeHtml(template)}</b>${c.message ? `\n${c.message}` : ''}`,
+        deepLink: `${publicAppUrl}/admin`,
       };
   }
 }

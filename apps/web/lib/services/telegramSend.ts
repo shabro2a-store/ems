@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { TELEGRAM_TIMEOUT_MS } from 'notify';
 import { prisma as defaultPrisma } from '@/lib/db/prisma';
 
 export type TelegramSendResult =
@@ -43,6 +44,7 @@ export async function sendToChat(chatId: string, text: string): Promise<Telegram
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(TELEGRAM_TIMEOUT_MS),
       body: JSON.stringify({
         chat_id: chatId,
         text,
@@ -85,7 +87,7 @@ export async function telegramBotUsername(): Promise<string | null> {
     return null;
   }
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, { signal: AbortSignal.timeout(TELEGRAM_TIMEOUT_MS) });
     const body = (await res.json()) as { ok?: boolean; result?: { username?: string } };
     botUsername = body.ok && body.result?.username ? body.result.username : null;
   } catch {

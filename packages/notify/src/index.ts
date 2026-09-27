@@ -4,7 +4,15 @@ import { Notifier } from './types';
 
 let cached: Notifier | null = null;
 
-type RecipientPrisma = { user: { findFirst: (args: unknown) => Promise<{ telegram_chat_id: string | null } | null> } };
+type RecipientPrisma = {
+  user: {
+    findFirst: (args: unknown) => Promise<{
+      telegram_chat_id: string | null;
+      notify_daily_summary: boolean;
+      notify_routine_pings: boolean;
+    } | null>;
+  };
+};
 let recipientPrisma: RecipientPrisma | null = null;
 
 async function getRecipientPrisma(): Promise<RecipientPrisma> {
@@ -38,9 +46,14 @@ export function makeNotifier(env: NodeJS.ProcessEnv = process.env): Notifier {
         const admin = await prisma.user.findFirst({
           where: { role: 'ADMIN', telegram_chat_id: { not: null } },
           orderBy: { created_at: 'asc' },
-          select: { telegram_chat_id: true },
+          select: { telegram_chat_id: true, notify_daily_summary: true, notify_routine_pings: true },
         });
-        return admin?.telegram_chat_id ?? null;
+        if (!admin?.telegram_chat_id) return null;
+        return {
+          chatId: admin.telegram_chat_id,
+          dailySummary: admin.notify_daily_summary,
+          routinePings: admin.notify_routine_pings,
+        };
       },
     });
   }
@@ -55,4 +68,4 @@ export function getNotifier(): Notifier {
 export const notifier: Notifier = new ConsoleNotifier(); // default export; worker uses getNotifier()
 export type { Notifier, NotificationPayload } from './types';
 export { sendPushToUser, vapidPublicKey, isPushServiceEndpoint } from './push';
-export type { PushPayload, PushSubscriptionStore } from './push';
+export type { PushPayload, PushSubscriptionStore } from './push';export { TELEGRAM_TIMEOUT_MS, ROUTINE_TEMPLATES, escapeHtml } from './telegram';
