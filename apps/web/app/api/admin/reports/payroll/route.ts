@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
-import { payoutForUser, payrollRoster, monthRangeBeirut } from '@/lib/services/payout';
+import { payoutForUser, payrollRoster } from '@/lib/services/payout';
+import { monthEndRates } from '@/lib/services/payrollRates';
 import { PayrollDocument } from 'pdf/payroll';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
@@ -42,6 +43,7 @@ export async function GET(req: Request) {
   // Same roster the payroll screen uses, so the PDF and the screen can never
   // disagree about who was paid this month.
   const users = await payrollRoster(prisma, month, branchId);
+  const rateAtMonthEnd = await monthEndRates(prisma, users, month);
 
   const rows = await Promise.all(
     users.map(async (u) => {
@@ -54,11 +56,6 @@ export async function GET(req: Request) {
       // It is still one number for a month that can hold several - gross is
       // priced per interval - so this is the rate the month ENDED on, which is
       // what its later work was paid at.
-      const latestRate = await prisma.rateChange.findFirst({
-        where: { user_id: u.id, effective_from: { lt: monthRangeBeirut(month).end } },
-        orderBy: { effective_from: 'desc' },
-        select: { rate_cent: true },
-      });
       return {
         // `name` first: a retired account's username has been parked to free
         // the original, and a payslip is about a person.
@@ -66,7 +63,7 @@ export async function GET(req: Request) {
         role: u.role,
         branch_name: u.branch?.name ?? null,
         hours: payout.hours,
-        rate_cent: latestRate?.rate_cent ?? 0,
+        rate_cent: rateAtMonthEnd.get(u.id)!,
         gross_cent: payout.grossCent,
         blocked_credit_cent: payout.blockedCreditCent,
         adjustments_cent: payout.adjustmentsCent,

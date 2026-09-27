@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
-import { payoutForUser, payrollRoster, monthRangeBeirut } from '@/lib/services/payout';
+import { payoutForUser, payrollRoster } from '@/lib/services/payout';
+import { monthEndRates } from '@/lib/services/payrollRates';
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -35,16 +36,8 @@ export async function GET(req: Request) {
   // hours makes the two stop multiplying out, and the payslip PDF prints the
   // same column - they have to agree.
   //
-  // One query for the page rather than one per employee: every change up to the
-  // month's end, newest first, and the first hit per user wins.
-  const rateAtMonthEnd = new Map<string, number>();
-  for (const rc of await prisma.rateChange.findMany({
-    where: { user_id: { in: users.map((u) => u.id) }, effective_from: { lt: monthRangeBeirut(month).end } },
-    orderBy: { effective_from: 'desc' },
-    select: { user_id: true, rate_cent: true },
-  })) {
-    if (!rateAtMonthEnd.has(rc.user_id)) rateAtMonthEnd.set(rc.user_id, rc.rate_cent);
-  }
+  // Shared with the PDF, which printed $0 where this printed today's rate.
+  const rateAtMonthEnd = await monthEndRates(prisma, users, month);
 
   const rows = await Promise.all(
     users.map(async (u) => {
@@ -60,7 +53,7 @@ export async function GET(req: Request) {
         branch_name: u.branch?.name ?? null,
         // Falls back to the current rate only for somebody with no RateChange
         // history at all, which is an account that has never been paid.
-        rate_cent: rateAtMonthEnd.get(u.id) ?? u.hourly_rate_cent,
+        rate_cent: rateAtMonthEnd.get(u.id)!,
         // Today's rate, which is what the rate dialog edits. The column above is
         // the rate the MONTH was paid at; starting the dialog from it made "open
         // August, press Save" set August's rate as the rate from now on.
