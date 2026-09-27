@@ -157,7 +157,8 @@ every request still pending.
 ### GET /api/me/leave  ·  POST /api/me/leave  *(POST: CSRF, Idempotent)*
 Summary `{ pending, upcoming: [...] }`; request body
 `{ kind: "DAY_OFF"|"HOURS_CHANGE", start_date, end_date, hoursOff?, note? }`.
-→ `200 { id, status: "PENDING" }`. Error: `PAST_DATE` 400.
+→ `200 { id, status: "PENDING" }`. Errors (400): `PAST_DATE`, `END_BEFORE_START`, `TOO_LONG` (more than
+31 days in one request - approval writes an override per day), `TOO_FAR_AHEAD` (starts over a year out).
 
 ### Driver trips (role DRIVER)
 - **POST /api/me/trip/start** *(CSRF, Idempotent, rate-limited)* — **multipart/form-data**

@@ -6,6 +6,12 @@ import { isMonthOpen } from './periodLock';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// One request covers at most a month: approving writes a schedule override for
+// every day in it. Longer time away is a few requests, or the owner's call.
+export const LEAVE_MAX_DAYS = 31;
+// And starts within a year: nobody's schedule is planned further out.
+export const LEAVE_MAX_AHEAD_DAYS = 365;
+
 export interface RequestLeaveInput {
   userId: string;
   kind: 'DAY_OFF' | 'HOURS_CHANGE';
@@ -17,7 +23,7 @@ export interface RequestLeaveInput {
 
 export type RequestLeaveResult =
   | { ok: true; id: string; status: 'PENDING' }
-  | { ok: false; code: 'INVALID_INPUT' | 'PAST_DATE' };
+  | { ok: false; code: 'INVALID_INPUT' | 'PAST_DATE' | 'END_BEFORE_START' | 'TOO_LONG' | 'TOO_FAR_AHEAD' };
 
 export async function requestLeave(
   input: RequestLeaveInput,
@@ -30,6 +36,10 @@ export async function requestLeave(
   const end = new Date(`${input.endDate}T00:00:00.000Z`);
   const today = new Date(`${todayInBeirut()}T00:00:00.000Z`);
   if (start < today) return { ok: false, code: 'PAST_DATE' };
+  if (end < start) return { ok: false, code: 'END_BEFORE_START' };
+  const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  if (days > LEAVE_MAX_DAYS) return { ok: false, code: 'TOO_LONG' };
+  if (start.getTime() - today.getTime() > LEAVE_MAX_AHEAD_DAYS * 86_400_000) return { ok: false, code: 'TOO_FAR_AHEAD' };
   if (input.hoursOff != null && (input.hoursOff < 0 || input.hoursOff > 24)) {
     return { ok: false, code: 'INVALID_INPUT' };
   }

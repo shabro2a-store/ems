@@ -135,6 +135,29 @@ describe('requestLeave', () => {
     if (!r.ok) expect(r.code).toBe('PAST_DATE');
   });
 
+  /*
+   * #39: nothing checked that a request ends on or after the day it starts, or
+   * how long it is - and approving one writes a schedule override for every
+   * day in it.
+   */
+  const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+  it('refuses a request that ends before it starts', async () => {
+    const r = await requestLeave({ userId: 'u1', kind: 'DAY_OFF', startDate: inDays(10), endDate: inDays(8) });
+    expect(r).toEqual({ ok: false, code: 'END_BEFORE_START' });
+  });
+
+  it('takes up to 31 days in one request, and no more', async () => {
+    expect((await requestLeave({ userId: 'u1', kind: 'DAY_OFF', startDate: inDays(10), endDate: inDays(40) })).ok).toBe(true);
+    const r = await requestLeave({ userId: 'u1', kind: 'DAY_OFF', startDate: inDays(10), endDate: inDays(41) });
+    expect(r).toEqual({ ok: false, code: 'TOO_LONG' });
+  });
+
+  it('refuses a start more than a year ahead', async () => {
+    const r = await requestLeave({ userId: 'u1', kind: 'DAY_OFF', startDate: inDays(400), endDate: inDays(401) });
+    expect(r).toEqual({ ok: false, code: 'TOO_FAR_AHEAD' });
+  });
+
   it('rejects invalid date format with INVALID_INPUT', async () => {
     const r = await requestLeave({ userId: 'u1', kind: 'DAY_OFF', startDate: '12-01-2026', endDate: '2026-12-03' });
     expect(r.ok).toBe(false);
@@ -143,7 +166,7 @@ describe('requestLeave', () => {
 
   it('rejects more than 24 hours off', async () => {
     const res = await requestLeave({
-      userId: 'u1', kind: 'HOURS_CHANGE', startDate: '2099-01-01', endDate: '2099-01-01', hoursOff: 25,
+      userId: 'u1', kind: 'HOURS_CHANGE', startDate: inDays(10), endDate: inDays(10), hoursOff: 25,
     });
     expect(res).toEqual({ ok: false, code: 'INVALID_INPUT' });
   });

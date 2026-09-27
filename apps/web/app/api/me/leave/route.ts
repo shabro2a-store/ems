@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
-import { requestLeave, leaveSummary } from '@/lib/services/leave';
+import { requestLeave, leaveSummary, LEAVE_MAX_DAYS } from '@/lib/services/leave';
 
 // The regex only checks shape. Round-tripping through a UTC Date catches a
 // string that is shaped like a date but names no real calendar day (e.g.
@@ -68,6 +68,9 @@ export async function POST(req: Request) {
   if (!result.ok) {
     if (result.code === 'INVALID_INPUT') return jsonError('INVALID_INPUT', 'Invalid dates or times', 400);
     if (result.code === 'PAST_DATE') return jsonError('PAST_DATE', 'start_date must be today or later', 400);
+    if (result.code === 'END_BEFORE_START') return jsonError('END_BEFORE_START', 'The end date is before the start date.', 400);
+    if (result.code === 'TOO_LONG') return jsonError('TOO_LONG', `One request can cover at most ${LEAVE_MAX_DAYS} days. Send a second request for the rest.`, 400);
+    if (result.code === 'TOO_FAR_AHEAD') return jsonError('TOO_FAR_AHEAD', 'Leave can be requested up to a year ahead.', 400);
   }
 
   const okResult = result as { ok: true; id: string; status: 'PENDING' };
