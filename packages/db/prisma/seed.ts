@@ -31,7 +31,9 @@ async function main() {
   // Clean ALL existing data (in dependency order) so we can re-seed cleanly.
   // Idempotent — safe to run multiple times.
   await prisma.$transaction(async (tx) => {
-    await tx.auditLog.deleteMany();
+    // Rows cannot be deleted (a trigger keeps the log append-only); a reseed
+    // starts a new history instead.
+    await tx.$executeRaw`TRUNCATE "AuditLog"`;
     await tx.adjustment.deleteMany();
     await tx.advance.deleteMany();
     await tx.punch.deleteMany();

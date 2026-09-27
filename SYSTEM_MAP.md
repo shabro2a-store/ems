@@ -148,7 +148,8 @@ cuid PKs, money = Int cents.
   while they shared one column, the 23:30 sweep dropped flags nobody had reviewed, and
   dismissing one made `watchedDetector`'s dedup miss so the cron recreated it a minute later.
   `context_json` carries the detail the dashboard renders as the flag's reason.
-- **AuditLog** — append-only (DB revokes UPDATE/DELETE). actor/action/entity/before/after.
+- **AuditLog** — append-only: a trigger refuses UPDATE and DELETE for every role, the app's own
+  included (it connects as the DB owner, whom a REVOKE would not reach). actor/action/entity/before/after.
 - **IdempotencyKey** — (key,user)→scope + cached response (`status_code` 0 = claimed,
   still working), 24h TTL. **RateLimitBucket** — token bucket store.
 

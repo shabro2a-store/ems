@@ -589,7 +589,8 @@ model AuditLog {
   before_json Json?
   after_json  Json?
   at          DateTime @default(now())
-  // REVOKE UPDATE, DELETE ON audit_log FROM ems_app;  (applied in migration)
+  // Append-only: a trigger refuses UPDATE and DELETE for every role (migration
+  // 20260927210000_audit_log_append_only).
 
   @@index([entity, entity_id])
 }
