@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
+import { writeAuditLog } from '@/lib/services/audit';
+import { webhookSecretUsable } from '@/lib/services/telegramConfig';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -27,15 +29,17 @@ interface TelegramUpdate {
 }
 
 export async function POST(req: Request) {
-  // Fails CLOSED. This used to be `if (expected && ...)`, which meant an empty
-  // TELEGRAM_WEBHOOK_SECRET skipped the check altogether and left the endpoint
-  // open to the internet - the one shape of mistake where forgetting to set a
-  // variable removes a guard instead of breaking loudly. There is nothing to
-  // guard when no bot exists, so an unconfigured install still answers.
+  // With no bot there is nobody this could be from, and nothing to do: it used
+  // to skip the secret check instead, so a stranger's /start bound their chat
+  // before the owner ever set the bot up - and got the alerts from then on.
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    return NextResponse.json({ ok: true, data: { skipped: true } });
+  }
+  // Fails CLOSED: no secret, or the published fallback docker-compose.yml used
+  // to fill in, guards nothing.
   const provided = req.headers.get('x-telegram-bot-api-secret-token');
   const expected = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
-  const botConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
-  if (botConfigured && (!expected || provided !== expected)) {
+  if (!webhookSecretUsable(expected) || provided !== expected) {
     return jsonError('FORBIDDEN', 'Bad webhook secret', 403);
   }
 
@@ -110,6 +114,14 @@ To move them here, open the app as admin → <b>Dashboard → Telegram alerts �
       where: { id: admin.id },
       data: { telegram_chat_id: mine },
     });
+    await writeAuditLog({
+      actorId: admin.id,
+      action: 'telegram.bind',
+      entity: 'User',
+      entityId: admin.id,
+      before: { telegram_chat_id: null },
+      after: { telegram_chat_id: mine },
+    });
     await reply(
       chatId,
       `👋 Connected.
@@ -138,10 +150,24 @@ To move them here, open the app as admin → <b>Dashboard → Telegram alerts �
   // The same thing Disconnect does, for the person with the handset rather than
   // the one with the login.
   if (text === '/stop') {
-    const cleared = await prisma.user.updateMany({
+    const bound = await prisma.user.findMany({
       where: { role: 'ADMIN', telegram_chat_id: String(chatId) },
+      select: { id: true },
+    });
+    const cleared = await prisma.user.updateMany({
+      where: { id: { in: bound.map((b) => b.id) }, telegram_chat_id: String(chatId) },
       data: { telegram_chat_id: null },
     });
+    for (const b of bound) {
+      await writeAuditLog({
+        actorId: b.id,
+        action: 'telegram.unbind',
+        entity: 'User',
+        entityId: b.id,
+        before: { telegram_chat_id: String(chatId) },
+        after: { telegram_chat_id: null },
+      });
+    }
     await reply(
       chatId,
       cleared.count > 0

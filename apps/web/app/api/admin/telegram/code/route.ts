@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { telegramBotUsername } from '@/lib/services/telegramSend';
+import { webhookSecretUsable } from '@/lib/services/telegramConfig';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -28,7 +29,7 @@ export async function GET() {
   // "unset" looks identical to "set" from the outside and nothing would ever
   // fail - the owner has to be shown it, or he will never find out.
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
-  const webhookSecretOk = secret.length > 0 && secret !== 'dev_webhook_secret_change_in_prod';
+  const webhookSecretOk = webhookSecretUsable(secret);
 
   // A link to the bot, nothing more. Binding is open by the owner's ruling:
   // whoever opens this and presses START receives the alerts, and the first

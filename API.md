@@ -553,8 +553,10 @@ not enough, since the ring is what authorises the trip.
 Guarded by the `x-telegram-bot-api-secret-token` header vs `TELEGRAM_WEBHOOK_SECRET`, and
 **fails closed**: once `TELEGRAM_BOT_TOKEN` is set, a missing or mismatched secret is a 403.
 It used to skip the check entirely when the variable was empty — the one shape of mistake
-where forgetting to set something removes a guard rather than breaking loudly. With no bot
-token configured there is nothing to guard and the endpoint still answers.
+where forgetting to set something removes a guard rather than breaking loudly. The literal
+fallback `docker-compose.yml` used to fill in counts as no secret. With no bot token configured
+it answers `{ skipped: true }` and binds nothing - a `/start` sent before the bot existed used
+to bind the stranger's chat. `/start` and `/stop` are audited (`telegram.bind` / `telegram.unbind`).
 That header proves the request came **from Telegram**, not *who* messaged the bot, so
 binding is additionally gated on a code from `GET /api/admin/telegram/code`:
 
