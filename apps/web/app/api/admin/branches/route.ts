@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
@@ -29,8 +29,9 @@ function jsonError(code: string, message: string, status: number) {
 }
 
 export async function GET() {
-  const h = headers();
-  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   // staff_count so the close confirmation can name how many people go with the
   // branch before it happens, rather than reporting it afterwards.
   const branches = await prisma.branch.findMany({
@@ -52,9 +53,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const h = headers();
-  const adminId = h.get('x-user-id');
-  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  const me = await identity();
+  if (!me) return unauthorized();
+  const adminId = me.userId;
+  if (me.role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 

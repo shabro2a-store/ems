@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
@@ -22,10 +22,11 @@ function jsonError(code: string, message: string, status: number) {
 // employees / drivers / callers cannot self-serve (admin resets theirs via
 // /api/admin/users/[id]/reset-password).
 export async function POST(req: Request) {
-  const h = headers();
-  const userId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const userId = me.userId;
   if (!userId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
-  if (h.get('x-user-role') !== 'ADMIN') {
+  if (me.role !== 'ADMIN') {
     return jsonError('FORBIDDEN', 'Only the admin can change passwords', 403);
   }
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);

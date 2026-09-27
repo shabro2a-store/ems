@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
@@ -51,9 +51,10 @@ function jsonError(code: string, message: string, status: number) {
 // waiver records the minutes it was given against, so a punch corrected later
 // cannot leave a bigger penalty forgiven by a ruling that never saw it.
 export async function POST(req: Request) {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const adminId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const role = me.role;
+  const adminId = me.userId;
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
@@ -56,9 +56,10 @@ const AUDIT_ACTION = {
 // changes no money at all and only takes the notice off the queue. Note the
 // inversion against overtime, where the pending day is the paid one.
 export async function POST(req: Request) {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const adminId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const role = me.role;
+  const adminId = me.userId;
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
 

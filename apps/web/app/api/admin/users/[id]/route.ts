@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
@@ -42,9 +42,10 @@ function jsonError(code: string, message: string, status: number) {
 }
 
 export async function PATCH(req: Request, ctx: { params: { id: string } }) {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const adminId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const role = me.role;
+  const adminId = me.userId;
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
 
@@ -173,9 +174,10 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
  * so the record of the deletion is still there when the user is not.
  */
 export async function DELETE(req: Request, ctx: { params: { id: string } }) {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const adminId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const role = me.role;
+  const adminId = me.userId;
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);

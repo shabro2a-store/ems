@@ -34,9 +34,11 @@ check `/api/health`'s `uptime_s` if in doubt.
   retirement all bump it. Access tokens are not checked against it (the middleware cannot
   reach the database), which is why they live only `ACCESS_TTL_MIN` (15 min): an ended
   session stops within that.
-- **Middleware** verifies the access JWT and injects `x-user-id` / `x-user-role` /
-  `x-user-branch-id` headers (clients cannot spoof them). Any `/api/me/*` or `/api/admin/*`
-  without a valid session → `401`. Each route re-checks the role.
+- **Middleware** verifies the access JWT: any `/api/me/*` or `/api/admin/*` without one → `401`.
+  It strips any `x-user-*` header a client sends and sets none. Each route and app layout
+  reads who is asking with `identity()` (`lib/auth/identity.ts`): the signed cookie, checked
+  against `User.session_version` and `is_active` - so an ended session is refused on its
+  next request, not when its 15-minute token runs out - then re-checks the role.
 - **CSRF**: every state-changing route validates `X-CSRF-Token` vs the `csrf` cookie
   (double-submit; both sides URL-decoded — the encoding bug is fixed).
 - **Idempotency**: mutating POSTs require an `Idempotency-Key` (24h dedupe). The key is

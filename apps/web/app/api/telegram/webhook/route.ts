@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
-import { headers } from 'next/headers';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
@@ -28,7 +27,6 @@ interface TelegramUpdate {
 }
 
 export async function POST(req: Request) {
-  const h = headers();
   // Fails CLOSED. This used to be `if (expected && ...)`, which meant an empty
   // TELEGRAM_WEBHOOK_SECRET skipped the check altogether and left the endpoint
   // open to the internet - the one shape of mistake where forgetting to set a

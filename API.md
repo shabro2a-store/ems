@@ -6,10 +6,10 @@ model and business rules.
 ## Conventions
 - **Envelope**: success `{ "ok": true, "data": {...} }`; error
   `{ "ok": false, "error": { "code": "...", "message": "..." } }`.
-- **Auth**: a JWT in the httpOnly `ems_access` cookie. Middleware verifies it and
-  injects `x-user-id` / `x-user-role` / `x-user-branch-id` request headers (clients
-  cannot set these). Any `/api/me/*` or `/api/admin/*` request without a valid
-  session gets `401 UNAUTHORIZED`. Each route additionally checks the role.
+- **Auth**: a JWT in the httpOnly `ems_access` cookie. Any `/api/me/*` or `/api/admin/*`
+  request without a valid session gets `401 UNAUTHORIZED` - including one whose session
+  was ended (sign-out, password reset, role change, retirement) since the token was
+  issued. Each route additionally checks the role.
 - **CSRF**: every state-changing request must send the `csrf` cookie value in an
   `X-CSRF-Token` header (double-submit). Failure → `403 FORBIDDEN` "CSRF token mismatch".
 - **Idempotency**: POSTs marked *Idempotent* require an `Idempotency-Key` header.

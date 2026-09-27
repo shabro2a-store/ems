@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
@@ -13,9 +13,10 @@ function jsonError(code: string, message: string, status: number) {
 
 // Ring a driver's phone. The caller may only ring drivers in their own branch.
 export async function POST(req: Request) {
-  const h = headers();
-  if (h.get('x-user-role') !== 'CALLER') return jsonError('FORBIDDEN', 'Caller only', 403);
-  const callerId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'CALLER') return jsonError('FORBIDDEN', 'Caller only', 403);
+  const callerId = me.userId;
   if (!callerId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 

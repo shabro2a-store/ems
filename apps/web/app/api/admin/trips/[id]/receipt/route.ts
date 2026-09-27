@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 
 /**
@@ -8,8 +8,9 @@ import { prisma } from '@/lib/db/prisma';
  * 404 once the weekly wipe has taken it.
  */
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const h = headers();
-  if (h.get('x-user-role') !== 'ADMIN') {
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'ADMIN') {
     return NextResponse.json({ ok: false, error: { code: 'FORBIDDEN', message: 'Admin only' } }, { status: 403 });
   }
   const receipt = await prisma.tripReceipt.findUnique({

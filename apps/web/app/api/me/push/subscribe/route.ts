@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
@@ -15,8 +15,9 @@ function jsonError(code: string, message: string, status: number) {
 
 // Register (or move to this user) a device's push subscription.
 export async function POST(req: Request) {
-  const h = headers();
-  const userId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const userId = me.userId;
   if (!userId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 

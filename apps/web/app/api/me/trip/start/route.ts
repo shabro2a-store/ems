@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
@@ -47,9 +47,10 @@ const ERROR_MAP: Record<string, { code: string; status: number }> = {
 };
 
 export async function POST(req: Request) {
-  const h = headers();
-  const userId = h.get('x-user-id');
-  const role = h.get('x-user-role');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const userId = me.userId;
+  const role = me.role;
   if (!userId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (role !== 'DRIVER') return jsonError('FORBIDDEN', 'Driver only', 403);
 

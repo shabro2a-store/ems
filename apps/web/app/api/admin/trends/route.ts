@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { inBeirut, todayInBeirut, todayInBeirutDateRange } from 'time';
 import { beirutDateSeries } from '@/lib/services/noticeWindow';
@@ -9,8 +9,9 @@ import { beirutDateSeries } from '@/lib/services/noticeWindow';
 // Branch-filterable via ?branchId=<id>.
 
 export async function GET(req: Request) {
-  const h = headers();
-  if (h.get('x-user-role') !== 'ADMIN') {
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'ADMIN') {
     return NextResponse.json({ ok: false, error: { code: 'FORBIDDEN', message: 'Admin only' } }, { status: 403 });
   }
 

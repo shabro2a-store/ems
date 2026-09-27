@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { boundAdminChatId, sendToChat } from '@/lib/services/telegramSend';
 
@@ -31,9 +31,10 @@ function jsonError(code: string, message: string, status: number) {
  * is worse than no test.
  */
 export async function POST(req: Request) {
-  const h = headers();
-  const userId = h.get('x-user-id');
-  const role = h.get('x-user-role');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const userId = me.userId;
+  const role = me.role;
   if (!userId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);

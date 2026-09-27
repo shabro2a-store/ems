@@ -1,12 +1,13 @@
-import { headers } from 'next/headers';
+import { identity } from '@/lib/auth/identity';
 import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-export default function CallerLayout({ children }: { children: React.ReactNode }) {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const userId = h.get('x-user-id');
+export default async function CallerLayout({ children }: { children: React.ReactNode }) {
+  const me = await identity();
+  if (!me) redirect('/login');
+  const role = me.role;
+  const userId = me.userId;
   if (!userId) redirect('/login');
   if (role !== 'CALLER') {
     redirect(role === 'ADMIN' ? '/admin' : role === 'DRIVER' ? '/driver' : '/employee');

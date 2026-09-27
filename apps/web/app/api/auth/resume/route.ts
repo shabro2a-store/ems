@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db/prisma';
 import { renewFromRefreshToken } from '@/lib/auth/issueSession';
 import { clearAuthCookies } from '@/lib/auth/cookies';
 import { REFRESH_COOKIE_NAME } from '@/lib/auth/constants';
+import { requestCookie } from '@/lib/auth/requestCookie';
 
 /**
  * Where the middleware sends a page request whose access token has lapsed but
@@ -17,8 +18,8 @@ import { REFRESH_COOKIE_NAME } from '@/lib/auth/constants';
 export async function GET(req: Request) {
   // The page the middleware was asked for, or ?next= when called directly.
   const next = sameSitePath(req.headers.get('x-resume-next') ?? new URL(req.url).searchParams.get('next'));
-  const match = (req.headers.get('cookie') ?? '').match(new RegExp(`(?:^|;\s*)${REFRESH_COOKIE_NAME}=([^;]+)`));
-  if (!match?.[1] || !(await renewFromRefreshToken(prisma, match[1]))) {
+  const token = requestCookie(req, REFRESH_COOKIE_NAME);
+  if (!token || !(await renewFromRefreshToken(prisma, token))) {
     clearAuthCookies();
     return redirect('/login');
   }

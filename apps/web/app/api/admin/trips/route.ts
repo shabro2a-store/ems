@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { workingDayHistoryFrom } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { monthRangeUtc, rateAt, tripDayResolver, PAIR_LOOKAROUND_MS } from '@/lib/services/payout';
@@ -20,8 +20,9 @@ function jsonError(code: string, message: string, status: number) {
  * and is not yet owed.
  */
 export async function GET(req: Request) {
-  const h = headers();
-  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
   const url = new URL(req.url);
   const userId = url.searchParams.get('userId') ?? '';

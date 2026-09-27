@@ -1,4 +1,4 @@
-import { headers } from 'next/headers';
+import { identity } from '@/lib/auth/identity';
 import { redirect } from 'next/navigation';
 import { prisma } from '@/lib/db/prisma';
 import AdminNav from '@/components/admin/AdminNav';
@@ -6,9 +6,10 @@ import AdminNav from '@/components/admin/AdminNav';
 export const dynamic = 'force-dynamic';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const userId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) redirect('/login');
+  const role = me.role;
+  const userId = me.userId;
 
   if (!userId) redirect('/login');
   if (role !== 'ADMIN') {

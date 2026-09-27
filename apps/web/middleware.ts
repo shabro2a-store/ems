@@ -42,23 +42,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.rewrite(new URL('/api/auth/resume', request.url), { request: { headers: requestHeaders } });
   }
 
-  if (token) {
-    if (payload) {
-      requestHeaders.set('x-user-id', payload.sub);
-      requestHeaders.set('x-user-role', payload.role);
-      // Set or removed, never left as the client sent it.
-      if (payload.branchId) requestHeaders.set('x-user-branch-id', payload.branchId);
-      else requestHeaders.delete('x-user-branch-id');
-    } else {
-      requestHeaders.delete('x-user-id');
-      requestHeaders.delete('x-user-role');
-      requestHeaders.delete('x-user-branch-id');
-    }
-  } else {
-    requestHeaders.delete('x-user-id');
-    requestHeaders.delete('x-user-role');
-    requestHeaders.delete('x-user-branch-id');
-  }
+  // Routes read who is asking from the signed cookie themselves (lib/auth/
+  // identity.ts). These headers are no longer set; they are removed so nothing
+  // can ever mistake a client's copy for ours.
+  for (const k of ['x-user-id', 'x-user-role', 'x-user-branch-id']) requestHeaders.delete(k);
 
   if (
     pathname.startsWith('/api/me/') ||
@@ -68,8 +55,7 @@ export async function middleware(request: NextRequest) {
     if (isPublic(pathname)) {
       return NextResponse.next({ request: { headers: requestHeaders } });
     }
-    const userId = requestHeaders.get('x-user-id');
-    if (!userId) {
+    if (!payload) {
       return NextResponse.json(
         { ok: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } },
         { status: 401 },

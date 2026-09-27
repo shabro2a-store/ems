@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { overtimeForUser } from '@/lib/services/overtime';
 
@@ -14,8 +14,9 @@ function jsonError(code: string, message: string, status: number) {
 // ever shows pending days, so without this a decided day was unreachable and a
 // mis-clicked Revoke could only be undone with a direct database write.
 export async function GET(req: Request) {
-  const h = headers();
-  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
   const url = new URL(req.url);
   const userId = url.searchParams.get('userId');

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
@@ -25,9 +25,10 @@ function jsonError(code: string, message: string, status: number) {
  * it costs one code.
  */
 export async function POST(req: Request) {
-  const h = headers();
-  const userId = h.get('x-user-id');
-  const role = h.get('x-user-role');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const userId = me.userId;
+  const role = me.role;
   if (!userId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);

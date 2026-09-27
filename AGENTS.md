@@ -34,8 +34,10 @@ endpoint contract.
 
 ## API conventions
 - Every response is `{ ok: true, data }` or `{ ok: false, error: { code, message } }`.
-- Auth: middleware verifies the JWT and injects `x-user-id`/`x-user-role`; every
-  route re-checks the role. `me/*` is scoped to the caller's own id.
+- Auth: middleware turns away requests with no valid token; every route and app
+  layout then calls `identity()` (`lib/auth/identity.ts`) - the signed cookie, checked
+  against the user's session version - and re-checks the role. Never read `x-user-*`
+  headers; the middleware strips them. `me/*` is scoped to the caller's own id.
 - Mutations require a CSRF token; most POSTs require an `Idempotency-Key`.
 - Never return `password_hash` (or other secrets) to the client — select explicitly.
 - The admin account is protected: it can't be created via the app, promoted/demoted,

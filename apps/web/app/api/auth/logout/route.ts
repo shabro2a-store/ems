@@ -4,14 +4,10 @@ import { csrfFromRequest } from '@/lib/auth/csrf';
 import { clearAuthCookies } from '@/lib/auth/cookies';
 import { verifyToken } from '@/lib/auth/jwt';
 import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '@/lib/auth/constants';
+import { requestCookie } from '@/lib/auth/requestCookie';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
-}
-
-function cookieValue(req: Request, name: string): string | undefined {
-  const m = (req.headers.get('cookie') ?? '').match(new RegExp(`(?:^|;\s*)${name}=([^;]+)`));
-  return m?.[1];
 }
 
 /**
@@ -24,8 +20,8 @@ export async function POST(req: Request) {
   if (!csrfFromRequest(req)) {
     return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
   }
-  const access = cookieValue(req, ACCESS_COOKIE_NAME);
-  const refresh = cookieValue(req, REFRESH_COOKIE_NAME);
+  const access = requestCookie(req, ACCESS_COOKIE_NAME);
+  const refresh = requestCookie(req, REFRESH_COOKIE_NAME);
   const who =
     (access ? await verifyToken(access, 'access') : null) ?? (refresh ? await verifyToken(refresh, 'refresh') : null);
   if (who) {

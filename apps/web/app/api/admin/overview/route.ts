@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { todayInBeirut, todayInBeirutDateRange, beirutWeekday, scheduleRowOn, workingDayHistoryFrom } from 'time';
 import { pendingPenaltyNotices } from '@/lib/services/penalty';
@@ -56,8 +56,9 @@ function flagReason(kind: string, ctx: unknown): string {
 type Status = 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT';
 
 export async function GET(req: Request) {
-  const h = headers();
-  if (h.get('x-user-role') !== 'ADMIN') {
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'ADMIN') {
     return NextResponse.json({ ok: false, error: { code: 'FORBIDDEN', message: 'Admin only' } }, { status: 403 });
   }
 

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { inBeirut, previousBeirutDate, nextBeirutDate } from 'time';
 import { prisma } from '@/lib/db/prisma';
@@ -29,9 +29,10 @@ const REVIEW_EXPIRED_MESSAGE = 'The 48 hours for reviewing this day have passed.
  * of those has settled what the driver is paid.
  */
 export async function POST(req: Request) {
-  const h = headers();
-  const adminId = h.get('x-user-id');
-  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  const me = await identity();
+  if (!me) return unauthorized();
+  const adminId = me.userId;
+  if (me.role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 

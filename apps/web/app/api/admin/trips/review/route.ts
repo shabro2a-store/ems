@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { todayInBeirut, previousBeirutDate, nextBeirutDate } from 'time';
 import { prisma } from '@/lib/db/prisma';
 import { dayReviewState, reviewDeadline, tripLocked, loadReviewWindow, type ReviewTrip, type DayReviewState } from '@/lib/services/tripReview';
@@ -54,8 +54,9 @@ function driverRow(
  * days still waiting on him, so he can find them without paging.
  */
 export async function GET(req: Request) {
-  const h = headers();
-  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
   const url = new URL(req.url);
   const now = new Date();

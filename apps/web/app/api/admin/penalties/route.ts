@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { penaltiesForUser } from '@/lib/services/penalty';
 
@@ -12,8 +12,9 @@ function jsonError(code: string, message: string, status: number) {
 // Computed late / early-leave penalties for one employee in a month, each with
 // its waived flag — feeds the admin "remove penalty" UI on the payroll page.
 export async function GET(req: Request) {
-  const h = headers();
-  if (h.get('x-user-role') !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
+  const me = await identity();
+  if (!me) return unauthorized();
+  if (me.role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
 
   const url = new URL(req.url);
   const userId = url.searchParams.get('userId');

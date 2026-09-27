@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 
 export async function GET() {
-  const h = headers();
+  const me = await identity();
+  if (!me) return unauthorized();
   return NextResponse.json({
     ok: true,
     data: {
-      userId: h.get('x-user-id'),
-      role: h.get('x-user-role'),
-      branchId: h.get('x-user-branch-id'),
+      userId: me.userId,
+      role: me.role,
+      branchId: me.branchId,
     },
   });
 }

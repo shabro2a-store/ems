@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 
 interface PresentUser {
@@ -40,8 +40,9 @@ function startOfTodayBeirut(): Date {
 }
 
 export async function GET() {
-  const h = headers();
-  const role = h.get('x-user-role');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const role = me.role;
   if (role !== 'ADMIN') {
     return NextResponse.json(
       { ok: false, error: { code: 'FORBIDDEN', message: 'Admin only' } },

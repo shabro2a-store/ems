@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { CSRF_COOKIE_NAME } from './constants';
+import { requestCookie } from './requestCookie';
 
 export function generateCsrfToken(): string {
   return randomBytes(32).toString('base64');
@@ -20,9 +21,7 @@ export function validateCsrf(cookieValue: string | undefined, headerValue: strin
 }
 
 export function csrfFromRequest(req: Request): boolean {
-  const cookieHeader = req.headers.get('cookie') ?? '';
-  const cookieMatch = cookieHeader.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE_NAME}=([^;]+)`));
-  const rawCookie = cookieMatch?.[1];
+  const rawCookie = requestCookie(req, CSRF_COOKIE_NAME);
   const rawHeader = req.headers.get('x-csrf-token') ?? undefined;
   // Next.js serializes cookie values with encodeURIComponent, so the csrf cookie
   // is URL-encoded on the wire (e.g. base64 "+/=" become "%2B%2F%3D"). Clients

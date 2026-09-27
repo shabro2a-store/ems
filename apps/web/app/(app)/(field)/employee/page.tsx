@@ -1,14 +1,15 @@
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
+import { identity } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import EmployeeHomeClient from './EmployeeHomeClient';
 
 export const dynamic = 'force-dynamic';
 
 export default async function EmployeeHomePage() {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const userId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) redirect('/login');
+  const role = me.role;
+  const userId = me.userId;
   if (!role || !userId) redirect('/login');
   if (role === 'ADMIN') redirect('/admin');
 

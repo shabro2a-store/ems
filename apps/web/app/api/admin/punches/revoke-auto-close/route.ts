@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { inBeirut, workingDayHistoryFrom } from 'time';
 import { prisma } from '@/lib/db/prisma';
@@ -44,9 +44,10 @@ function jsonError(code: string, message: string, status: number) {
  * keep the employee locked out.
  */
 export async function POST(req: Request) {
-  const h = headers();
-  const role = h.get('x-user-role');
-  const adminId = h.get('x-user-id');
+  const me = await identity();
+  if (!me) return unauthorized();
+  const role = me.role;
+  const adminId = me.userId;
   if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
 
