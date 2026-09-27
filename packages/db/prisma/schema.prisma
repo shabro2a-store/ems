@@ -597,8 +597,11 @@ model AuditLog {
 model IdempotencyKey {
   key           String
   user_id       String
-  response_json Json
-  status_code   Int
+  // NULL / 0 while the request that claimed the key is still working.
+  response_json Json?
+  status_code   Int      @default(0)
+  // The route the key was used on; '' on rows from before routes were kept.
+  scope         String   @default("")
   created_at    DateTime @default(now())
   expires_at    DateTime
 

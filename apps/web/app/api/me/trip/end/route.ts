@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
 
-  const cached = await readIdempotentResponse({ userId, key: idemKey });
+  const cached = await readIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
 
   const result = await endTrip({ userId, lat: body.lat, lng: body.lng, accuracy: body.accuracy });
@@ -61,13 +61,13 @@ export async function POST(req: Request) {
     };
     const response = { ok: false, error: { code: mapped.code, message: friendly[result.code] ?? `Trip end rejected: ${result.code}` } };
     if (mapped.status >= 400 && mapped.status < 500) {
-      await storeIdempotentResponse({ userId, key: idemKey, status_code: mapped.status, response_json: response });
+      await storeIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname, status_code: mapped.status, response_json: response });
     }
     return NextResponse.json(response, { status: mapped.status });
   }
 
   const response = { ok: true, data: { trip_id: result.trip_id, back_at: result.back_at.toISOString(), duration_min: result.duration_min } };
-  await storeIdempotentResponse({ userId, key: idemKey, status_code: 200, response_json: response });
+  await storeIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname, status_code: 200, response_json: response });
   return NextResponse.json(response, { status: 200 });
 }
 

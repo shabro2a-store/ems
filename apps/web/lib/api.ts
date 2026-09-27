@@ -87,10 +87,40 @@ interface SendOpts {
   idemPrefix?: string;
 }
 
+// ---- sending the same thing twice ----
+//
+// The Idempotency-Key only protects anything if the same action carries the
+// same key. It used to be minted afresh on every call, so a double tap was two
+// keys and two writes - a $50 bonus became $100. Two rules now:
+//  - an identical send made while the first is still on its way is the first
+//    one: it waits for that answer instead of going out again;
+//  - a send whose outcome is unknown (the connection dropped - it may well have
+//    been done) keeps its key, so resending the same thing lets the server say
+//    "already done" rather than do it again. A clear answer, either way, frees
+//    the next identical send to be a new request.
+
+const inFlight = new Map<string, Promise<ApiResult<unknown>>>();
+const unsettledKeys = new Map<string, { key: string; at: number }>();
+const UNSETTLED_KEY_MS = 10 * 60_000;
+
 export async function apiSend<T = unknown>(url: string, opts: SendOpts = {}): Promise<ApiResult<T>> {
+  const fingerprint = `${opts.method ?? 'POST'} ${url} ${JSON.stringify(opts.body ?? null)}`;
+  const running = inFlight.get(fingerprint);
+  if (running) return running as Promise<ApiResult<T>>;
+  const sending = sendOnce<T>(url, opts, fingerprint).finally(() => inFlight.delete(fingerprint));
+  inFlight.set(fingerprint, sending);
+  return sending;
+}
+
+async function sendOnce<T>(url: string, opts: SendOpts, fingerprint: string): Promise<ApiResult<T>> {
   const { method = 'POST', body, idempotent = false, idemPrefix = 'web' } = opts;
   // One key for the request, repeats included: it is the same request.
-  const key = idempotent ? idemKey(idemPrefix) : null;
+  const earlier = unsettledKeys.get(fingerprint);
+  const key = idempotent
+    ? earlier && Date.now() - earlier.at < UNSETTLED_KEY_MS
+      ? earlier.key
+      : idemKey(idemPrefix)
+    : null;
   const send = () => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -106,8 +136,11 @@ export async function apiSend<T = unknown>(url: string, opts: SendOpts = {}): Pr
   };
   try {
     const res = await apiFetch(url, send);
-    return (await res.json()) as ApiResult<T>;
+    const result = (await res.json()) as ApiResult<T>;
+    unsettledKeys.delete(fingerprint);
+    return result;
   } catch {
+    if (key) unsettledKeys.set(fingerprint, { key, at: Date.now() });
     return { ok: false, error: { code: 'NETWORK', message: 'Network error — check your connection.' } };
   }
 }

@@ -95,3 +95,38 @@ describe('a request whose session has lapsed', () => {
     expect(location.href).toBe('/admin');
   });
 });
+
+describe('sending the same thing twice', () => {
+  it('goes out once when the second tap lands while the first is still on its way', async () => {
+    let release: (r: Response) => void = () => undefined;
+    serve(() => new Promise<Response>((r) => { release = r; }));
+    const a = apiSend('/api/admin/adjustments', { body: { userId: 'u', amountCent: 5000 }, idempotent: true });
+    const b = apiSend('/api/admin/adjustments', { body: { userId: 'u', amountCent: 5000 }, idempotent: true });
+    release(respond(200, { ok: true, data: { id: 'a1' } }));
+    expect(await a).toEqual(await b);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('retries with the same key when the first attempt\'s outcome is unknown', async () => {
+    let n = 0;
+    serve(() => {
+      n += 1;
+      if (n === 1) throw new TypeError('Failed to fetch');
+      return respond(200, { ok: true, data: {} });
+    });
+    const body = { body: { userId: 'u', amountCent: 5000 }, idempotent: true };
+    expect((await apiSend('/api/admin/adjustments', body)).ok).toBe(false);
+    await apiSend('/api/admin/adjustments', body);
+    const keys = calls.map((c) => (c.init?.headers as Record<string, string>)['Idempotency-Key']);
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it('uses a new key once the first attempt got a clear answer', async () => {
+    serve(() => respond(200, { ok: true, data: {} }));
+    const body = { body: { userId: 'u', amountCent: 5000 }, idempotent: true };
+    await apiSend('/api/admin/adjustments', body);
+    await apiSend('/api/admin/adjustments', body);
+    const keys = calls.map((c) => (c.init?.headers as Record<string, string>)['Idempotency-Key']);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+});

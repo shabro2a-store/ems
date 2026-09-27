@@ -32,7 +32,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     return jsonError('INVALID_INPUT', 'Invalid request body', 400);
   }
 
-  const cached = await readIdempotentResponse({ userId: adminId, key: idemKey });
+  const cached = await readIdempotentResponse({ userId: adminId, key: idemKey, scope: new URL(req.url).pathname });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
 
   const result = await decideLeave({ adminId, leaveId: ctx.params.id, decision: body.decision });
@@ -56,7 +56,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     ok: true,
     data: { id: okResult.id, status: okResult.status, overrides_created: okResult.overrides_created },
   };
-  await storeIdempotentResponse({ userId: adminId, key: idemKey, status_code: 200, response_json: response });
+  await storeIdempotentResponse({ userId: adminId, key: idemKey, scope: new URL(req.url).pathname, status_code: 200, response_json: response });
   return NextResponse.json(response, { status: 200 });
 }
 

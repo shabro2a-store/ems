@@ -101,7 +101,7 @@ export async function POST(req: Request) {
     if (existing) return jsonError('CALLER_EXISTS', 'This branch already has a caller', 409);
   }
 
-  const cached = await readIdempotentResponse({ userId: adminId, key: idemKey });
+  const cached = await readIdempotentResponse({ userId: adminId, key: idemKey, scope: new URL(req.url).pathname });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
 
   const passwordHash = await bcrypt.hash(body.password, 12);
@@ -156,7 +156,7 @@ export async function POST(req: Request) {
       temp_password: tempPassword,
     },
   };
-  await storeIdempotentResponse({ userId: adminId, key: idemKey, status_code: 200, response_json: response });
+  await storeIdempotentResponse({ userId: adminId, key: idemKey, scope: new URL(req.url).pathname, status_code: 200, response_json: response });
   return NextResponse.json(response, { status: 200 });
 }
 

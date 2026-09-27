@@ -99,7 +99,7 @@ export async function POST(req: Request) {
     return jsonError('MONTH_CLOSED', CLOSED_MONTH_MESSAGE, 409);
   }
 
-  const cached = await readIdempotentResponse({ userId: adminId, key: idemKey });
+  const cached = await readIdempotentResponse({ userId: adminId, key: idemKey, scope: new URL(req.url).pathname });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
 
   // The first of the month at UTC midnight, matching how monthRangeUtc selects
@@ -127,7 +127,7 @@ export async function POST(req: Request) {
   });
 
   const response = { ok: true, data: { adjustment } };
-  await storeIdempotentResponse({ userId: adminId, key: idemKey, status_code: 200, response_json: response });
+  await storeIdempotentResponse({ userId: adminId, key: idemKey, scope: new URL(req.url).pathname, status_code: 200, response_json: response });
   return NextResponse.json(response, { status: 200 });
 }
 

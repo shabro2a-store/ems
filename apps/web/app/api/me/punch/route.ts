@@ -105,7 +105,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const cached = await readIdempotentResponse({ userId, key: idemKey });
+  const cached = await readIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname });
   if (cached) {
     return NextResponse.json(cached.response_json, { status: cached.status_code });
   }
@@ -186,6 +186,7 @@ export async function POST(req: Request) {
   await storeIdempotentResponse({
     userId,
     key: idemKey,
+    scope: new URL(req.url).pathname,
     status_code: 200,
     response_json: response,
   });

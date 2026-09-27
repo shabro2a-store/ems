@@ -50,7 +50,7 @@ export async function POST(req: Request) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
 
-  const cached = await readIdempotentResponse({ userId, key: idemKey });
+  const cached = await readIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
 
   const rate = await consumeAdvanceRateLimit({ userId });
@@ -72,7 +72,7 @@ export async function POST(req: Request) {
   if (!result.ok) {
     if (result.code === 'EXCEEDS_ACCRUED_EARNINGS') {
       const response = { ok: false, error: { code: 'EXCEEDS_ACCRUED_EARNINGS', message: 'Advance exceeds accrued earnings this month.' } };
-      await storeIdempotentResponse({ userId, key: idemKey, status_code: 409, response_json: response });
+      await storeIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname, status_code: 409, response_json: response });
       return NextResponse.json(response, { status: 409 });
     }
     if (result.code === 'INVALID_INPUT') {
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
 
   const okResult = result as { ok: true; id: string; status: 'PENDING' };
   const response = { ok: true, data: { id: okResult.id, status: okResult.status } };
-  await storeIdempotentResponse({ userId, key: idemKey, status_code: 200, response_json: response });
+  await storeIdempotentResponse({ userId, key: idemKey, scope: new URL(req.url).pathname, status_code: 200, response_json: response });
   return NextResponse.json(response, { status: 200 });
 }
 

@@ -12,8 +12,12 @@ model and business rules.
   session gets `401 UNAUTHORIZED`. Each route additionally checks the role.
 - **CSRF**: every state-changing request must send the `csrf` cookie value in an
   `X-CSRF-Token` header (double-submit). Failure → `403 FORBIDDEN` "CSRF token mismatch".
-- **Idempotency**: POSTs marked *Idempotent* require an `Idempotency-Key` header;
-  a replay within 24h returns the original response.
+- **Idempotency**: POSTs marked *Idempotent* require an `Idempotency-Key` header.
+  The key is claimed before any work is done, so of several requests carrying it
+  exactly one goes ahead; one arriving while that one is still working gets
+  `409 IN_PROGRESS`, and one arriving after it gets the original response (for 24h).
+  A key already used on a different route gets `409 KEY_REUSED`. A claim whose
+  request died without answering can be taken over after 60 s.
 - **Rate limits**: punch, trip-start, advance — 5/min each; login — 10 per account per 15 min,
   and 30/min per Cloudflare-verified address → `429 RATE_LIMITED`
   (with `Retry-After` except login).

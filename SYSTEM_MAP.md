@@ -39,7 +39,12 @@ check `/api/health`'s `uptime_s` if in doubt.
   without a valid session → `401`. Each route re-checks the role.
 - **CSRF**: every state-changing route validates `X-CSRF-Token` vs the `csrf` cookie
   (double-submit; both sides URL-decoded — the encoding bug is fixed).
-- **Idempotency**: mutating POSTs require an `Idempotency-Key` (24h dedupe).
+- **Idempotency**: mutating POSTs require an `Idempotency-Key` (24h dedupe). The key is
+  claimed first (`INSERT ... ON CONFLICT DO NOTHING`, scoped to the route path), so only one
+  request with it does the work; the rest get the stored answer or `409 IN_PROGRESS`. A
+  claim left behind by a crashed request can be taken over after a 60 s lease. The client
+  (`lib/api.ts`) sends one request for identical sends in flight, and re-sends with the
+  same key after a network failure whose outcome is unknown.
 - **Rate limits**: punch, trip-start, advance — 5/min; login — 10 per account per 15 min plus
   30/min per `CF-Connecting-IP` (the only address a client cannot forge), counted in one
   atomic statement (`consumeRateLimit`) → `429`. Unknown usernames cost the same bcrypt as a
@@ -140,7 +145,8 @@ cuid PKs, money = Int cents.
   dismissing one made `watchedDetector`'s dedup miss so the cron recreated it a minute later.
   `context_json` carries the detail the dashboard renders as the flag's reason.
 - **AuditLog** — append-only (DB revokes UPDATE/DELETE). actor/action/entity/before/after.
-- **IdempotencyKey** — (key,user)→cached response, 24h TTL. **RateLimitBucket** — token bucket store.
+- **IdempotencyKey** — (key,user)→scope + cached response (`status_code` 0 = claimed,
+  still working), 24h TTL. **RateLimitBucket** — token bucket store.
 
 ---
 
