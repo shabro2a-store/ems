@@ -117,8 +117,8 @@ attempt is paid time, and it is only sound evidence because the geofence ran fir
 ### GET /api/me/today
 → `200 { in_at, minutes_since_in, minutes_today, hours_month, open_session_stale }` — the field screens'
 live counters. Hours only, no money: a shared shop floor with per-employee rates
-made a live earnings ticker a source of friction. The caller's own payslip
-(`GET /api/me/payroll`) still carries the real money figures.
+made a live earnings ticker a source of friction. Nothing a field worker is sent carries
+their earnings (see `GET /api/me/payroll`).
 - `minutes_since_in` is the **open session** alone, `null` when checked out — the
   driver's "On shift" tile.
 - `minutes_today` is the whole **current shift-day** (`currentShiftDayMinutes`): every
@@ -134,12 +134,15 @@ made a live earnings ticker a source of friction. The caller's own payslip
   watch the button vanish mid-shift.
 
 ### GET /api/me/payroll?month=YYYY-MM
-→ `200 { hours, gross_cent, blocked_credit_cent, blocked_credit_min, adjustments_cent,
-advances_cent, penalties_cent, overtime_deduction_cent, net_cent }`. Every subtracted line is
-listed separately, so `gross + adjustments − advances − penalties − overtime_deduction === net`.
-`blocked_credit_cent` is **inside** `gross_cent` and inside `hours`, never added to either: it
-is the accepted blocked-time credit, and without the line the payslip credits hours the
-employee knows they did not clock.
+The field worker's month (the **Month** tab). The owner ruled that staff track their hours,
+advances, penalties and bonuses, not what they earned - so this sends **no** gross, trip pay,
+take-home or rate; they are not merely hidden on screen.
+→ `200 { month, hours, blocked_credit_min, trips_count, trips_denied, adjustments[] { id, kind,
+amount_cent, reason, created_at }, adjustments_cent, penalties[] { date, shortfall_min,
+amount_cent }, penalties_cent, overtime_deduction_cent, advances_cent }`. `blocked_credit_min`
+is **inside** `hours` (accepted blocked-time credit). `penalties[]` lists each day docked;
+waived days are left out. The full payslip, with gross and net, is the owner's
+(`GET /api/admin/payroll`, the PDF).
 
 ### GET /api/me/advances  ·  GET /api/me/advances?view=list
 Summary `{ pending, approved_this_month_cent }` - the approved advances that come out of this

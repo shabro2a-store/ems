@@ -140,7 +140,13 @@ describe('revoked overtime on the payroll surfaces (HTTP)', () => {
     expect(body.data.totals.overtime_deduction_cent).toBe(OVERTIME_CENT);
   });
 
-  it('shows the employee why their take-home dropped', async () => {
+  /*
+   * The owner's call (2026-09-27): staff track their hours, advances, penalties
+   * and bonuses - not how much money they made. The deduction is shown; gross,
+   * trip pay and take-home are not sent at all, so they cannot be read from the
+   * app's own traffic either.
+   */
+  it('shows the employee the deduction, but not what they earned', async () => {
     const { emp, admin } = await setup();
     const aSession = await loginAs(admin.username, 'test-pass-1');
     expect((await decide(aSession, emp.id, DAY, 'REVOKED')).status).toBe(200);
@@ -150,17 +156,14 @@ describe('revoked overtime on the payroll surfaces (HTTP)', () => {
       headers: { Cookie: eSession.cookies, 'X-CSRF-Token': eSession.csrf },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; data: PayrollRow };
+    const body = (await res.json()) as { ok: boolean; data: PayrollRow & { hours: number } };
     expect(body.ok).toBe(true);
     expect(body.data.overtime_deduction_cent).toBe(OVERTIME_CENT);
-    expect(body.data.net_cent).toBe(GROSS_CENT - OVERTIME_CENT);
-    expect(
-      body.data.gross_cent +
-        body.data.adjustments_cent -
-        body.data.advances_cent -
-        body.data.penalties_cent -
-        body.data.overtime_deduction_cent,
-    ).toBe(body.data.net_cent);
+    expect(body.data.hours).toBeGreaterThan(0);
+    expect(Array.isArray((body.data as unknown as { penalties: unknown[] }).penalties)).toBe(true);
+    for (const hidden of ['gross_cent', 'net_cent', 'trips_cent', 'blocked_credit_cent', 'rate_cent']) {
+      expect(body.data).not.toHaveProperty(hidden);
+    }
   });
 
   it('lists a decided day so it can still be found after it leaves the queue', async () => {

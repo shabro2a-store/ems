@@ -170,7 +170,7 @@ Full request/response detail is in [API.md](API.md). Summary:
 **Health (public)**: `GET /api/health`, `GET /api/health/db`.
 
 **Employee/self `/api/me/*`** (any role): `GET ping` · `POST punch` (geofenced) ·
-`POST punch/dev` (dev-only) · `GET today` (real earnings) · `GET payroll?month` ·
+`POST punch/dev` (dev-only) · `GET today` (hours) · `GET payroll?month` (hours, penalties, bonuses, advances - no earnings) ·
 `GET/POST advances` · `GET/POST leave` · `POST trip/start|end`, `GET trip/current` (DRIVER) ·
 `GET calls` / `POST calls/ack` (driver ring poll + dismiss) · `GET push/key` /
 `POST push/subscribe` (Web Push setup) · `POST password` (ADMIN-only).
@@ -526,8 +526,9 @@ an "Open in app" deep link) — all actions happen in the web app.
   the owner to eyeball against actual pay), inline adjustments, per-employee penalties with
   **Remove/Restore**, branch-aware PDF).
 - **Employee** (phone): `/employee` (punch + hours today/this month, greets by name) ·
-  `/employee/advances` · `/employee/leave` · `/employee/payroll` (real earnings live here, not
-  on the home screen).
+  `/employee/advances` · `/employee/leave` · `/employee/payroll` (the **Month** tab: hours,
+  deliveries, bonuses/deductions with reasons, penalties by day, advances - never earnings;
+  the owner ruled staff do not see what they made, and the API does not send it).
 - **Driver** (phone): `/driver` — **clock in/out** (attendance punch) **and** trip out/back
   off one GPS check (must clock in before going out on an order), shift/hours tiles, greets
   by name, + the same advances/leave/pay tabs. Shows a full-screen flashing **alarm** (sound +
@@ -569,8 +570,9 @@ The bugs found in the initial audit are fixed:
 - Correct-punch now **persists** (sets corrected/corrected_by/correction_reason).
 - `/api/me/today` returned **real earnings** (today + month + advances + net); since superseded —
   a live per-rate earnings ticker on a shared shop floor caused friction between staff, so the
-  field screens now show **hours only** (today + this month). Real earnings still live on the
-  employee's own payslip, `/api/me/payroll`. The "Today" tile is the whole shift-day
+  field screens now show **hours only** (today + this month). Since 2026-09-27 no field
+  screen shows earnings at all: `/api/me/payroll` sends hours, penalties, bonuses and
+  advances only. The "Today" tile is the whole shift-day
   (`minutes_today`), not the open session — it used to render `minutes_since_in`, so punching
   out and back in restarted it from zero and the earlier session disappeared. The driver keeps
   a separate "On shift" tile for the current session, which is what that label means.

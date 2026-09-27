@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { payoutForUser } from '@/lib/services/payout';
+import { penaltiesForUser } from '@/lib/services/penalty';
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
 
@@ -31,11 +32,21 @@ export async function GET(req: Request) {
     select: { id: true, kind: true, amount_cent: true, reason: true, created_at: true },
   });
 
-  const result = await payoutForUser(userId, month, prisma);
+  const [result, penalties] = await Promise.all([payoutForUser(userId, month, prisma), penaltiesForUser(userId, month, prisma)]);
+  // The owner's ruling: staff track their hours, advances, penalties and
+  // bonuses - not what they earned. So no gross, no trip pay, no take-home and
+  // no rate, and not merely hidden on screen: never sent, so the app's own
+  // traffic does not carry them either. What they are docked or given stays.
   return NextResponse.json({
     ok: true,
     data: {
+      month,
       hours: result.hours,
+      // Inside `hours`: time the app refused a check-in for, which the owner
+      // accepted. Minutes, not money.
+      blocked_credit_min: result.blockedCreditMin,
+      trips_count: result.tripsCount,
+      trips_denied: result.tripsDenied,
       adjustments: adjustments.map((a) => ({
         id: a.id,
         kind: a.kind,
@@ -43,23 +54,16 @@ export async function GET(req: Request) {
         reason: a.reason,
         created_at: a.created_at.toISOString(),
       })),
-      gross_cent: result.grossCent,
-      // Part of gross_cent and of hours, so it needs a line of its own too -
-      // otherwise the payslip credits them for hours they know they did not
-      // clock, with nothing accounting for it.
-      blocked_credit_cent: result.blockedCreditCent,
-      blocked_credit_min: result.blockedCreditMin,
       adjustments_cent: result.adjustmentsCent,
-      advances_cent: result.advancesCent,
+      // Each day docked, so the total can be traced to the days behind it. A
+      // waived day is left out: nothing is taken for it.
+      penalties: penalties
+        .filter((p) => !p.waived && p.amount_cent > 0)
+        .map((p) => ({ date: p.date, shortfall_min: p.shortfallMin, amount_cent: p.amount_cent })),
       penalties_cent: result.penaltiesCent,
-      // Part of net_cent, so it needs a line of its own - otherwise take-home
-      // drops with nothing on the payslip accounting for it.
+      // Overtime the owner did not approve, taken back.
       overtime_deduction_cent: result.overtimeDeductionCent,
-      // A driver's second earnings line; zero for everybody else.
-      trips_count: result.tripsCount,
-      trips_cent: result.tripsCent,
-      trips_denied: result.tripsDenied,
-      net_cent: result.netCent,
+      advances_cent: result.advancesCent,
     },
   });
 }
