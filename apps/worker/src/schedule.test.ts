@@ -20,7 +20,7 @@ function registered() {
 describe('the worker schedule', () => {
   it('reads every cron line on the shop clock', () => {
     const jobs = registered();
-    expect(jobs.length).toBe(10);
+    expect(jobs.length).toBe(11);
     for (const j of jobs) expect(j.timezone, j.expression).toBe('Asia/Beirut');
   });
 

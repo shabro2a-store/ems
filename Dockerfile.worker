@@ -23,7 +23,10 @@ COPY apps ./apps
 ENV NODE_ENV=production
 RUN addgroup -S -g 1001 nodejs && adduser -S -u 1001 -G nodejs worker
 USER worker
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "process.exit(0)"
+# Healthy while the worker keeps writing its heartbeat (apps/worker/src/heartbeat.ts:
+# a real query every 30 s, then the time). Stale for 2 minutes - hung, or unable
+# to reach the database - is unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD node -e "const t=Date.parse(require('fs').readFileSync('/tmp/ems-worker-heartbeat','utf8'));process.exit(Date.now()-t<=120000?0:1)"
 WORKDIR /app/apps/worker
 CMD ["/app/node_modules/.bin/tsx", "src/index.ts"]

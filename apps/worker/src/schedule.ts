@@ -10,6 +10,8 @@ import { runEndOfDayWatcher } from './jobs/endOfDayWatcher';
 import { runDailySummary } from './jobs/dailySummary';
 import { runRingRepeater } from './jobs/ringRepeater';
 import { runWipeReceipts } from './jobs/wipeReceipts';
+import { beat } from './heartbeat';
+import { prisma } from './db/prisma';
 
 /** The part of node-cron this file uses, so the table can be read without starting it. */
 export interface CronLike {
@@ -55,6 +57,9 @@ export function registerJobs(cron: CronLike, notifier: Notifier): void {
   // reminder. The query is one indexed read over a table that is empty except in
   // the forty-five seconds after somebody is called.
   at('*/5 * * * * *', 'ringRepeater', () => runRingRepeater());
+  // What the container healthcheck reads: a real query, then the time. Without
+  // it the check was `process.exit(0)` and passed whatever the worker was doing.
+  at('*/30 * * * * *', 'heartbeat', () => beat(prisma));
   // Hourly, not once at a fixed clock time. The job judges the last working day
   // that has fully ended, and a working day ends where the person's own rest
   // says it does, not at an hour anybody could line a clock up against. Running

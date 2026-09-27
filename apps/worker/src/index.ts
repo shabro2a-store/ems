@@ -8,6 +8,7 @@ registerJobs(cron, getNotifier());
 
 console.log('cron schedule registered (Asia/Beirut):');
 console.log('  */5s    ringRepeater');
+console.log('  */30s   heartbeat (healthcheck)');
 console.log('  10 *    watchedDetector');
 console.log('  */1     missedCheckout, tripThreshold');
 console.log('  */10    autoCloseAbandoned, autoCloseAbandonedTrips');
