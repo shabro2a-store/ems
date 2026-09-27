@@ -10,14 +10,10 @@ export async function GET() {
   try {
     await prisma.$queryRaw`SELECT 1`;
   } catch (e) {
+    // Public route: what Postgres said (users, hosts, ports) goes to the log only.
+    console.error('[health/db] database unreachable', e);
     return NextResponse.json(
-      {
-        ok: false,
-        error: {
-          code: 'DB_UNREACHABLE',
-          message: e instanceof Error ? e.message : 'Database unreachable',
-        },
-      },
+      { ok: false, error: { code: 'DB_UNREACHABLE', message: 'Database unreachable' } },
       { status: 503 },
     );
   }

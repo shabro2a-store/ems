@@ -108,7 +108,8 @@ session, and its message says to clock out first. It **records a
 happens **after** the geofence check.
 
 ### POST /api/me/punch/dev  *(CSRF; dev only)*
-Enabled only when `ENABLE_DEV_ENDPOINTS=true`, else `404`. Body `{ kind }`. Skips
+Enabled only in a development build (`next dev`) with `ENABLE_DEV_ENDPOINTS=true`, else `404` - a
+production build never serves it, whatever the flag says. Body `{ kind }`. Skips
 GPS/geofence (uses the branch centre) for testing on devices without GPS. Its
 `ALREADY_PUNCHED_IN` deliberately records **no** `BlockedPunchAttempt`: a blocked
 attempt is paid time, and it is only sound evidence because the geofence ran first.

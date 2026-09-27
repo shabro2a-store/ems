@@ -17,9 +17,10 @@ function jsonError(code: string, message: string, status: number) {
 }
 
 export async function POST(req: Request) {
-  // Gate behind an explicit env var. Available in dev OR when explicitly enabled in prod.
-  // Production deployments should set ENABLE_DEV_ENDPOINTS=false (or omit it).
-  if (process.env.ENABLE_DEV_ENDPOINTS !== 'true') {
+  // A development build only, and only when asked for. The flag alone was the
+  // whole guard, and it is one line in the same .env as everything else: set
+  // by mistake on the server, anyone could clock in from anywhere.
+  if (process.env.NODE_ENV === 'production' || process.env.ENABLE_DEV_ENDPOINTS !== 'true') {
     return jsonError('NOT_FOUND', 'Endpoint not available', 404);
   }
 
