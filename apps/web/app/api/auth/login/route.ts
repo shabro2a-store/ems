@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/db/prisma';
 import { verifyPassword } from '@/lib/auth/password';
 import { trustedClientIp } from '@/lib/auth/cookies';
@@ -10,12 +11,17 @@ import {
   LOGIN_ATTEMPTS_PER_ADDRESS,
   LOGIN_ADDRESS_WINDOW_MS,
   SEED_DEFAULT_PASSWORD,
+  PASSWORD_MIN_LENGTH,
+  BCRYPT_ROUNDS,
 } from '@/lib/auth/constants';
 import { consumeRateLimit } from '@/lib/services/rateLimit';
+import { writeAuditLog } from '@/lib/services/audit';
 
 const LoginBody = z.object({
   username: z.string().min(1).max(64),
   password: z.string().min(1).max(256),
+  // Only with the seed password, which works for nothing else (see below).
+  newPassword: z.string().max(256).optional(),
 });
 
 // A real bcrypt hash (cost 12) of a random string nobody knows. Checked when
@@ -70,15 +76,34 @@ export async function POST(req: Request) {
   });
   // A retired account's hash is a placeholder bcrypt cannot parse, so anyone
   // who cannot sign in is checked against the dummy instead.
-  const live = user && user.is_active ? user : null;
+  let live = user && user.is_active ? user : null;
   const ok = await verifyPassword(body.password, live?.password_hash ?? NO_SUCH_USER_HASH);
   if (!live || !ok) {
     return jsonError('UNAUTHORIZED', 'Invalid credentials', 401);
   }
 
-  await issueSession(prisma, live);
+  // The seed's admin password is published - it is in the repo and the docs -
+  // so it never opens a session: it only lets the owner choose a new one.
+  // Staff are left alone; the owner sets their passwords, change-me included.
+  if (live.role === 'ADMIN' && body.password === SEED_DEFAULT_PASSWORD) {
+    if (!body.newPassword) {
+      return jsonError('PASSWORD_CHANGE_REQUIRED', 'Choose a new password to finish signing in.', 403);
+    }
+    if (body.newPassword.length < PASSWORD_MIN_LENGTH || body.newPassword === SEED_DEFAULT_PASSWORD) {
+      return jsonError(
+        'INVALID_INPUT',
+        `The new password must be at least ${PASSWORD_MIN_LENGTH} characters, and not ${SEED_DEFAULT_PASSWORD}.`,
+        400,
+      );
+    }
+    live = await prisma.user.update({
+      where: { id: live.id },
+      data: { password_hash: await bcrypt.hash(body.newPassword, BCRYPT_ROUNDS), session_version: { increment: 1 } },
+    });
+    await writeAuditLog({ actorId: live.id, action: 'user.change_password', entity: 'User', entityId: live.id });
+  }
 
-  const mustChangePassword = body.password === SEED_DEFAULT_PASSWORD;
+  await issueSession(prisma, live);
 
   return NextResponse.json({
     ok: true,
@@ -89,7 +114,6 @@ export async function POST(req: Request) {
         role: live.role,
         branchId: live.branch_id ?? null,
       },
-      mustChangePassword,
     },
   });
 }

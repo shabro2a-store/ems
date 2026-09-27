@@ -149,15 +149,11 @@ export async function POST(req: Request) {
     after: { username: user.username, role: user.role, branch_id: user.branch_id, hourly_rate_cent: user.hourly_rate_cent },
   });
 
-  const tempPassword = body.password;
+  // The password is not sent back: the owner typed it, and this answer is kept
+  // as the Idempotency-Key replay - it used to sit there, and in every backup,
+  // in plain text.
   const { password_hash: _pwh, ...safeUser } = user;
-  const response = {
-    ok: true,
-    data: {
-      user: safeUser,
-      temp_password: tempPassword,
-    },
-  };
+  const response = { ok: true, data: { user: safeUser } };
   await storeIdempotentResponse({ userId: adminId, key: idemKey, scope: new URL(req.url).pathname, status_code: 200, response_json: response });
   return NextResponse.json(response, { status: 200 });
 }

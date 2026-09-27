@@ -35,9 +35,11 @@ Common error codes: `UNAUTHORIZED` 401, `FORBIDDEN` 403, `INVALID_INPUT` 400,
 Body `{ username, password }`. Limited per account (10 per 15 min, whatever address each
 attempt claims) and per `CF-Connecting-IP` (30/min); `X-Forwarded-For` is never trusted for
 this. An unknown username takes as long as a wrong password.
-→ `200 { user: { id, username, role, branchId }, mustChangePassword }` and sets the
+→ `200 { user: { id, username, role, branchId } }` and sets the
 `ems_access`, `ems_refresh`, `csrf` cookies. Errors: `INVALID_INPUT`, `RATE_LIMITED`,
-`UNAUTHORIZED` (unknown/inactive user or wrong password).
+`UNAUTHORIZED` (unknown/inactive user or wrong password). The seed's admin password
+`change-me` opens no session: an ADMIN signing in with it gets `403 PASSWORD_CHANGE_REQUIRED`
+until the same request carries `newPassword` (≥ 8 chars, not `change-me`), which replaces it.
 
 ### POST /api/auth/logout
 CSRF. Signs the person out **everywhere**: their `session_version` moves on, so every
@@ -261,7 +263,8 @@ chars). Ends every other session of the admin's; this one is re-issued.
 - **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`).
 - **POST /api/admin/users** *(CSRF, Idempotent)* `{ username, name?, password, role:
   "EMPLOYEE"|"DRIVER"|"CALLER", branchId, hourlyRateCent, canRoamBranches? }` →
-  `{ user, temp_password }` (`password` ≥ 8 chars). `canRoamBranches` defaults to **false**: a new account is
+  `{ user }` (`password` ≥ 8 chars; not sent back - the owner typed it, and the answer is
+  kept as the Idempotency-Key replay). `canRoamBranches` defaults to **false**: a new account is
   single-branch until the owner grants otherwise.
   `username` is the login; `name` is the display name. Creating an **ADMIN is
   rejected (403)**. **CALLER** needs a branch, gets no pay rate/RateChange, and is capped at
@@ -294,7 +297,9 @@ chars). Ends every other session of the admin's; this one is re-issued.
   Deleting the ADMIN account, or your own, is rejected 403. `GET /api/admin/users` excludes
   retired accounts entirely. The audit row outlives the person either way.
 - **POST /api/admin/users/[id]/reset-password** *(CSRF)* optional `{ password }` —
-  sets that password, or generates a random one. → `{ temp_password }`.
+  sets that password, or generates a random one. → `{ temp_password }` (never kept).
+  `400 OWN_PASSWORD` on the caller's own account: that goes through `POST /api/me/password`,
+  which asks for the current password.
 - **POST /api/admin/users/[id]/deactivate** *(CSRF)* toggles active. Deactivating an
   **admin is rejected (403)**.
 - **PATCH /api/admin/users/[id]/notification-prefs** *(CSRF)* `{ dailySummary?, routinePings? }`.

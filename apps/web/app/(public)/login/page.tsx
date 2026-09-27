@@ -12,6 +12,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the server refuses the seed password until a new one is chosen.
+  const [needNew, setNeedNew] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   // The button is disabled in the HTML and enabled only once React is running.
   // A browser that cannot run the page's script - JavaScript off, or a Chrome
   // too old for the bundle - used to submit the form natively and land back
@@ -23,13 +27,18 @@ export default function LoginPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (needNew && newPassword !== confirm) {
+      setError('The new passwords do not match.');
+      return;
+    }
     setLoading(true);
     const res = await apiSend<{ user?: { role: string } }>('/api/auth/login', {
-      body: { username, password },
+      body: needNew ? { username, password, newPassword } : { username, password },
     });
     setLoading(false);
     if (!res.ok) {
-      setError(errorMessage(res));
+      if (res.error.code === 'PASSWORD_CHANGE_REQUIRED') setNeedNew(true);
+      else setError(errorMessage(res));
       return;
     }
     const role = res.data.user?.role;
@@ -70,9 +79,37 @@ export default function LoginPage() {
               required
             />
           </Field>
+          {needNew && (
+            <>
+              <Alert tone="warning">
+                This is the starting password everyone can look up. Choose a new one to finish signing in.
+              </Alert>
+              <Field label="New password" htmlFor="new-password">
+                <Input
+                  id="new-password"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                />
+              </Field>
+              <Field label="Confirm new password" htmlFor="confirm-password">
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  autoComplete="new-password"
+                  required
+                />
+              </Field>
+            </>
+          )}
           {error && <Alert tone="danger">{error}</Alert>}
           <Button type="submit" size="lg" fullWidth loading={loading} disabled={!ready}>
-            {loading ? 'Signing in…' : ready ? 'Sign in' : 'Loading…'}
+            {loading ? 'Signing in…' : !ready ? 'Loading…' : needNew ? 'Save and sign in' : 'Sign in'}
           </Button>
           {!ready && (
             <p className="text-center text-xs text-muted">

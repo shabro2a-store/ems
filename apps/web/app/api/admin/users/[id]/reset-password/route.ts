@@ -26,6 +26,12 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
 
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
+  // This route needs no current password, so on the owner's own account it
+  // would hand the admin login to anyone at an unlocked admin tab. Their own
+  // goes through the Password dialog, which asks for the current one.
+  if (ctx.params.id === adminId) {
+    return jsonError('OWN_PASSWORD', 'Change your own password with the Password button at the top of the page.', 400);
+  }
 
   const user = await prisma.user.findUnique({ where: { id: ctx.params.id } });
   if (!user) return jsonError('NOT_FOUND', 'User not found', 404);

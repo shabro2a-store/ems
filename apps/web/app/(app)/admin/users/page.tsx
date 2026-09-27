@@ -401,7 +401,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setErr(null);
-    const res = await apiSend<{ temp_password: string }>('/api/admin/users', {
+    const res = await apiSend('/api/admin/users', {
       idempotent: true, idemPrefix: 'user-create',
       body: {
         username, name, password, role,
@@ -412,7 +412,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
     });
     setBusy(false);
     if (!res.ok) { setErr(errorMessage(res)); return; }
-    onCreated(username, res.data.temp_password);
+    onCreated(username, password);
   }
 
   return (
@@ -715,7 +715,9 @@ function ManageModal({
 }) {
   const paid = PAID_ROLES.has(user.role);
   const items: Array<{ label: string; hint: string; danger?: boolean; onClick: () => void }> = [
-    { label: 'Set password', hint: 'Give them a new temporary password to sign in with.', onClick: onPassword },
+    user.role === 'ADMIN'
+      ? { label: 'Change password', hint: 'Use the Password button at the top of the page - it asks for your current password first.', onClick: onClose }
+      : { label: 'Set password', hint: 'Give them a new temporary password to sign in with.', onClick: onPassword },
     ...(paid
       ? [
           {

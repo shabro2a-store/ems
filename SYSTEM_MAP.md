@@ -54,7 +54,8 @@ check `/api/health`'s `uptime_s` if in doubt.
 - **Identity**: `username` = login handle (unique); `name` = display name shown in the
   app (greetings, admin bar, lists). **Only the admin manages passwords** — the admin
   changes their own (`POST /api/me/password`, ADMIN-only) and sets/resets every other
-  user's (`POST /api/admin/users/[id]/reset-password`). Employees/drivers/callers have no
+  user's (`POST /api/admin/users/[id]/reset-password` - refused on the admin's own account,
+  which needs the current password). Employees/drivers/callers have no
   self-service password change.
 - **Admin protection**: the admin account cannot be created via the app, promoted/demoted,
   or deactivated (fail-closed with 403). `password_hash` is never returned to the client.
@@ -67,7 +68,8 @@ check `/api/health`'s `uptime_s` if in doubt.
   middleware to `/api/auth/resume`, which renews and redirects back to the same page — so
   somebody signed in within the week is never shown the login form. There is no longer a
   12h driver session re-issued at the punch; renewal covers a shift of any length.
-  `mustChangePassword` is returned when the password equals the seed default `change-me`.
+  The seed's admin password `change-me` (published in the repo) opens no session: the login
+  form asks the owner for a new one and the same request saves it. Staff are not forced.
 
 ---
 
