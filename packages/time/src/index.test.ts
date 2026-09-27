@@ -39,6 +39,10 @@ describe('time package placeholder', () => {
 });
 
 describe('todayInBeirutDateRange', () => {
+  it('starts a winter day at 22:00 UTC, not 21:00 - Beirut is UTC+2 then', () => {
+    expect(todayInBeirutDateRange('2026-12-15').startUtc.toISOString()).toBe('2026-12-14T22:00:00.000Z');
+  });
+
   it('covers a plain 24-hour day', () => {
     const { startUtc, endUtc } = todayInBeirutDateRange('2026-08-23');
     expect(local(startUtc)).toBe('2026-08-23 00:00');

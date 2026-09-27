@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
+import { todayInBeirut, todayInBeirutDateRange } from 'time';
 
 interface PresentUser {
   id: string;
@@ -32,11 +33,10 @@ interface FlagOut {
   notified_at: string | null;
 }
 
+// Beirut is UTC+2 in winter: a fixed +3 put "today" an hour early from the
+// last Sunday of October to the last Sunday of March.
 function startOfTodayBeirut(): Date {
-  const offsetMs = 3 * 60 * 60_000;
-  const nowBeirut = new Date(Date.now() + offsetMs);
-  const startOfDay = new Date(Date.UTC(nowBeirut.getUTCFullYear(), nowBeirut.getUTCMonth(), nowBeirut.getUTCDate(), 0, 0, 0, 0));
-  return new Date(startOfDay.getTime() - offsetMs);
+  return todayInBeirutDateRange(todayInBeirut()).startUtc;
 }
 
 export async function GET() {
