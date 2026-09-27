@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { apiGet, apiSend, apiSendForm, errorMessage, formatBeirutTime } from '@/lib/api';
+import { fixIsFresh, STALE_FIX_MESSAGE, type GpsFix } from '@/lib/gpsFix';
 import { Card, CardBody, StatTile, Alert } from '@/components/ui';
 import EnableAlerts from '@/components/field/EnableAlerts';
 import ReceiptCamera from '@/components/field/ReceiptCamera';
@@ -24,7 +25,7 @@ interface TripInfo { open: boolean; since_min?: number; threshold_min: number; s
 type Status =
   | { kind: 'idle' }
   | { kind: 'locating' }
-  | { kind: 'ready'; lat: number; lng: number; accuracy: number }
+  | ({ kind: 'ready' } & GpsFix)
   | { kind: 'error'; message: string };
 
 function deviceFp(): string {
@@ -91,7 +92,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
           setStatus({ kind: 'error', message: `GPS is weak (±${Math.round(accuracy)}m). Move to open sky and try again.` });
           return;
         }
-        setStatus({ kind: 'ready', lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy });
+        setStatus({ kind: 'ready', lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy, at: Date.now() });
       },
       (err) => setStatus({ kind: 'error', message: err.message || 'Could not get your location.' }),
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
@@ -100,6 +101,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
 
   const punch = useCallback(async (kind: 'IN' | 'OUT') => {
     if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
+    if (!fixIsFresh(status)) { setStatus({ kind: 'idle' }); setBanner({ tone: 'danger', text: STALE_FIX_MESSAGE }); return; }
     setBusy(true); setBanner(null);
     const r = await apiSend('/api/me/punch', {
       idempotent: true, idemPrefix: 'punch',
@@ -108,6 +110,8 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     setBusy(false);
     if (r.ok) {
       const d = r.data as { notice?: string };
+      // One fix, one action: the next needs the phone's position then, not now.
+      setStatus({ kind: 'idle' });
       setBanner({
         tone: 'success',
         text: d.notice ?? (kind === 'IN' ? 'Clocked in. Have a good shift!' : 'Clocked out. See you next time!'),
@@ -122,6 +126,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
   // runs with what it captured.
   const tripStart = useCallback(async (photo: Blob) => {
     if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
+    if (!fixIsFresh(status)) { setStatus({ kind: 'idle' }); setBanner({ tone: 'danger', text: STALE_FIX_MESSAGE }); return; }
     setBusy(true); setBanner(null);
     const form = new FormData();
     form.set('lat', String(status.lat));
@@ -132,12 +137,15 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     setBusy(false);
     if (r.ok) {
       setBanner({ tone: 'success', text: 'Out on an order. Drive safe!' });
+      // One fix, one action: the next needs the phone's position then, not now.
+      setStatus({ kind: 'idle' });
       await refresh();
     } else setBanner({ tone: 'danger', text: errorMessage(r) });
   }, [status, refresh]);
 
   const tripEnd = useCallback(async () => {
     if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
+    if (!fixIsFresh(status)) { setStatus({ kind: 'idle' }); setBanner({ tone: 'danger', text: STALE_FIX_MESSAGE }); return; }
     setBusy(true); setBanner(null);
     const r = await apiSend<{ duration_min?: number }>('/api/me/trip/end', {
       idempotent: true, idemPrefix: 'trip',
@@ -146,6 +154,8 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     setBusy(false);
     if (r.ok) {
       setBanner({ tone: 'success', text: `Back! Trip lasted ${dur(r.data.duration_min ?? 0)}.` });
+      // One fix, one action: the next needs the phone's position then, not now.
+      setStatus({ kind: 'idle' });
       await refresh();
     } else setBanner({ tone: 'danger', text: errorMessage(r) });
   }, [status, refresh]);

@@ -80,7 +80,11 @@ export function verifyWithinGeofence(
     };
   }
 
-  if (nearest.distance >= nearest.branch.gps_radius_m + accuracy) {
+  // The accuracy is whatever the phone reports, so it may stretch the fence by
+  // at most the radius again: added in full, a phone claiming +-100 m punched
+  // from 149 m out of a 50 m branch.
+  const slack = Math.min(accuracy, nearest.branch.gps_radius_m);
+  if (nearest.distance >= nearest.branch.gps_radius_m + slack) {
     return {
       ok: false,
       reason: 'TOO_FAR',

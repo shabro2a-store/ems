@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { apiGet, apiSend, errorMessage, formatBeirutTime } from '@/lib/api';
+import { fixIsFresh, STALE_FIX_MESSAGE, type GpsFix } from '@/lib/gpsFix';
 import { Card, CardBody, StatTile, Alert } from '@/components/ui';
 
 interface TodayPayload {
@@ -17,7 +18,7 @@ interface TodayPayload {
 type Status =
   | { kind: 'idle' }
   | { kind: 'locating' }
-  | { kind: 'ready'; lat: number; lng: number; accuracy: number }
+  | ({ kind: 'ready' } & GpsFix)
   | { kind: 'error'; message: string };
 
 function deviceFp(): string {
@@ -64,7 +65,7 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
           setStatus({ kind: 'error', message: `GPS is weak (±${Math.round(accuracy)}m). Step outside and try again.` });
           return;
         }
-        setStatus({ kind: 'ready', lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy });
+        setStatus({ kind: 'ready', lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy, at: Date.now() });
       },
       (err) => setStatus({ kind: 'error', message: err.message || 'Could not get your location.' }),
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
@@ -73,6 +74,7 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
 
   const submit = useCallback(async (kind: 'IN' | 'OUT') => {
     if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
+    if (!fixIsFresh(status)) { setStatus({ kind: 'idle' }); setBanner({ tone: 'danger', text: STALE_FIX_MESSAGE }); return; }
     setBusy(true); setBanner(null);
     const r = await apiSend('/api/me/punch', {
       idempotent: true, idemPrefix: 'punch',
@@ -81,6 +83,8 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
     setBusy(false);
     if (r.ok) {
       const d = r.data as { notice?: string };
+      // One fix, one action: the next needs the phone's position then, not now.
+      setStatus({ kind: 'idle' });
       setBanner({
         tone: 'success',
         text: d.notice ?? (kind === 'IN' ? 'Checked in. Have a good shift!' : 'Checked out. See you next time!'),

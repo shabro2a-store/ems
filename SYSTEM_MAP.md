@@ -441,7 +441,12 @@ Full request/response detail is in [API.md](API.md). Summary:
   self-resolve is a duplicate tap, so it says to clock out first — something they can do
   themselves. See API.md.
 - **Geofence (`geofence.ts`)**: nearest active branch by haversine; reject if
-  `accuracy > gps_accuracy_max_m` or `distance ≥ radius + accuracy`.
+  `accuracy > gps_accuracy_max_m` or `distance ≥ radius + min(accuracy, radius)` - the phone's
+  own accuracy figure stretches the fence by at most its radius again (it used to be added in
+  full: 149 m out of a 50 m branch). The field screens use a GPS fix for one action only and
+  refuse one older than 2 minutes (`lib/gpsFix.ts`), so a position taken at the branch cannot
+  be carried home to clock out. The coordinates are still the phone's word: a location-spoofing
+  app is not something a web page can detect.
 - **Trips (`trip.ts`)**: one open trip per driver (service + DB index); geofenced both ends.
 - **Advances**: an employee can borrow against everything earned **this month** —
   worked wages **plus bonuses, minus deductions and penalties**: capped so

@@ -70,6 +70,20 @@ describe('verifyWithinGeofence', () => {
     if (!r.ok) expect(r.reason).toBe('TOO_FAR');
   });
 
+  /*
+   * Security #3: the accuracy is whatever the phone says, and it was added to
+   * the radius in full - a phone claiming +-100 m could punch from 149 m out
+   * of a 50 m branch. It now stretches the fence by at most the radius itself.
+   */
+  it('lets a reported accuracy stretch the fence by at most its own radius', () => {
+    const at = (m: number) => 33.8962 + m / 111_320;
+    expect(verifyWithinGeofence(at(90), 35.4827, withBranches(HAMRA), 45).ok).toBe(true);
+    const far = verifyWithinGeofence(at(140), 35.4827, withBranches(HAMRA), 100);
+    expect(far.ok).toBe(false);
+    if (!far.ok) expect(far.reason).toBe('TOO_FAR');
+    expect(verifyWithinGeofence(at(99), 35.4827, withBranches(HAMRA), 100).ok).toBe(true);
+  });
+
   it('returns LOW_GPS_ACCURACY when accuracy > gps_accuracy_max_m', () => {
     const r = verifyWithinGeofence(33.8962, 35.4827, withBranches(HAMRA), 200);
     expect(r.ok).toBe(false);
