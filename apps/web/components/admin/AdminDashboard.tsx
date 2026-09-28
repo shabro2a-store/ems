@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend, centsToUsd, formatBeirutTime, errorMessage } from '@/lib/api';
 import { Card, CardBody, CardHeader, Badge, StatTile, EmptyState, Spinner, Select, Button, Alert } from '@/components/ui';
 import { TelegramAlertsCard } from './TelegramAlertsCard';
+import { usePolling } from '@/lib/usePolling';
 
 interface Person {
   id: string;
@@ -98,9 +99,8 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadOverview();
     loadAux();
-    const id = setInterval(loadOverview, POLL_MS);
-    return () => clearInterval(id);
   }, [branchId, loadOverview, loadAux]);
+  usePolling(loadOverview, POLL_MS);
 
   // `key` is per-button (id + action) so only the clicked button shows a spinner.
   // `success` may read the response so the confirmation can name what actually

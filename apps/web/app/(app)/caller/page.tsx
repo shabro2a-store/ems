@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend, errorMessage } from '@/lib/api';
 import { Alert, EmptyState, Spinner } from '@/components/ui';
 import { BrandMark } from '@/components/BrandMark';
+import { usePolling } from '@/lib/usePolling';
 
 interface Driver {
   id: string;
@@ -58,9 +59,8 @@ export default function CallerBoard() {
 
   useEffect(() => {
     load();
-    const poll = setInterval(load, 3000);
-    return () => clearInterval(poll);
   }, [load]);
+  usePolling(load, 3000);
 
   // Local clock for the live "out for" timers. Uses elapsed offset so we never
   // call Date.now() during render.

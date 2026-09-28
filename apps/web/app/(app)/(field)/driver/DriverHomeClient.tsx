@@ -6,6 +6,8 @@ import { fixIsFresh, STALE_FIX_MESSAGE, type GpsFix } from '@/lib/gpsFix';
 import { Card, CardBody, StatTile, Alert } from '@/components/ui';
 import EnableAlerts from '@/components/field/EnableAlerts';
 import ReceiptCamera from '@/components/field/ReceiptCamera';
+import { usePolling } from '@/lib/usePolling';
+import { onCalls } from '@/lib/callsFeed';
 
 interface TodayPayload {
   in_at: string | null;
@@ -64,20 +66,14 @@ export default function DriverHomeClient({ username, branch }: { username: strin
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 30_000);
-    return () => clearInterval(id);
   }, [refresh]);
+  usePolling(refresh, 30_000);
 
-  // Fast poll for dispatch state so "out on order" enables right after the ring.
-  useEffect(() => {
-    let alive = true;
-    const tick = async () => {
-      const r = await apiGet<{ canGoOut: boolean }>('/api/me/calls');
-      if (alive && r.ok) setCanGoOut(r.data.canGoOut);
-    };
-    const id = setInterval(tick, 4000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  // "Out on order" enables right after the ring: the siren (DriverAlarm, on
+  // every driver tab) already polls /api/me/calls every few seconds and
+  // publishes what it hears. This tab used to run a second 4-second loop on
+  // the same endpoint.
+  useEffect(() => onCalls((c) => setCanGoOut(c.canGoOut)), []);
 
   const locate = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {

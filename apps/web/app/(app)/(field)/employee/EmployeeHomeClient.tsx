@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { apiGet, apiSend, errorMessage, formatBeirutTime } from '@/lib/api';
 import { fixIsFresh, STALE_FIX_MESSAGE, type GpsFix } from '@/lib/gpsFix';
 import { Card, CardBody, StatTile, Alert } from '@/components/ui';
+import { usePolling } from '@/lib/usePolling';
 
 interface TodayPayload {
   in_at: string | null;
@@ -48,9 +49,8 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
 
   useEffect(() => {
     fetchToday();
-    const id = setInterval(fetchToday, 30_000);
-    return () => clearInterval(id);
   }, [fetchToday]);
+  usePolling(fetchToday, 30_000);
 
   const locate = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {

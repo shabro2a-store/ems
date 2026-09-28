@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
+import { publishCalls } from '@/lib/callsFeed';
 
 /*
  * The caller's ring, made to behave like an incoming call.
@@ -127,8 +128,12 @@ export default function DriverAlarm() {
   useEffect(() => {
     let alive = true;
     async function check() {
-      const r = await apiGet<{ ringing: boolean }>('/api/me/calls');
-      if (alive && r.ok) setRinging(r.data.ringing);
+      const r = await apiGet<{ ringing: boolean; canGoOut: boolean }>('/api/me/calls');
+      if (alive && r.ok) {
+        setRinging(r.data.ringing);
+        // The Trips tab's "out on order" button listens for this.
+        publishCalls({ ringing: r.data.ringing, canGoOut: r.data.canGoOut });
+      }
     }
     check();
     const t = setInterval(check, 3000);
