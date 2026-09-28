@@ -55,6 +55,34 @@ describe('session renewal', () => {
     expect(setCookies(res).some((c) => c.startsWith('ems_access=') && !c.startsWith('ems_access=;'))).toBe(true);
   });
 
+  /*
+   * #63: the installed app opens on "/" (the manifest's start_url), and "/"
+   * always went to the login form - somebody signed in for a week was asked to
+   * sign in every time they tapped the icon.
+   */
+  it("opens the app at the signed-in person's own home", async () => {
+    const branch = await seedTestBranch();
+    await seedTestUser({ username: 'start-emp', branch_id: branch.id });
+    await seedTestUser({ username: 'start-admin', role: Role.ADMIN });
+    const emp = await loginAs('start-emp', 'test-pass-1');
+    const admin = await loginAs('start-admin', 'test-pass-1');
+    const at = async (cookies: string) =>
+      (await fetch(`${BASE_URL}/`, { headers: { Cookie: cookies }, redirect: 'manual' })).headers.get('location') ?? '';
+    expect(await at(emp.cookies)).toMatch(/\/employee$/);
+    expect(await at(admin.cookies)).toMatch(/\/admin$/);
+    expect(await at('')).toMatch(/\/login$/);
+  });
+
+  it('renews on the way into the app when only the week-long session is left', async () => {
+    const branch = await seedTestBranch();
+    await seedTestUser({ username: 'start-lapsed', branch_id: branch.id });
+    const s = await loginAs('start-lapsed', 'test-pass-1');
+    const res = await fetch(`${BASE_URL}/`, { headers: { Cookie: `ems_refresh=${cookie(s, 'ems_refresh')}` }, redirect: 'manual' });
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('/');
+    expect(setCookies(res).some((c) => c.startsWith('ems_access=') && !c.startsWith('ems_access=;'))).toBe(true);
+  });
+
   it('sends a page with no session at all to the login form, as before', async () => {
     const res = await fetch(`${BASE_URL}/employee`, { redirect: 'manual' });
     expect(res.headers.get('location')).toMatch(/\/login$/);

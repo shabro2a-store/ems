@@ -3,6 +3,8 @@
   "short_name": "Shabro2a",
   "description": "Shabro2a Employee Management",
   "start_url": "/",
+  "id": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#2563eb",

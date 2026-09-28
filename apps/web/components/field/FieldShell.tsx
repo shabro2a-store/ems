@@ -34,6 +34,14 @@ export default function FieldShell({ children }: { children: React.ReactNode }) 
     });
   }, []);
 
+  // Registered for everybody on a field page, not only from the driver's
+  // alerts banner: it is what brings an open tab forward when a notification
+  // is tapped. Registering asks nothing of the user; turning on pushes still
+  // does (EnableAlerts).
+  useEffect(() => {
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }, []);
+
   const driver = role === 'DRIVER';
   const home = driver ? '/driver' : '/employee';
   const tabs: Tab[] = [

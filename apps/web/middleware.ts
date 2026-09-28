@@ -22,7 +22,8 @@ function isPublic(pathname: string): boolean {
 const APP_SECTIONS = ['/admin', '/employee', '/driver', '/caller'];
 
 function isAppPage(pathname: string): boolean {
-  return APP_SECTIONS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+  // "/" too: the installed app opens there and sends a signed-in person home.
+  return pathname === '/' || APP_SECTIONS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
 export async function middleware(request: NextRequest) {
