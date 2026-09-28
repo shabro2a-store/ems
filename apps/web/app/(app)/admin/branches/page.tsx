@@ -18,6 +18,18 @@ interface Branch {
   staff_count: number;
 }
 
+// The branch's position anchors every punch's geofence there, so a reading
+// rougher than this is not saved: at +-80 m the fence could sit across the road.
+const RECORD_MAX_ACCURACY_M = 30;
+
+function metresBetween(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const h =
+    Math.sin(rad(b.lat - a.lat) / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+}
+
 async function getCurrentPosition(timeoutMs = 10000): Promise<{ lat: number; lng: number; accuracy: number }> {
   return new Promise((resolve, reject) => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -39,6 +51,11 @@ export default function AdminBranchesPage() {
   const [removing, setRemoving] = useState<Branch | null>(null);
   const [adding, setAdding] = useState(false);
   const [locatingId, setLocatingId] = useState<string | null>(null);
+  // A reading waiting for "Save location": nothing is written until then.
+  const [reading, setReading] = useState<{ branch: Branch; lat: number; lng: number; accuracy: number } | null>(null);
+  const [savingLocation, setSavingLocation] = useState(false);
+  const [removingBusy, setRemovingBusy] = useState(false);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ tone: 'success' | 'warning' | 'danger'; text: string } | null>(null);
   // A branch with punches or trips behind it can never be deleted - payroll and
   // the attendance log both point at it, for every month it was ever open. So
@@ -50,20 +67,20 @@ export default function AdminBranchesPage() {
   async function load() {
     setLoading(true);
     const r = await apiGet<{ branches: Branch[] }>('/api/admin/branches');
-    if (r.ok) setBranches(r.data.branches);
+    if (r.ok) { setBranches(r.data.branches); setLoadErr(null); }
+    else setLoadErr(errorMessage(r));
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
 
+  // Read first, then ask: the old button wrote the reading straight over the
+  // branch's position, however rough it was.
   async function recordLocation(b: Branch) {
     setMsg(null);
     setLocatingId(b.id);
     try {
       const fix = await getCurrentPosition();
-      const res = await apiSend(`/api/admin/branches/${b.id}`, { method: 'PATCH', body: { lat: fix.lat, lng: fix.lng } });
-      if (!res.ok) { setMsg({ tone: 'danger', text: errorMessage(res) }); return; }
-      setMsg({ tone: 'success', text: `${b.name}: location saved at ±${Math.round(fix.accuracy)}m.` });
-      await load();
+      setReading({ branch: b, ...fix });
     } catch (e) {
       setMsg({ tone: 'warning', text: e instanceof Error ? e.message : 'Location capture failed' });
     } finally {
@@ -71,9 +88,22 @@ export default function AdminBranchesPage() {
     }
   }
 
+  async function saveReading() {
+    if (!reading) return;
+    setSavingLocation(true);
+    const res = await apiSend(`/api/admin/branches/${reading.branch.id}`, { method: 'PATCH', body: { lat: reading.lat, lng: reading.lng } });
+    setSavingLocation(false);
+    if (!res.ok) { setMsg({ tone: 'danger', text: errorMessage(res) }); setReading(null); return; }
+    setMsg({ tone: 'success', text: `${reading.branch.name}: location saved at ±${Math.round(reading.accuracy)}m.` });
+    setReading(null);
+    await load();
+  }
+
   async function confirmRemove() {
-    if (!removing) return;
+    if (!removing || removingBusy) return;
+    setRemovingBusy(true);
     const res = await apiSend<{ deleted: boolean; closed: boolean; staff_retired: number }>(`/api/admin/branches/${removing.id}`, { method: 'DELETE' });
+    setRemovingBusy(false);
     if (!res.ok) { setMsg({ tone: 'danger', text: errorMessage(res) }); setRemoving(null); return; }
     setMsg(
       res.data.closed
@@ -115,6 +145,11 @@ export default function AdminBranchesPage() {
 
       {loading ? (
         <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
+      ) : loadErr ? (
+        <div className="space-y-3">
+          <Alert tone="danger">The branches could not be loaded. {loadErr}</Alert>
+          <Button variant="secondary" onClick={load}>Try again</Button>
+        </div>
       ) : branches.length === 0 ? (
         <EmptyState title="No branches yet" hint="Add your first branch, then record its location on-site." />
       ) : (
@@ -167,9 +202,39 @@ export default function AdminBranchesPage() {
 
       {adding && <AddBranchModal onClose={() => setAdding(false)} onCreated={() => { setAdding(false); setMsg({ tone: 'success', text: 'Branch created. Record its location on-site next.' }); load(); }} />}
       {editing && <EditBranchModal branch={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setMsg({ tone: 'success', text: 'Branch updated.' }); load(); }} />}
+      {reading && (() => {
+        const rough = reading.accuracy > RECORD_MAX_ACCURACY_M;
+        const hadOne = !(reading.branch.lat === 0 && reading.branch.lng === 0);
+        const moves = hadOne ? Math.round(metresBetween(reading.branch, reading)) : null;
+        return (
+          <Modal title={`Set ${reading.branch.name}'s location here?`} onClose={() => setReading(null)}
+            footer={rough
+              ? <><Button variant="secondary" onClick={() => setReading(null)}>Cancel</Button><Button onClick={() => { const b = reading.branch; setReading(null); void recordLocation(b); }}>Try again</Button></>
+              : <><Button variant="secondary" onClick={() => setReading(null)}>Cancel</Button><Button onClick={saveReading} loading={savingLocation}>Save location</Button></>}>
+            {rough ? (
+              <Alert tone="warning">
+                The phone only knows where it is to within ±{Math.round(reading.accuracy)} m - too rough to fence the branch
+                with. Step outside or wait a moment, then try again. It needs ±{RECORD_MAX_ACCURACY_M} m or better.
+              </Alert>
+            ) : (
+              <div className="space-y-2 text-sm">
+                <p>
+                  Reading: <span className="tabular">{reading.lat.toFixed(5)}, {reading.lng.toFixed(5)}</span>, accurate to
+                  ±{Math.round(reading.accuracy)} m.
+                </p>
+                <p className="text-muted">
+                  {moves === null
+                    ? 'This branch has no location yet. Every punch here will be checked against this point.'
+                    : `This replaces the saved location, ${moves} m away. Every punch here is checked against it from now on.`}
+                </p>
+              </div>
+            )}
+          </Modal>
+        );
+      })()}
       {removing && (
         <Modal title={`Remove ${removing.name}?`} onClose={() => setRemoving(null)}
-          footer={<><Button variant="secondary" onClick={() => setRemoving(null)}>Cancel</Button><Button variant="danger" onClick={confirmRemove}>Remove</Button></>}>
+          footer={<><Button variant="secondary" onClick={() => setRemoving(null)}>Cancel</Button><Button variant="danger" onClick={confirmRemove} loading={removingBusy}>Remove</Button></>}>
           <p className="text-sm text-muted">
             The branch closes now: nobody can punch there and it disappears from every screen and
             from the list you assign staff to.
