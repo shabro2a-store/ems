@@ -65,7 +65,6 @@ function fakeDb(users: UserRow[], punches: PunchRow[]) {
       },
     },
     branch: { findMany: async () => [] },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
 

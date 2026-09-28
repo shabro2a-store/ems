@@ -27,7 +27,6 @@ function fakeDb(rows: AdminRow[]) {
         return matched[0] ?? null;
       },
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
 

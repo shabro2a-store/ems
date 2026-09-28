@@ -45,7 +45,7 @@ endpoint contract.
 - Every mutation writes an append-only `AuditLog` entry.
 
 ## Testing
-- `pnpm -r typecheck` and `pnpm -r test` must be green.
+- `pnpm -r typecheck`, `pnpm --filter web lint` and `pnpm -r test` must be green.
 - Unit tests run standalone; HTTP integration tests need the app running at
   `TEST_BASE_URL` (default `http://127.0.0.1:3000`) plus Postgres — see the CI
   workflow and README.

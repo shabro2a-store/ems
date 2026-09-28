@@ -76,6 +76,7 @@ jobs:
           --exit-code
 
       - run: pnpm -r typecheck
+      - run: pnpm --filter web lint
 
       # The HTTP integration tests hit a live server at TEST_BASE_URL, so build
       # and boot the web app before running the suite.

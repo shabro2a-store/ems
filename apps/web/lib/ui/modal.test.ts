@@ -26,6 +26,8 @@ function Harness() {
     null,
     createElement('button', { id: 'opener', onClick: () => setOpen(true) }, 'Open'),
     open &&
+      // Modal's props type requires children, so they go in the props object.
+      // eslint-disable-next-line react/no-children-prop
       createElement(Modal, {
         title: 'Edit branch',
         onClose: () => setOpen(false),

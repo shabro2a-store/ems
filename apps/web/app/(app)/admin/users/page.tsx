@@ -361,7 +361,7 @@ export default function AdminEmployeesPage() {
       )}
       {tempPw && (
         <Modal title="Temporary password" onClose={() => setTempPw(null)} footer={<Button onClick={() => setTempPw(null)}>Done</Button>}>
-          <p className="text-sm text-muted">Share this with <b className="text-content">{tempPw.username}</b> — they'll be asked to change it on first login.</p>
+          <p className="text-sm text-muted">Share this with <b className="text-content">{tempPw.username}</b>. It is their password until you set another - staff cannot change their own.</p>
           <div className="mt-3 rounded-lg border border-border bg-surface-muted px-4 py-3 text-center font-mono text-lg">{tempPw.pw}</div>
         </Modal>
       )}

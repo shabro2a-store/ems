@@ -42,7 +42,8 @@ const nextConfig = {
     instrumentationHook: true,
   },
   eslint: {
-    // No ESLint config or dependency in this repo; skip the build-time step.
+    // Linted as its own step (`pnpm --filter web lint`, run in CI), not inside
+    // `next build`, so a lint finding never blocks building a fix for deploy.
     ignoreDuringBuilds: true,
   },
 };

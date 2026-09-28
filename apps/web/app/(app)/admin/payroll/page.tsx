@@ -98,7 +98,7 @@ export default function AdminPayrollPage() {
     }
     setLoading(false);
   }
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [month, branchId]);
+  useEffect(() => { load(); }, [month, branchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grouped = useMemo(() => {
     const g = new Map<string, Row[]>();
@@ -622,7 +622,7 @@ function PenaltiesModal({ row, month, closed, onClose, onChanged }: { row: Row; 
     if (r.ok) setItems(r.data.penalties);
     else setErr(errorMessage(r));
   }
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function setWaived(p: PenaltyItem, waived: boolean) {
     const id = `${p.date}|${p.kind}`;
@@ -757,7 +757,7 @@ function OvertimeModal({ row, month, closed, onClose, onChanged }: { row: Row; m
     if (r.ok) setItems(r.data.overtime);
     else setErr(errorMessage(r));
   }
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function decide(o: OvertimeItem, decision: 'ACCEPTED' | 'REVOKED' | 'PENDING') {
     const id = `${o.date}|${decision}`;
@@ -869,7 +869,7 @@ function BlockedCreditModal({ row, month, closed, onClose, onChanged }: { row: R
     if (r.ok) setItems(r.data.credits);
     else setErr(errorMessage(r));
   }
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function decide(c: BlockedCreditItem, decision: 'ACCEPTED' | 'REVOKED' | 'PENDING') {
     const id = `${c.date}|${decision}`;
