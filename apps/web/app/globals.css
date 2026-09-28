@@ -42,17 +42,19 @@
   --surface-muted: 248 250 252; /* slate-50 */
   --border: 226 232 240; /* slate-200 */
   --text: 15 23 42; /* slate-900 */
-  --text-muted: 100 116 139; /* slate-500 */
+  /* Darker than slate-500 (4.47:1 on the page background): every text/ground
+     pair here clears WCAG AA's 4.5:1. */
+  --text-muted: 88 101 122;
 
   --primary: 37 99 235; /* blue-600 */
   --primary-hover: 29 78 216; /* blue-700 */
   --primary-subtle: 239 246 255; /* blue-50 */
 
-  --success: 5 150 105; /* emerald-600 */
+  --success: 4 120 87; /* emerald-700; 600 was 3.8:1 on white */
   --success-subtle: 236 253 245; /* emerald-50 */
-  --danger: 220 38 38; /* red-600 */
+  --danger: 185 28 28; /* red-700; 600 was 4.4:1 on its subtle ground */
   --danger-subtle: 254 242 242; /* red-50 */
-  --warning: 217 119 6; /* amber-600 */
+  --warning: 180 83 9; /* amber-700; 600 was 3.2:1 on white */
   --warning-subtle: 255 251 235; /* amber-50 */
 
   --ring: 59 130 246; /* blue-500 */

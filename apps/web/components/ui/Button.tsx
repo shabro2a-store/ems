@@ -7,9 +7,11 @@ type Size = 'sm' | 'md' | 'lg';
 // lines in a narrow table cell, or "Show removed (2)" onto three in a toolbar,
 // is a broken control, not a responsive one - the layout around it should
 // give, and it does (the tables scroll sideways, the toolbars wrap).
+// No focus-visible:outline-none: it cancelled the site-wide focus outline
+// (globals.css), so a keyboard user could not see which button they were on.
 const base =
   'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium transition-colors ' +
-  'focus-visible:outline-none disabled:opacity-50 disabled:pointer-events-none select-none';
+  'focus-visible:outline-offset-2 disabled:opacity-50 disabled:pointer-events-none select-none';
 
 const variants: Record<Variant, string> = {
   primary: 'bg-primary text-white hover:bg-primary-hover shadow-sm',
@@ -46,6 +48,7 @@ export function Button({
     <button
       className={`${base} ${variants[variant]} ${sizes[size]} ${fullWidth ? 'w-full' : ''} ${className}`}
       disabled={disabled || loading}
+      aria-busy={loading || undefined}
       {...rest}
     >
       {loading && (
