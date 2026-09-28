@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { apiGet, beirutMonth, centsToUsd } from '@/lib/api';
+import { apiGet, beirutMonth, centsToUsd, formatMinutes } from '@/lib/api';
 import { Card, CardBody, CardHeader, Field, Input, Spinner, StatTile } from '@/components/ui';
 
 // The owner's ruling: staff track their hours, advances, penalties and bonuses
@@ -25,12 +25,6 @@ interface MonthData {
 
 function dayLabel(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Beirut' });
-}
-
-function duration(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 export default function EmployeeMonthPage() {
@@ -80,7 +74,7 @@ export default function EmployeeMonthPage() {
                 {/* Inside the hours above, never added to them. Without the line
                     the month shows hours they know they did not clock. */}
                 {data.blocked_credit_min > 0 && (
-                  <Line k="of which time you could not clock in" v={duration(data.blocked_credit_min)} />
+                  <Line k="of which time you could not clock in" v={formatMinutes(data.blocked_credit_min)} />
                 )}
                 {drives && (
                   <Line
@@ -122,7 +116,7 @@ export default function EmployeeMonthPage() {
               ) : (
                 <dl className="divide-y divide-border text-sm">
                   {data.penalties.map((p) => (
-                    <Line key={p.date} k={`${dayLabel(p.date)} · ${duration(p.shortfall_min)} short`} v={`−${centsToUsd(p.amount_cent, false)}`} tone="danger" />
+                    <Line key={p.date} k={`${dayLabel(p.date)} · ${formatMinutes(p.shortfall_min)} short`} v={`−${centsToUsd(p.amount_cent, false)}`} tone="danger" />
                   ))}
                   {data.overtime_deduction_cent > 0 && (
                     <Line k="Overtime not approved" v={`−${centsToUsd(data.overtime_deduction_cent, false)}`} tone="danger" />

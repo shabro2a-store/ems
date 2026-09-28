@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
 import { Button } from '@/components/ui';
+import { isIos } from '@/lib/device';
 
 type State = 'hidden' | 'prompt' | 'denied' | 'ios-install' | 'error';
 
@@ -15,9 +16,6 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   return out;
 }
 
-function isIos(): boolean {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
-}
 function isStandalone(): boolean {
   return (
     window.matchMedia?.('(display-mode: standalone)').matches ||

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
-import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { getClientIp } from '@/lib/auth/cookies';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';

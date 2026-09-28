@@ -23,7 +23,8 @@ describe('Beirut dates on the phone', () => {
 /* #59 / #61: hours shown as 1.3333333333333333h, and six copies of the minutes formatter. */
 describe('durations', () => {
   it('reads as hours and minutes', () => {
-    expect(formatMinutes(425)).toBe('7h 05m');
+    expect(formatMinutes(425)).toBe('7h 5m');
+    expect(formatMinutes(480)).toBe('8h');
     expect(formatMinutes(45)).toBe('45m');
     expect(formatMinutes(0)).toBe('0m');
   });

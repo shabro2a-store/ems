@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { apiGet, apiSend, apiSendForm, errorMessage, formatBeirutTime } from '@/lib/api';
+import { apiGet, apiSend, apiSendForm, errorMessage, formatBeirutTime, formatMinutes } from '@/lib/api';
 import { fixIsFresh, STALE_FIX_MESSAGE, type GpsFix } from '@/lib/gpsFix';
 import { Card, CardBody, StatTile, Alert, Button } from '@/components/ui';
 import EnableAlerts from '@/components/field/EnableAlerts';
 import ReceiptCamera from '@/components/field/ReceiptCamera';
 import { usePolling } from '@/lib/usePolling';
 import { onCalls } from '@/lib/callsFeed';
+import { deviceFp } from '@/lib/device';
 
 interface TodayPayload {
   in_at: string | null;
@@ -29,20 +30,6 @@ type Status =
   | { kind: 'locating' }
   | ({ kind: 'ready' } & GpsFix)
   | { kind: 'error'; message: string };
-
-function deviceFp(): string {
-  if (typeof window === 'undefined') return 'ssr';
-  let v = window.localStorage.getItem('ems_device_fp');
-  if (!v) {
-    v = crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
-    window.localStorage.setItem('ems_device_fp', v);
-  }
-  return v;
-}
-function dur(min: number): string {
-  const h = Math.floor(min / 60);
-  return h ? `${h}h ${min % 60}m` : `${min}m`;
-}
 
 export default function DriverHomeClient({ username, branch }: { username: string; branch: { name: string; gps_radius_m: number; gps_accuracy_max_m: number; trip_threshold_min: number } }) {
   const [today, setToday] = useState<TodayPayload | null>(null);
@@ -163,7 +150,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
     });
     setBusy(false);
     if (r.ok) {
-      setBanner({ tone: 'success', text: `Back! Trip lasted ${dur(r.data.duration_min ?? 0)}.` });
+      setBanner({ tone: 'success', text: `Back! Trip lasted ${formatMinutes(r.data.duration_min ?? 0)}.` });
       // One fix, one action: the next needs the phone's position then, not now.
       setStatus({ kind: 'idle' });
       await refresh();
@@ -223,7 +210,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
                 <span className="h-2 w-2 rounded-full bg-success" /> On shift
               </div>
               <p className="mt-2 text-sm text-muted">
-                since {today?.in_at ? formatBeirutTime(today.in_at) : '—'} · {dur(today?.minutes_since_in ?? 0)}
+                since {today?.in_at ? formatBeirutTime(today.in_at) : '—'} · {formatMinutes(today?.minutes_since_in ?? 0)}
               </p>
             </>
           ) : (
@@ -237,8 +224,8 @@ export default function DriverHomeClient({ username, branch }: { username: strin
       {/* Three tiles on a 375px phone: "1h 55m" at tile size does not fit a
           third of the row, so the month spans instead of squeezing. */}
       <div className="grid grid-cols-2 gap-3">
-        <StatTile label="On shift" value={today ? dur(today.in_at ? (today.minutes_since_in ?? 0) : 0) : '—'} />
-        <StatTile label="Today" value={today ? dur(today.minutes_today) : '—'} />
+        <StatTile label="On shift" value={today ? formatMinutes(today.in_at ? (today.minutes_since_in ?? 0) : 0) : '—'} />
+        <StatTile label="Today" value={today ? formatMinutes(today.minutes_today) : '—'} />
         <div className="col-span-2">
           <StatTile label="This month" value={today ? `${today.hours_month.toFixed(1)}h` : '—'} />
         </div>
@@ -252,7 +239,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
               <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${over ? 'bg-warning-subtle text-warning' : 'bg-primary-subtle text-primary'}`}>
                 <span className={`h-2 w-2 rounded-full ${over ? 'bg-warning' : 'bg-primary'}`} /> Out on an order
               </div>
-              <p className="mt-2 text-3xl font-semibold tabular">{dur(since)}</p>
+              <p className="mt-2 text-3xl font-semibold tabular">{formatMinutes(since)}</p>
               <p className="text-xs text-muted">out · threshold {branch.trip_threshold_min}m{over ? ' · over' : ''}</p>
             </>
           ) : (

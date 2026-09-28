@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { apiGet, apiSend, errorMessage, formatBeirutTime } from '@/lib/api';
+import { apiGet, apiSend, errorMessage, formatBeirutTime, formatMinutes } from '@/lib/api';
 import { fixIsFresh, STALE_FIX_MESSAGE, type GpsFix } from '@/lib/gpsFix';
 import { Card, CardBody, StatTile, Alert, Button } from '@/components/ui';
 import { usePolling } from '@/lib/usePolling';
+import { deviceFp } from '@/lib/device';
 
 interface TodayPayload {
   in_at: string | null;
@@ -21,20 +22,6 @@ type Status =
   | { kind: 'locating' }
   | ({ kind: 'ready' } & GpsFix)
   | { kind: 'error'; message: string };
-
-function deviceFp(): string {
-  if (typeof window === 'undefined') return 'ssr';
-  let v = window.localStorage.getItem('ems_device_fp');
-  if (!v) {
-    v = crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
-    window.localStorage.setItem('ems_device_fp', v);
-  }
-  return v;
-}
-function dur(min: number): string {
-  const h = Math.floor(min / 60);
-  return h ? `${h}h ${min % 60}m` : `${min}m`;
-}
 
 export default function EmployeeHomeClient({ username, branch }: { username: string; branch: { name: string; gps_radius_m: number; gps_accuracy_max_m: number } }) {
   const [today, setToday] = useState<TodayPayload | null>(null);
@@ -133,7 +120,7 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
                 <span className="h-2 w-2 rounded-full bg-success" /> Checked in
               </div>
               <p className="mt-2 text-sm text-muted">
-                since {today && today.in_at ? formatBeirutTime(today.in_at) : '—'} · {dur(today?.minutes_since_in ?? 0)}
+                since {today && today.in_at ? formatBeirutTime(today.in_at) : '—'} · {formatMinutes(today?.minutes_since_in ?? 0)}
               </p>
             </>
           ) : (
@@ -145,7 +132,7 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
       </Card>
 
       <div className="grid grid-cols-2 gap-3">
-        <StatTile label="Today" value={today ? dur(today.minutes_today) : '—'} />
+        <StatTile label="Today" value={today ? formatMinutes(today.minutes_today) : '—'} />
         <StatTile label="This month" value={today ? `${today.hours_month.toFixed(1)}h` : '—'} />
       </div>
 

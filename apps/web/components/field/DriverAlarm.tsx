@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
 import { publishCalls } from '@/lib/callsFeed';
+import { isIos } from '@/lib/device';
 
 /*
  * The caller's ring, made to behave like an incoming call.
@@ -47,15 +48,6 @@ import { publishCalls } from '@/lib/callsFeed';
  * a Focus mode. A driver who taps "arm" and believes they are covered is worse
  * off than one who knows to keep the screen on.
  */
-function isIos(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    // iPadOS reports itself as a Mac; the touch points give it away.
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
-}
-
 export default function DriverAlarm() {
   const [ringing, setRinging] = useState(false);
   const [ios, setIos] = useState(false);

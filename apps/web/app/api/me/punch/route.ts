@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { inBeirut } from 'time';
-import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { getClientIp } from '@/lib/auth/cookies';
 import { consumePunchRateLimit } from '@/lib/services/rateLimit';

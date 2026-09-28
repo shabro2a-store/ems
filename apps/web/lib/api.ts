@@ -208,12 +208,13 @@ export function beirutMonth(now: Date = new Date()): string {
   return beirutToday(now).slice(0, 7);
 }
 
-/** Minutes as "7h 05m" / "45m" - one formatter for every screen. */
+/** Minutes as "7h 5m", "8h" or "45m" - one formatter for every screen (there were six). */
 export function formatMinutes(min: number): string {
   const m = Math.max(0, Math.round(min));
   const h = Math.floor(m / 60);
   const rest = m % 60;
-  return h > 0 ? `${h}h ${String(rest).padStart(2, '0')}m` : `${rest}m`;
+  if (h === 0) return `${rest}m`;
+  return rest ? `${h}h ${rest}m` : `${h}h`;
 }
 
 /** Hours to one decimal, for display: 80 minutes is 1.3h, never 1.3333333333333333h. */

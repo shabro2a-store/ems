@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { apiGet, apiSend, beirutToday, centsToUsd, errorMessage } from '@/lib/api';
+import { apiGet, apiSend, beirutToday, centsToUsd, errorMessage, formatMinutes } from '@/lib/api';
 import {
-  PageHeader, Card, CardHeader, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile,
+  PageHeader, Card, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile,
 } from '@/components/ui';
 import { EmployeeCards } from '@/components/admin/EmployeeCards';
 
@@ -381,14 +381,12 @@ function FragmentGroup({ group, show, children }: { group: string; show: boolean
 }
 
 function StatusChip({ st }: { st: Status }) {
-  if (st.status === 'IN') return <Badge tone="success">In · {fmt(st.since_min)}</Badge>;
+  if (st.status === 'IN') return <Badge tone="success">In · {formatMinutes(st.since_min)}</Badge>;
   if (st.status === 'ON_TRIP') return <Badge tone="warning">On trip{st.over ? ' · over' : ''}</Badge>;
   if (st.status === 'DAY_OFF') return <Badge tone="neutral">Day off</Badge>;
   if (st.status === 'LEFT') return <Badge tone="neutral">Left{st.hours_today !== undefined ? ` · ${st.hours_today}h today` : ''}</Badge>;
   return <Badge tone="danger">Absent</Badge>;
 }
-function fmt(min: number) { const h = Math.floor(min / 60); return h ? `${h}h ${min % 60}m` : `${min}m`; }
-
 function SetPasswordModal({ user, onClose, onDone }: { user: User; onClose: () => void; onDone: (pw: string) => void }) {
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiGet, apiSend, centsToUsd, formatBeirutTime, formatHours, errorMessage } from '@/lib/api';
+import { apiGet, apiSend, centsToUsd, formatBeirutTime, formatHours, formatMinutes, errorMessage } from '@/lib/api';
 import { Card, CardBody, CardHeader, Badge, StatTile, EmptyState, Spinner, Select, Button, Alert } from '@/components/ui';
 import { TelegramAlertsCard } from './TelegramAlertsCard';
 import { usePolling } from '@/lib/usePolling';
@@ -37,24 +37,12 @@ type ActivityEvent = { id: string; type: 'IN' | 'OUT' | 'TRIP_OUT' | 'TRIP_BACK'
 
 const POLL_MS = 10_000;
 
-function dur(min: number): string {
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
-}
 function initials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
-function formatMinutes(min: number): string {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
 const STATUS: Record<Person['status'], { label: (p: Person) => string; tone: 'success' | 'primary' | 'danger' | 'warning' | 'neutral' }> = {
-  IN: { label: (p) => `In · ${dur(p.since_min)}`, tone: 'success' },
-  ON_TRIP: { label: (p) => `On trip · ${dur(p.since_min)}${p.over ? ' over' : ''}`, tone: 'warning' },
+  IN: { label: (p) => `In · ${formatMinutes(p.since_min)}`, tone: 'success' },
+  ON_TRIP: { label: (p) => `On trip · ${formatMinutes(p.since_min)}${p.over ? ' over' : ''}`, tone: 'warning' },
   DAY_OFF: { label: () => 'Day off', tone: 'neutral' },
   ABSENT: { label: () => 'Absent', tone: 'danger' },
   LEFT: { label: () => 'Left', tone: 'neutral' },
@@ -295,7 +283,7 @@ export default function AdminDashboard() {
                   <li key={d.trip_id} className="flex items-start gap-3 px-4 py-3 sm:px-5">
                     <Badge tone="warning">Late</Badge>
                     <div className="min-w-0 flex-1 text-sm">
-                      <div className="font-medium">{d.driver_username} is {dur(d.since_min)} out</div>
+                      <div className="font-medium">{d.driver_username} is {formatMinutes(d.since_min)} out</div>
                       <div className="text-xs text-muted">{d.branch_name} · threshold {d.threshold_min}m</div>
                       <div className="mt-1 text-xs text-muted">Clears itself when the driver presses Back — nothing to action here.</div>
                     </div>

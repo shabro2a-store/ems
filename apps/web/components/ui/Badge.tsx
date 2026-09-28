@@ -27,15 +27,3 @@ export function Badge({
     </span>
   );
 }
-
-// A small colored dot for status, paired with a label so meaning isn't color-only.
-export function StatusDot({ tone = 'neutral' }: { tone?: Tone }) {
-  const color: Record<Tone, string> = {
-    neutral: 'bg-muted',
-    primary: 'bg-primary',
-    success: 'bg-success',
-    danger: 'bg-danger',
-    warning: 'bg-warning',
-  };
-  return <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${color[tone]}`} />;
-}

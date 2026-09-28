@@ -62,7 +62,6 @@ export async function branchDriverStatuses(
         select: { at: true, branch_id: true },
       });
       let clockedIn = false;
-      let clockInAt: Date | null = null;
       let clockInBranchId: string | null = null;
       if (lastIn) {
         const laterOut = await db.punch.findFirst({
@@ -71,7 +70,6 @@ export async function branchDriverStatuses(
         });
         if (!laterOut) {
           clockedIn = true;
-          clockInAt = lastIn.at;
           clockInBranchId = lastIn.branch_id;
         }
       }

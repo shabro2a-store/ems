@@ -499,7 +499,7 @@ an "Open in app" deep link) — all actions happen in the web app.
 - **Tokens**: CSS variables in `apps/web/app/globals.css`, mapped in `tailwind.config.ts` —
   slate ground, white surfaces, one blue accent; semantic success/danger/warning kept separate.
   Light theme, English/LTR.
-- **Primitives**: `apps/web/components/ui/*` — Button, Card, Badge/StatusDot, Field/Input/Select/
+- **Primitives**: `apps/web/components/ui/*` — Button, Card, Badge, Field/Input/Select/
   Textarea, Modal, PageHeader, StatTile, EmptyState, Spinner, Alert.
 - **Shared client helper**: `apps/web/lib/api.ts` — `apiGet`/`apiSend` (CSRF + Idempotency-Key
   handled once), `errorMessage` (human message, not codes), money/Beirut-time formatters.
