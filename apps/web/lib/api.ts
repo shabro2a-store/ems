@@ -149,13 +149,19 @@ interface SendFormOpts {
   form: FormData;
   idempotent?: boolean;
   idemPrefix?: string;
+  /**
+   * The key to send, when the caller keeps one across retries of the same
+   * upload - the receipt screen does, so a resend after a dropped connection
+   * cannot start a second trip if the first one did land.
+   */
+  idempotencyKey?: string;
 }
 
 // The same envelope as apiSend, for a request that carries a file. No
 // Content-Type header: the browser writes the multipart boundary itself.
 export async function apiSendForm<T = unknown>(url: string, opts: SendFormOpts): Promise<ApiResult<T>> {
-  const { form, idempotent = false, idemPrefix = 'web' } = opts;
-  const key = idempotent ? idemKey(idemPrefix) : null;
+  const { form, idempotent = false, idemPrefix = 'web', idempotencyKey } = opts;
+  const key = idempotencyKey ?? (idempotent ? idemKey(idemPrefix) : null);
   const send = () => {
     const headers: Record<string, string> = { 'X-CSRF-Token': csrfFromCookie() };
     if (key) headers['Idempotency-Key'] = key;

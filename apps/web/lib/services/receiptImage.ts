@@ -7,14 +7,9 @@
  * Anything else - a PNG, a thumbnail, a hundred-megabyte upload - is refused
  * and the trip does not start.
  */
-export const RECEIPT_MAX_BYTES = 4 * 1024 * 1024;
+import { RECEIPT_MAX_BYTES, RECEIPT_MIN_SHORT_SIDE } from '../receiptLimits';
 
-/**
- * The short side is what the receipt's width lands on in portrait. Below this
- * the print is a smear, and the automated reader the owner wants later would
- * have nothing to read - the photos are kept for that as much as for him.
- */
-export const RECEIPT_MIN_SHORT_SIDE = 480;
+export { RECEIPT_MAX_BYTES, RECEIPT_MIN_SHORT_SIDE };
 
 export type ReceiptInspection =
   | { ok: true; width: number; height: number }

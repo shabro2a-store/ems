@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { RECEIPT_MIN_SHORT_SIDE } from '@/lib/receiptLimits';
 
 /**
  * The driver's viewfinder for the order receipt.
@@ -85,6 +86,15 @@ export default function ReceiptCamera({
   const capture = useCallback(() => {
     const v = videoRef.current;
     if (!v || v.videoWidth === 0) return;
+    // The server refuses a receipt smaller than this. Said here, before the
+    // driver taps Use, rather than after an upload that could only fail.
+    if (Math.min(v.videoWidth, v.videoHeight) < RECEIPT_MIN_SHORT_SIDE) {
+      setError(
+        `This camera only gives a ${v.videoWidth}x${v.videoHeight} picture - too small to read a receipt. ` +
+          'Close other apps using the camera and try again, or use another phone.',
+      );
+      return;
+    }
     const canvas = document.createElement('canvas');
     canvas.width = v.videoWidth;
     canvas.height = v.videoHeight;

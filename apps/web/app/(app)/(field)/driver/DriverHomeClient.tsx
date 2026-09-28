@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiGet, apiSend, apiSendForm, errorMessage, formatBeirutTime } from '@/lib/api';
 import { fixIsFresh, STALE_FIX_MESSAGE, type GpsFix } from '@/lib/gpsFix';
-import { Card, CardBody, StatTile, Alert } from '@/components/ui';
+import { Card, CardBody, StatTile, Alert, Button } from '@/components/ui';
 import EnableAlerts from '@/components/field/EnableAlerts';
 import ReceiptCamera from '@/components/field/ReceiptCamera';
 import { usePolling } from '@/lib/usePolling';
@@ -52,6 +52,12 @@ export default function DriverHomeClient({ username, branch }: { username: strin
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
   const [camera, setCamera] = useState(false);
+  // The receipt photo until the trip has actually started. The camera closes
+  // as soon as the photo is used, and a failed upload used to lose it with the
+  // camera - the driver had to go back, reopen it and photograph the receipt
+  // again. The key goes with the photo, so a resend after a dropped
+  // connection cannot start a second trip if the first one did land.
+  const [pending, setPending] = useState<{ photo: Blob; key: string } | null>(null);
 
   const refresh = useCallback(async () => {
     const [t, tr, calls] = await Promise.all([
@@ -120,23 +126,31 @@ export default function DriverHomeClient({ username, branch }: { username: strin
   // Going out: the receipt photo travels with the request, so a trip cannot
   // start without one - the camera opens first (see the OUT button) and this
   // runs with what it captured.
-  const tripStart = useCallback(async (photo: Blob) => {
-    if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: 'Tap "Get GPS" first.' }); return; }
-    if (!fixIsFresh(status)) { setStatus({ kind: 'idle' }); setBanner({ tone: 'danger', text: STALE_FIX_MESSAGE }); return; }
+  const tripStart = useCallback(async (upload: { photo: Blob; key: string }) => {
+    const kept = ' Your receipt photo is kept - tap Send again.';
+    if (status.kind !== 'ready') { setBanner({ tone: 'danger', text: `Tap "Get GPS" first.${kept}` }); return; }
+    if (!fixIsFresh(status)) { setStatus({ kind: 'idle' }); setBanner({ tone: 'danger', text: `${STALE_FIX_MESSAGE}${kept}` }); return; }
     setBusy(true); setBanner(null);
     const form = new FormData();
     form.set('lat', String(status.lat));
     form.set('lng', String(status.lng));
     form.set('accuracy', String(status.accuracy));
-    form.set('photo', photo, 'receipt.jpg');
-    const r = await apiSendForm('/api/me/trip/start', { form, idempotent: true, idemPrefix: 'trip' });
+    form.set('photo', upload.photo, 'receipt.jpg');
+    const r = await apiSendForm('/api/me/trip/start', { form, idempotent: true, idempotencyKey: upload.key });
     setBusy(false);
     if (r.ok) {
+      setPending(null);
       setBanner({ tone: 'success', text: 'Out on an order. Drive safe!' });
       // One fix, one action: the next needs the phone's position then, not now.
       setStatus({ kind: 'idle' });
       await refresh();
-    } else setBanner({ tone: 'danger', text: errorMessage(r) });
+      return;
+    }
+    // Unknown outcome (the connection dropped): the same key, so a resend is
+    // answered with whatever the first attempt got. A definite refusal is
+    // stored under its key, so the next attempt needs a new one.
+    setPending(r.error.code === 'NETWORK' ? upload : { photo: upload.photo, key: crypto.randomUUID() });
+    setBanner({ tone: 'danger', text: errorMessage(r) + (r.error.code === 'BAD_PHOTO' ? '' : kept) });
   }, [status, refresh]);
 
   const tripEnd = useCallback(async () => {
@@ -313,10 +327,26 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         </p>
       </div>
 
+      {pending && !open && !camera && (
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <p className="mb-2 text-sm font-medium">Receipt photo waiting to be sent</p>
+          <div className="flex gap-2">
+            <Button className="flex-1" loading={busy} disabled={!ready} onClick={() => void tripStart(pending)}>Send again</Button>
+            <Button variant="secondary" disabled={busy} onClick={() => setCamera(true)}>Retake</Button>
+            <Button variant="ghost" disabled={busy} onClick={() => setPending(null)}>Discard</Button>
+          </div>
+        </div>
+      )}
+
       {camera && (
         <ReceiptCamera
           onCancel={() => setCamera(false)}
-          onCapture={(photo) => { setCamera(false); void tripStart(photo); }}
+          onCapture={(photo) => {
+            setCamera(false);
+            const upload = { photo, key: crypto.randomUUID() };
+            setPending(upload);
+            void tripStart(upload);
+          }}
         />
       )}
 
