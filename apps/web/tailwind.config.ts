@@ -54,9 +54,6 @@ const config: Config = {
         ],
       },
     },
-    minHeight: {
-      '12': '3rem',
-    },
   },
   plugins: [],
 };
