@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
-import { Card, CardBody, CardHeader, Badge, Button, Spinner, Alert } from '@/components/ui';
+import { Card, CardBody, CardHeader, Badge, Button, Spinner, Alert, Modal } from '@/components/ui';
 
 interface BindState {
   bound: boolean;
@@ -24,6 +24,9 @@ export function TelegramAlertsCard() {
   const [busy, setBusy] = useState<'test' | 'disconnect' | null>(null);
   const [banner, setBanner] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  // The app's own dialog, not window.confirm (design system; and a browser
+  // confirm can be switched off for the site with one tick).
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   const load = useCallback(async () => {
     const res = await apiGet<BindState>('/api/admin/telegram/code');
@@ -62,10 +65,10 @@ export function TelegramAlertsCard() {
   }, [load]);
 
   const disconnect = useCallback(async () => {
-    // The phone is company property in somebody else's pocket, so this is the
-    // button you reach for when it goes missing. Confirm it, because pressing
-    // it by accident silences every alert until somebody notices.
-    if (!window.confirm('Stop sending alerts to the bound phone? You can bind it again at any time.')) return;
+    // Reached through a confirm dialog: the phone is company property in
+    // somebody else's pocket, and pressing this by accident silences every
+    // alert until somebody notices.
+    setConfirmDisconnect(false);
     setBusy('disconnect');
     setBanner(null);
     const res = await apiSend('/api/admin/telegram/disconnect');
@@ -101,18 +104,17 @@ export function TelegramAlertsCard() {
         {!state.bot_configured ? (
           <p className="text-sm text-muted">
             No bot token is configured on the server, so alerts stay in the app. Add{' '}
-            <code className="rounded bg-surface-2 px-1">TELEGRAM_BOT_TOKEN</code> to the server
+            <code className="rounded bg-surface-muted px-1">TELEGRAM_BOT_TOKEN</code> to the server
             environment to enable Telegram delivery.
           </p>
         ) : (
           <div className="space-y-3">
             {state.webhook_secret_ok === false && (
               <Alert tone="danger">
-                <b>TELEGRAM_WEBHOOK_SECRET is still the default.</b> That value is published in this
-                project&apos;s source, so anyone who knows it can post to the webhook and try codes at
-                it. Alerts still work — this is worth fixing, not urgent. Put a fresh value in{' '}
-                <code>.env</code> (<code>openssl rand -hex 16</code>), restart, then re-run{' '}
-                <code>setWebhook</code> with the same value.
+                <b>TELEGRAM_WEBHOOK_SECRET is not set</b> (or is the published default). Alerts still go
+                out, but the bot refuses every message sent to it - /start and /stop do nothing until
+                it is set. Put a fresh value in <code>.env</code> (<code>openssl rand -hex 16</code>),
+                restart, then re-run <code>setWebhook</code> with the same value.
               </Alert>
             )}
 
@@ -120,9 +122,12 @@ export function TelegramAlertsCard() {
               <Badge tone={state.bound ? 'success' : 'warning'}>
                 {state.bound ? 'Connected' : 'Not connected'}
               </Badge>
-              {!showCode && (
+              {/* Connect only while nothing is bound. "Bind another chat" used to
+                  sit here when connected and did nothing: the first chat keeps the
+                  alerts until it is disconnected, which the line below says. */}
+              {!showCode && !state.bound && (
                 <Button size="sm" variant="secondary" onClick={() => setShowCode(true)}>
-                  {state.bound ? 'Bind another chat' : 'Connect'}
+                  Connect
                 </Button>
               )}
               {state.bound && (
@@ -141,13 +146,20 @@ export function TelegramAlertsCard() {
                     variant="danger"
                     loading={busy === 'disconnect'}
                     disabled={busy !== null}
-                    onClick={() => void disconnect()}
+                    onClick={() => setConfirmDisconnect(true)}
                   >
                     Disconnect
                   </Button>
                 </>
               )}
             </div>
+
+            {state.bound && (
+              <p className="text-xs text-muted">
+                To send the alerts to a different phone, press <b>Disconnect</b>, then press START on the
+                new one.
+              </p>
+            )}
 
             {banner && <Alert tone={banner.tone}>{banner.text}</Alert>}
 
@@ -160,7 +172,7 @@ export function TelegramAlertsCard() {
                 </p>
                 {state.bind_url ? (
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 truncate rounded-md border border-border bg-surface-2 px-3 py-2 text-sm">
+                    <code className="flex-1 truncate rounded-md border border-border bg-surface-muted px-3 py-2 text-sm">
                       {state.bind_url}
                     </code>
                     <Button
@@ -192,6 +204,15 @@ export function TelegramAlertsCard() {
           </div>
         )}
       </CardBody>
+      {confirmDisconnect && (
+        <Modal
+          title="Stop Telegram alerts?"
+          onClose={() => setConfirmDisconnect(false)}
+          footer={<><Button variant="secondary" onClick={() => setConfirmDisconnect(false)}>Cancel</Button><Button variant="danger" onClick={() => void disconnect()}>Disconnect</Button></>}
+        >
+          <p className="text-sm text-muted">No more alerts will reach the connected phone. You can connect a phone again at any time.</p>
+        </Modal>
+      )}
     </Card>
   );
 }
