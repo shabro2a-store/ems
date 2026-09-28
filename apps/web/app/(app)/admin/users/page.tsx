@@ -43,6 +43,10 @@ export default function AdminEmployeesPage() {
   // The staff list itself failed: say so, rather than "No staff yet".
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
+  // One account change at a time, checked in the same tick as the tap.
+  const acting = useRef(false);
+  // Asked before restricting somebody who may roam (was window.confirm).
+  const [restricting, setRestricting] = useState<User | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
@@ -103,8 +107,11 @@ export default function AdminEmployeesPage() {
   };
 
   async function toggleActive(u: User) {
+    if (acting.current) return;
+    acting.current = true;
     setErr(null);
     const res = await apiSend(`/api/admin/users/${u.id}/deactivate`);
+    acting.current = false;
     if (!res.ok) { setErr(errorMessage(res)); return; }
     await load();
   }
@@ -113,16 +120,17 @@ export default function AdminEmployeesPage() {
   // changes where somebody is allowed to stand tomorrow morning. They can still
   // always clock OUT where they clocked in, so nobody covering right now is
   // stranded by this - see punchableBranches.
-  async function toggleRoam(u: User) {
-    if (u.can_roam_branches && !window.confirm(
-      `Restrict ${u.name || u.username} to ${u.branch?.name ?? 'their own branch'}? ` +
-      `They will not be able to clock in anywhere else from now on.`,
-    )) return;
+  async function toggleRoam(u: User, confirmed = false) {
+    if (u.can_roam_branches && !confirmed) { setRestricting(u); return; }
+    if (acting.current) return;
+    acting.current = true;
+    setRestricting(null);
     setErr(null);
     const res = await apiSend(`/api/admin/users/${u.id}`, {
       method: 'PATCH',
       body: { canRoamBranches: !u.can_roam_branches },
     });
+    acting.current = false;
     if (!res.ok) { setErr(errorMessage(res)); return; }
     await load();
   }
@@ -311,6 +319,18 @@ export default function AdminEmployeesPage() {
         />
       )}
 
+      {restricting && (
+        <Modal
+          title={`Restrict ${restricting.name || restricting.username}?`}
+          onClose={() => setRestricting(null)}
+          footer={<><Button variant="secondary" onClick={() => setRestricting(null)}>Cancel</Button><Button variant="danger" onClick={() => void toggleRoam(restricting, true)}>Restrict</Button></>}
+        >
+          <p className="text-sm text-muted">
+            From now on they can clock in only at {restricting.branch?.name ?? 'their own branch'}. Anybody covering
+            somewhere else right now can still clock out where they clocked in.
+          </p>
+        </Modal>
+      )}
       {removing && (
         <Modal
           title={`Remove ${removing.name || removing.username}?`}

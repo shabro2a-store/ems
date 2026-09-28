@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { apiGet, apiSend } from '@/lib/api';
+import { apiGet } from '@/lib/api';
 import { BrandMark } from '@/components/BrandMark';
 import DriverAlarm from '@/components/field/DriverAlarm';
+import { logout } from '@/lib/logout';
 
 interface Tab {
   href: string;
@@ -41,11 +42,6 @@ export default function FieldShell({ children }: { children: React.ReactNode }) 
     // Hours, penalties, bonuses and advances - not earnings (the owner's ruling).
     { href: '/employee/payroll', label: 'Month', icon: ICON.month, match: (p) => p.startsWith('/employee/payroll') },
   ];
-
-  async function logout() {
-    await apiSend('/api/auth/logout');
-    window.location.href = '/login';
-  }
 
   return (
     <div className="min-h-screen bg-bg pb-24">

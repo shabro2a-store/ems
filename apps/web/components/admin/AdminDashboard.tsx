@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiGet, apiSend, centsToUsd, formatBeirutTime, errorMessage } from '@/lib/api';
+import { apiGet, apiSend, centsToUsd, formatBeirutTime, formatHours, errorMessage } from '@/lib/api';
 import { Card, CardBody, CardHeader, Badge, StatTile, EmptyState, Spinner, Select, Button, Alert } from '@/components/ui';
 import { TelegramAlertsCard } from './TelegramAlertsCard';
 import { usePolling } from '@/lib/usePolling';
@@ -554,7 +554,7 @@ export default function AdminDashboard() {
                     <div className="min-w-0 flex-1 text-sm">
                       <div className="font-medium">
                         {l.username} · {l.kind === 'DAY_OFF' ? 'day off' : 'hours change'}
-                        {l.kind === 'HOURS_CHANGE' && l.off_min != null ? ` → ${l.off_min / 60}h off` : ''}
+                        {l.kind === 'HOURS_CHANGE' && l.off_min != null ? ` → ${formatHours(l.off_min)} off` : ''}
                       </div>
                       <div className="text-xs text-muted">
                         {l.start_date}{l.end_date !== l.start_date ? ` → ${l.end_date}` : ''}{l.note ? ` · ${l.note}` : ''}
@@ -576,7 +576,7 @@ export default function AdminDashboard() {
                                 const n = (d as { overrides_created?: number })?.overrides_created ?? 0;
                                 const days = `${n} day${n === 1 ? '' : 's'}`;
                                 return l.kind === 'HOURS_CHANGE' && l.off_min != null
-                                  ? `Time off approved — ${l.username} owes ${l.off_min / 60}h less (${days} updated on their schedule).`
+                                  ? `Time off approved — ${l.username} owes ${formatHours(l.off_min)} less (${days} updated on their schedule).`
                                   : `Day off approved — ${days} marked off on ${l.username}'s schedule.`;
                               },
                             })

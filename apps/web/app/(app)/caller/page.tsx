@@ -5,6 +5,7 @@ import { apiGet, apiSend, errorMessage } from '@/lib/api';
 import { Alert, EmptyState, Spinner } from '@/components/ui';
 import { BrandMark } from '@/components/BrandMark';
 import { usePolling } from '@/lib/usePolling';
+import { logout } from '@/lib/logout';
 
 interface Driver {
   id: string;
@@ -71,11 +72,17 @@ export default function CallerBoard() {
     return () => clearInterval(t);
   }, []);
 
+  // Checked and set in the same tick: two taps on one card used to both get
+  // past the state, which only updates on the next render, and ring twice.
+  const ringingNow = useRef(new Set<string>());
+
   async function ring(d: Driver) {
-    if (!d.available) return;
+    if (!d.available || ringingNow.current.has(d.id)) return;
+    ringingNow.current.add(d.id);
     setJustRang((p) => ({ ...p, [d.id]: Date.now() }));
     setRingError(null);
     const r = await apiSend('/api/caller/ring', { body: { driverId: d.id } });
+    ringingNow.current.delete(d.id);
     if (!r.ok) {
       // Never leave "Ringing…" on a card whose phone was not rung.
       setJustRang((p) => { const n = { ...p }; delete n[d.id]; return n; });
@@ -85,11 +92,6 @@ export default function CallerBoard() {
     load();
     // clear the local "ringing…" flash after a few seconds
     setTimeout(() => setJustRang((p) => { const n = { ...p }; delete n[d.id]; return n; }), 6000);
-  }
-
-  async function logout() {
-    await apiSend('/api/auth/logout');
-    window.location.href = '/login';
   }
 
   const sorted = [...drivers].sort((a, b) => rank(a) - rank(b));

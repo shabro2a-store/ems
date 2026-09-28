@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
-import { apiSend } from '@/lib/api';
 import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 import { BrandMark } from '@/components/BrandMark';
+import { logout } from '@/lib/logout';
 
 export interface NavItem {
   href: string;
@@ -29,11 +29,6 @@ export interface AdminNavProps {
 export default function AdminNav({ username }: AdminNavProps) {
   const pathname = usePathname();
   const [pwOpen, setPwOpen] = useState(false);
-
-  async function logout() {
-    await apiSend('/api/auth/logout');
-    window.location.href = '/login';
-  }
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur">

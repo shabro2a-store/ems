@@ -75,7 +75,11 @@ export default function EnableAlerts() {
     return () => { alive = false; };
   }, []);
 
+  const [enabling, setEnabling] = useState(false);
+
   async function enable() {
+    if (enabling) return;
+    setEnabling(true);
     const perm = await Notification.requestPermission();
     if (perm === 'granted') {
       const ok = await subscribe();
@@ -83,6 +87,7 @@ export default function EnableAlerts() {
     } else {
       setState('denied');
     }
+    setEnabling(false);
   }
 
   if (state === 'hidden') return null;
@@ -93,7 +98,7 @@ export default function EnableAlerts() {
       <div className={`${base} border-primary/30 bg-primary-subtle`}>
         <div className="flex items-center justify-between gap-3">
           <span>🔔 Turn on order alerts so you ring even when your phone is locked.</span>
-          <button onClick={enable} className="flex-none rounded-lg bg-primary px-3 py-1.5 font-semibold text-white">
+          <button onClick={enable} disabled={enabling} className="flex-none rounded-lg bg-primary px-3 py-1.5 font-semibold text-white disabled:opacity-50">
             Enable
           </button>
         </div>
