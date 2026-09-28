@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, apiGet, apiSend, centsToUsd, csrfFromCookie, errorMessage, formatBeirutTime } from '@/lib/api';
 import { PageHeader, Card, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile } from '@/components/ui';
 import { PayrollCards } from '@/components/admin/PayrollCards';
@@ -73,15 +73,22 @@ export default function AdminPayrollPage() {
   const [blockedCreditFor, setBlockedCreditFor] = useState<Row | null>(null);
   const [salaryFor, setSalaryFor] = useState<Row | null>(null);
 
+  // The month the lock state belongs to. A reload of the same month keeps it -
+  // clearing it flashed every open dialog to "closed" and disabled its buttons
+  // for the length of the request - while a new month is locked until the
+  // server says otherwise.
+  const openFor = useRef<string | null>(null);
+
   async function load() {
     setLoading(true);
     setErr(null);
-    setOpen(null);
+    if (openFor.current !== month) setOpen(null);
     const r = await apiGet<{ rows: Row[]; totals: Totals; branches: Branch[]; month: string; open: boolean }>(
       `/api/admin/payroll?${month ? `month=${month}&` : ''}branchId=${branchId}`,
     );
     if (r.ok) {
       if (!month) setMonth(r.data.month);
+      openFor.current = r.data.month;
       setOpen(r.data.open);
       setRows(r.data.rows);
       setTotals(r.data.totals);
@@ -638,14 +645,15 @@ function PenaltiesModal({ row, month, closed, onClose, onChanged }: { row: Row; 
   }
 
   return (
-    <Modal size="lg" title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+    <Modal size="lg" title={`Penalties · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      {/* In the body: it used to sit inside the Close button, crushed onto one line. */}
       {closed && (
         <div className="mb-3">
           <Alert tone="warning">
             {month} is closed — this is the record as it was paid. Nothing here can be changed.
           </Alert>
         </div>
-      )}Close</Button>}>
+      )}
       <p className="mb-3 text-sm text-muted">
         Automatic penalties for covering fewer hours than the day required: double the shortfall is
         docked, never more than the day itself earned. Remove one when the employee gave notice —
@@ -687,6 +695,7 @@ function PenaltiesModal({ row, month, closed, onClose, onChanged }: { row: Row; 
                       size="sm"
                       variant="secondary"
                       loading={busy === `${id}|remove`}
+                      disabled={closed || (busy !== null && busy !== `${id}|remove`)}
                       onClick={() => setWaived(p, true)}
                     >
                       Confirm removal
@@ -696,6 +705,9 @@ function PenaltiesModal({ row, month, closed, onClose, onChanged }: { row: Row; 
                     size="sm"
                     variant={confirming === id ? 'danger' : p.waived ? 'secondary' : 'ghost'}
                     loading={busy === (p.waived ? `${id}|restore` : `${id}|remove`)}
+                    // A closed month is the record as it was paid - and one
+                    // decision at a time, so a second tap cannot race the first.
+                    disabled={closed || (busy !== null && busy !== (p.waived ? `${id}|restore` : `${id}|remove`))}
                     onClick={() => {
                       if (p.waived && confirming !== id) {
                         setConfirming(id);
@@ -766,14 +778,15 @@ function OvertimeModal({ row, month, closed, onClose, onChanged }: { row: Row; m
   }
 
   return (
-    <Modal size="lg" title={`Overtime · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+    <Modal size="lg" title={`Overtime · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      {/* In the body: it used to sit inside the Close button, crushed onto one line. */}
       {closed && (
         <div className="mb-3">
           <Alert tone="warning">
             {month} is closed — this is the record as it was paid. Nothing here can be changed.
           </Alert>
         </div>
-      )}Close</Button>}>
+      )}
       <p className="mb-3 text-sm text-muted">
         Every day worked past its scheduled hours. Overtime is paid automatically, so a pending day
         is already in their pay — revoking one deducts it. Undo puts a day back to pending.
@@ -800,15 +813,15 @@ function OvertimeModal({ row, month, closed, onClose, onChanged }: { row: Row; m
                 <div className="flex shrink-0 gap-2">
                   {o.decision === null ? (
                     <>
-                      <Button size="sm" variant="secondary" loading={busy === `${o.date}|ACCEPTED`} disabled={closed} onClick={() => decide(o, 'ACCEPTED')}>
+                      <Button size="sm" variant="secondary" loading={busy === `${o.date}|ACCEPTED`} disabled={closed || busy !== null} onClick={() => decide(o, 'ACCEPTED')}>
                         Accept
                       </Button>
-                      <Button size="sm" variant="ghost" loading={busy === `${o.date}|REVOKED`} disabled={closed} onClick={() => decide(o, 'REVOKED')}>
+                      <Button size="sm" variant="ghost" loading={busy === `${o.date}|REVOKED`} disabled={closed || busy !== null} onClick={() => decide(o, 'REVOKED')}>
                         Revoke
                       </Button>
                     </>
                   ) : (
-                    <Button size="sm" variant="secondary" loading={busy === `${o.date}|PENDING`} disabled={closed} onClick={() => decide(o, 'PENDING')}>
+                    <Button size="sm" variant="secondary" loading={busy === `${o.date}|PENDING`} disabled={closed || busy !== null} onClick={() => decide(o, 'PENDING')}>
                       Undo
                     </Button>
                   )}
@@ -877,14 +890,15 @@ function BlockedCreditModal({ row, month, closed, onClose, onChanged }: { row: R
   }
 
   return (
-    <Modal size="lg" title={`Blocked time · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>
+    <Modal size="lg" title={`Blocked time · ${row.username}`} onClose={onClose} footer={<Button onClick={onClose}>Close</Button>}>
+      {/* In the body: it used to sit inside the Close button, crushed onto one line. */}
       {closed && (
         <div className="mb-3">
           <Alert tone="warning">
             {month} is closed — this is the record as it was paid. Nothing here can be changed.
           </Alert>
         </div>
-      )}Close</Button>}>
+      )}
       <p className="mb-3 text-sm text-muted">
         Time the app refused their check-in for while they were at the branch. Nothing is paid until you
         accept it, and an accepted day that later changes goes back to waiting — so a day here may need
@@ -913,15 +927,15 @@ function BlockedCreditModal({ row, month, closed, onClose, onChanged }: { row: R
                 <div className="flex shrink-0 gap-2">
                   {c.decision === null ? (
                     <>
-                      <Button size="sm" variant="secondary" loading={busy === `${c.date}|ACCEPTED`} disabled={closed} onClick={() => decide(c, 'ACCEPTED')}>
+                      <Button size="sm" variant="secondary" loading={busy === `${c.date}|ACCEPTED`} disabled={closed || busy !== null} onClick={() => decide(c, 'ACCEPTED')}>
                         Accept
                       </Button>
-                      <Button size="sm" variant="ghost" loading={busy === `${c.date}|REVOKED`} disabled={closed} onClick={() => decide(c, 'REVOKED')}>
+                      <Button size="sm" variant="ghost" loading={busy === `${c.date}|REVOKED`} disabled={closed || busy !== null} onClick={() => decide(c, 'REVOKED')}>
                         Revoke
                       </Button>
                     </>
                   ) : (
-                    <Button size="sm" variant="secondary" loading={busy === `${c.date}|PENDING`} disabled={closed} onClick={() => decide(c, 'PENDING')}>
+                    <Button size="sm" variant="secondary" loading={busy === `${c.date}|PENDING`} disabled={closed || busy !== null} onClick={() => decide(c, 'PENDING')}>
                       Undo
                     </Button>
                   )}
