@@ -187,3 +187,30 @@ export function formatBeirutTime(iso: string): string {
     minute: '2-digit',
   });
 }
+
+/**
+ * Today's date in Beirut, YYYY-MM-DD - whatever the phone's own zone or clock
+ * setting says. `new Date().toISOString().slice(0, 10)` is the UTC date: from
+ * Beirut midnight until 02:00 or 03:00 it still names yesterday.
+ */
+export function beirutToday(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Beirut', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+
+/** This month in Beirut, YYYY-MM. */
+export function beirutMonth(now: Date = new Date()): string {
+  return beirutToday(now).slice(0, 7);
+}
+
+/** Minutes as "7h 05m" / "45m" - one formatter for every screen. */
+export function formatMinutes(min: number): string {
+  const m = Math.max(0, Math.round(min));
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  return h > 0 ? `${h}h ${String(rest).padStart(2, '0')}m` : `${rest}m`;
+}
+
+/** Hours to one decimal, for display: 80 minutes is 1.3h, never 1.3333333333333333h. */
+export function formatHours(min: number): string {
+  return `${Math.round((min / 60) * 10) / 10}h`;
+}

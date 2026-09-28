@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { apiGet, apiSend, centsToUsd, errorMessage } from '@/lib/api';
+import { apiGet, apiSend, beirutToday, centsToUsd, errorMessage } from '@/lib/api';
 import {
   PageHeader, Card, CardHeader, Badge, Button, Modal, Field, Input, Select, EmptyState, Alert, Spinner, StatTile,
 } from '@/components/ui';
@@ -524,23 +524,31 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
   const [err, setErr] = useState<string | null>(null);
   const [fill, setFill] = useState("8");
 
+  // Bumped by "Try again" after a failed load.
+  const [attempt, setAttempt] = useState(0);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
+      setLoadErr(null);
       const r = await apiGet<{ weeklySchedule: { weekday: number; shift_min: number | null }[]; overrides: { id: string; date: string; kind: "DAY_OFF" | "HOURS_CHANGE"; shift_min: number | null; note: string | null }[] }>(`/api/admin/schedules/${user.id}`);
-      const byWd = new Map((r.ok ? r.data.weeklySchedule : []).map((s) => [s.weekday, s]));
+      // A failed load leaves the form empty and Save disabled. It used to fill
+      // the week with seven days Off, and one Save wrote that over the real one.
+      if (!r.ok) { setLoadErr(errorMessage(r)); return; }
+      const byWd = new Map(r.data.weeklySchedule.map((s) => [s.weekday, s]));
       setDays(DAYS.map((d) => {
         const s = byWd.get(d.wd);
-        return { wd: d.wd, name: d.name, working: !!s, hours: s?.shift_min != null ? s.shift_min / 60 : 8 };
+        return { wd: d.wd, name: d.name, working: !!s, hours: s?.shift_min != null ? round1(s.shift_min / 60) : 8 };
       }));
-      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayStr = beirutToday();
       setOverrides(
-        (r.ok ? r.data.overrides : [])
+        r.data.overrides
           .map((o) => ({ ...o, date: o.date.slice(0, 10) }))
           .filter((o) => o.date >= todayStr)
           .slice(0, 8),
       );
     })();
-  }, [user.id]);
+  }, [user.id, attempt]);
 
   async function save() {
     if (!days) return;
@@ -572,7 +580,12 @@ function ScheduleModal({ user, onClose, onSaved }: { user: User; onClose: () => 
   return (
     <Modal title={`Weekly schedule · ${user.name || user.username}`} onClose={onClose}
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={save} loading={busy} disabled={!days}>Save schedule</Button></>}>
-      {!days ? (
+      {loadErr ? (
+        <div className="space-y-3">
+          <Alert tone="danger">This schedule could not be loaded, so it cannot be edited yet. {loadErr}</Alert>
+          <Button variant="secondary" onClick={() => setAttempt((a) => a + 1)}>Try again</Button>
+        </div>
+      ) : !days ? (
         <div className="grid place-items-center py-8"><Spinner /></div>
       ) : (
         <div className="space-y-3">
