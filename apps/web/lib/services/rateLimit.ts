@@ -11,55 +11,19 @@ const PUNCH_WINDOW_MS = 60_000;
 export async function consumePunchRateLimit(
   opts: ConsumePunchOpts,
 ): Promise<{ allowed: boolean; retryAfterSec?: number }> {
-  const identifier = `user:${opts.userId}:punch`;
-  const now = new Date();
-  const windowAgo = new Date(now.getTime() - PUNCH_WINDOW_MS);
-
-  const existing = await prisma.rateLimitBucket.findUnique({
-    where: { identifier },
-  });
-
-  if (!existing) {
-    await prisma.rateLimitBucket.create({
-      data: {
-        identifier,
-        tokens: PUNCH_RATE_LIMIT_PER_MIN - 1,
-        refilled_at: now,
-      },
-    });
-    return { allowed: true };
-  }
-
-  if (existing.refilled_at < windowAgo) {
-    await prisma.rateLimitBucket.update({
-      where: { identifier },
-      data: { tokens: PUNCH_RATE_LIMIT_PER_MIN - 1, refilled_at: now },
-    });
-    return { allowed: true };
-  }
-
-  if (existing.tokens <= 0) {
-    const retryAfterSec = Math.max(
-      1,
-      Math.ceil((windowAgo.getTime() + PUNCH_WINDOW_MS - now.getTime()) / 1000),
-    );
-    return { allowed: false, retryAfterSec };
-  }
-
-  await prisma.rateLimitBucket.update({
-    where: { identifier },
-    data: { tokens: { decrement: 1 } },
-  });
-  return { allowed: true };
+  // One statement (consumeRateLimit): reading the bucket and then creating it
+  // let two taps at once both insert, and the loser came back as a 500.
+  return consumeRateLimit(prisma, `user:${opts.userId}:punch`, PUNCH_RATE_LIMIT_PER_MIN, PUNCH_WINDOW_MS);
 }
 
 /**
  * Take one attempt from `identifier`'s bucket of `limit` per `windowMs`, in a
  * single statement.
  *
- * The limiters above read the bucket and then write it, so attempts arriving
- * together all read "tokens left" before any of them wrote - twenty at once
- * went through a limit of five. An upsert is one statement, and Postgres
+ * Every limiter goes through here. They used to read the bucket and then
+ * write it, so attempts arriving together all read "tokens left" before any of
+ * them wrote - twenty at once went through a limit of five, and two at once on
+ * an empty bucket both inserted it, the loser failing with a 500. An upsert is one statement, and Postgres
  * serialises it on the row: exactly `limit` get through, whatever the timing.
  * The count may go below zero while the window lasts; the first attempt after
  * it starts a fresh one.
