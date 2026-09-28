@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { apiGet, centsToUsd } from '@/lib/api';
+import { apiGet, beirutMonth, centsToUsd } from '@/lib/api';
 import { Card, CardBody, CardHeader, Field, Input, Spinner, StatTile } from '@/components/ui';
 
 // The owner's ruling: staff track their hours, advances, penalties and bonuses
@@ -22,10 +22,6 @@ interface MonthData {
   advances_cent: number;
 }
 
-function currentMonth(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
 
 function dayLabel(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Beirut' });
@@ -38,7 +34,8 @@ function duration(min: number): string {
 }
 
 export default function EmployeeMonthPage() {
-  const [month, setMonth] = useState(currentMonth());
+  // Beirut's month, whatever zone the phone is set to.
+  const [month, setMonth] = useState(beirutMonth());
   const [data, setData] = useState<MonthData | null>(null);
   const [loading, setLoading] = useState(true);
 

@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiGet, apiSend, errorMessage } from '@/lib/api';
+import { apiGet, apiSend, beirutToday, errorMessage } from '@/lib/api';
 import { Card, CardBody, CardHeader, StatTile, Field, Input, Select, Textarea, Button, Badge, Alert, EmptyState } from '@/components/ui';
 
 interface Upcoming { date: string; kind: string; shift_min: number | null; note: string | null }
 interface Summary { pending: number; upcoming: Upcoming[] }
 
+// Beirut's date, not the UTC one: after midnight Beirut, toISOString() still
+// said yesterday, and the server refuses a start in the past.
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return beirutToday();
 }
 
 export default function EmployeeLeavePage() {
