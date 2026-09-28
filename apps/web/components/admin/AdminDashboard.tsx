@@ -249,14 +249,19 @@ export default function AdminDashboard() {
                   <div className="tabular text-xl font-semibold">{Math.max(0, ...trends.map((p) => p.present))}</div>
                 </div>
               </div>
-              <div className="flex h-24 items-end gap-2">
+              {/* Each bar sits in a track that stretches to the chart's height,
+                  so its percentage has something to be a percentage OF. The
+                  columns used to size to their content, and every bar drew 0px. */}
+              <div className="flex h-24 items-stretch gap-2">
                 {trends.map((p, i) => (
                   <div key={p.date} className="flex flex-1 flex-col items-center gap-1.5">
-                    <div
-                      className={`w-full max-w-[34px] rounded-t ${i === trends.length - 1 ? 'bg-primary' : 'bg-primary/70'}`}
-                      style={{ height: `${Math.max(4, (p.present / maxPresent) * 100)}%` }}
-                      title={`${p.present} present · ${p.hours}h`}
-                    />
+                    <div className="flex w-full flex-1 items-end justify-center">
+                      <div
+                        className={`w-full max-w-[34px] rounded-t ${i === trends.length - 1 ? 'bg-primary' : 'bg-primary/70'}`}
+                        style={{ height: `${Math.max(4, (p.present / maxPresent) * 100)}%` }}
+                        title={`${p.present} present · ${p.hours}h`}
+                      />
+                    </div>
                     <span className="text-[11px] text-muted">{p.label}</span>
                   </div>
                 ))}
