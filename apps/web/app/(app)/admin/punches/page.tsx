@@ -32,7 +32,6 @@ export default function AdminPunchesPage() {
   const [userId, setUserId] = useState('all');
   const [staff, setStaff] = useState<Staff[]>([]);
   const [hasMore, setHasMore] = useState(false);
-  const [limit, setLimit] = useState(200);
   const [loading, setLoading] = useState(true);
   const [target, setTarget] = useState<Punch | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<Punch | null>(null);
@@ -43,6 +42,7 @@ export default function AdminPunchesPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -58,7 +58,9 @@ export default function AdminPunchesPage() {
     if (p.ok) {
       setPunches(p.data.punches);
       setHasMore(p.data.has_more);
-      setLimit(p.data.limit);
+      setLoadErr(null);
+    } else {
+      setLoadErr(errorMessage(p));
     }
     if (b.ok) setBranches(b.data.branches);
     if (u.ok) setStaff(u.data.users.filter((x) => x.role === 'EMPLOYEE' || x.role === 'DRIVER'));
@@ -180,7 +182,14 @@ export default function AdminPunchesPage() {
       {loading ? (
         <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
       ) : punches.length === 0 ? (
-        <EmptyState title="No punches" hint="Check-ins and check-outs will appear here." />
+        loadErr ? (
+          <div className="space-y-3">
+            <Alert tone="danger">The punches could not be loaded. {loadErr}</Alert>
+            <Button variant="secondary" onClick={load}>Try again</Button>
+          </div>
+        ) : (
+          <EmptyState title="No punches" hint="Check-ins and check-outs will appear here." />
+        )
       ) : (
         <>
         {/* A phone gets one card per punch; the table is for md and up. */}

@@ -127,7 +127,9 @@ export default function CallerBoard() {
       {loading ? (
         <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
       ) : drivers.length === 0 ? (
-        <EmptyState title="No drivers on this board" hint="This branch's drivers are always listed. One who can work at any branch appears once they clock in here." />
+        // Offline with nothing loaded yet is not an empty board: the offline
+        // notice above says what is wrong, and "no drivers" would contradict it.
+        offline ? null : <EmptyState title="No drivers on this board" hint="This branch's drivers are always listed. One who can work at any branch appears once they clock in here." />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {sorted.map((d) => {

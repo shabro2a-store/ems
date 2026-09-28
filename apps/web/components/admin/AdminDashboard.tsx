@@ -64,6 +64,8 @@ export default function AdminDashboard() {
   const [ov, setOv] = useState<Overview | null>(null);
   const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
+  // Which side panels failed to load: shown as such, not as "no activity" or an empty week.
+  const [auxFailed, setAuxFailed] = useState<{ activity: boolean; trends: boolean }>({ activity: false, trends: false });
   const [updated, setUpdated] = useState<Date | null>(null);
   // True while the last poll failed: the figures on screen are the last ones
   // that arrived, and the header must not keep calling them live.
@@ -90,6 +92,7 @@ export default function AdminDashboard() {
     ]);
     if (a.ok) setActivity(a.data.events);
     if (t.ok) setTrends(t.data.points);
+    setAuxFailed({ activity: !a.ok, trends: !t.ok });
   }, []);
 
   useEffect(() => {
@@ -249,6 +252,9 @@ export default function AdminDashboard() {
                   <div className="tabular text-xl font-semibold">{Math.max(0, ...trends.map((p) => p.present))}</div>
                 </div>
               </div>
+              {auxFailed.trends && trends.length === 0 && (
+                <p className="text-sm text-danger">This week could not be loaded. Refresh the page to try again.</p>
+              )}
               {/* Each bar sits in a track that stretches to the chart's height,
                   so its percentage has something to be a percentage OF. The
                   columns used to size to their content, and every bar drew 0px. */}
@@ -598,7 +604,9 @@ export default function AdminDashboard() {
             <CardHeader title="Activity" subtitle="Latest events" />
             {activity.length === 0 ? (
               <CardBody>
-                <p className="text-sm text-muted">No recent activity.</p>
+                <p className={`text-sm ${auxFailed.activity ? 'text-danger' : 'text-muted'}`}>
+                  {auxFailed.activity ? 'Activity could not be loaded. Refresh the page to try again.' : 'No recent activity.'}
+                </p>
               </CardBody>
             ) : (
               <ul className="max-h-72 overflow-y-auto py-1">

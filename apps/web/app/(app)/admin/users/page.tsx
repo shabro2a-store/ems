@@ -40,6 +40,9 @@ export default function AdminEmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The staff list itself failed: say so, rather than "No staff yet".
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
@@ -62,7 +65,8 @@ export default function AdminEmployeesPage() {
       apiGet<{ branches: Branch[] }>('/api/admin/branches'),
       apiGet<{ people: { id: string; status: Status['status']; since_min: number; over: boolean }[] }>('/api/admin/overview'),
     ]);
-    if (u.ok) setUsers(u.data.users);
+    if (u.ok) { setUsers(u.data.users); setLoadErr(null); }
+    else setLoadErr(errorMessage(u));
     // A closed branch is never offered for assignment: an account filed against
     // one cannot punch anywhere. It stays in history filters, which is a
     // different question.
@@ -128,19 +132,23 @@ export default function AdminEmployeesPage() {
   // has to be able to reconstruct, so it is deactivated instead and the message
   // says which happened rather than leaving the owner guessing.
   async function confirmRemove() {
-    if (!removing) return;
+    if (!removing || removeBusy) return;
     setErr(null);
+    setNotice(null);
+    setRemoveBusy(true);
     const res = await apiSend<{ deleted: boolean; retired: boolean; username_freed?: string }>(
       `/api/admin/users/${removing.id}`,
       { method: 'DELETE' },
     );
+    setRemoveBusy(false);
     const name = removing.name || removing.username;
     setRemoving(null);
     if (!res.ok) { setErr(errorMessage(res)); return; }
-    setErr(
+    // A success, so the success banner - it used to go through setErr and show red.
+    setNotice(
       res.data.retired
         ? `${name} is gone: the login is dead and "${res.data.username_freed}" is free to use again. Their punches stay where they are, so the months they worked still pay out — scroll payroll back and they are still there. From next month they simply will not appear.`
-        : null,
+        : `${name} removed.`,
     );
     await load();
   }
@@ -178,6 +186,11 @@ export default function AdminEmployeesPage() {
 
       {loading ? (
         <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
+      ) : loadErr ? (
+        <div className="space-y-3">
+          <Alert tone="danger">The staff list could not be loaded. {loadErr}</Alert>
+          <Button variant="secondary" onClick={load}>Try again</Button>
+        </div>
       ) : filtered.length === 0 ? (
         <EmptyState title="No staff yet" hint="Add your first employee to get started." />
       ) : (
@@ -305,7 +318,7 @@ export default function AdminEmployeesPage() {
           footer={
             <>
               <Button variant="secondary" onClick={() => setRemoving(null)}>Cancel</Button>
-              <Button variant="danger" onClick={confirmRemove}>Remove</Button>
+              <Button variant="danger" onClick={confirmRemove} loading={removeBusy}>Remove</Button>
             </>
           }
         >

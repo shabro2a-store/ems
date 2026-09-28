@@ -17,6 +17,7 @@ export default function EmployeeAdvancesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   async function refresh() {
     const [s, l] = await Promise.all([
@@ -24,7 +25,8 @@ export default function EmployeeAdvancesPage() {
       apiGet<{ advances: Advance[] }>('/api/me/advances?view=list'),
     ]);
     if (s.ok) setSummary(s.data);
-    if (l.ok) setList(l.data.advances);
+    if (l.ok) { setList(l.data.advances); setLoadErr(null); }
+    else setLoadErr(errorMessage(l));
   }
   useEffect(() => { refresh(); }, []);
 
@@ -65,7 +67,9 @@ export default function EmployeeAdvancesPage() {
 
       <div>
         <h2 className="mb-2 text-sm font-semibold">Your requests</h2>
-        {list.length === 0 ? (
+        {loadErr ? (
+          <Alert tone="danger">Your requests could not be loaded. {loadErr}</Alert>
+        ) : list.length === 0 ? (
           <EmptyState title="No requests yet" />
         ) : (
           <Card>

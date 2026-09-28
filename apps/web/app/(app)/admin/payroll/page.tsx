@@ -192,7 +192,9 @@ export default function AdminPayrollPage() {
 
       {loading ? (
         <div className="grid place-items-center py-16 text-muted"><Spinner /></div>
-      ) : rows.length === 0 ? (
+      ) : err && rows.length === 0 ? null : rows.length === 0 ? (
+        // Only when the month actually loaded: beside a failure it read as
+        // "nobody worked", which is a different, and false, statement.
         <EmptyState title="No payroll data" hint="No active staff for this month/branch." />
       ) : (
         <>

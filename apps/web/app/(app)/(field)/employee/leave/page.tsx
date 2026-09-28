@@ -22,9 +22,13 @@ export default function EmployeeLeavePage() {
   const [ok, setOk] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Distinct from "nothing scheduled": a failed load used to say exactly that.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+
   async function refresh() {
     const r = await apiGet<Summary>('/api/me/leave');
-    if (r.ok) setSummary(r.data);
+    if (r.ok) { setSummary(r.data); setLoadErr(null); }
+    else setLoadErr(errorMessage(r));
   }
   useEffect(() => { refresh(); }, []);
 
@@ -75,7 +79,9 @@ export default function EmployeeLeavePage() {
 
       <div>
         <h2 className="mb-2 text-sm font-semibold">Upcoming</h2>
-        {!summary || summary.upcoming.length === 0 ? (
+        {loadErr ? (
+          <Alert tone="danger">Your leave could not be loaded. {loadErr}</Alert>
+        ) : !summary || summary.upcoming.length === 0 ? (
           <EmptyState title="Nothing scheduled" hint="Approved days off will show here." />
         ) : (
           <Card>
