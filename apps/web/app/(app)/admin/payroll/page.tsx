@@ -154,7 +154,7 @@ export default function AdminPayrollPage() {
       {open === false && (
         <div className="mb-3">
           <Alert tone="warning">
-            🔒 <b>{month} is closed.</b> It has already been paid, so bonuses, deductions and
+            <b>{month} is closed.</b> It has already been paid, so bonuses, deductions and
             rulings can only be made on the current month. The figures below are read-only. A punch
             that was actually wrong can still be corrected on the Punches screen.
           </Alert>
@@ -330,7 +330,7 @@ export default function AdminPayrollPage() {
                             title={closed ? `${month} is closed — adjust the current month instead.` : undefined}
                             onClick={() => setAdjust(r)}
                           >
-                            ＋ Adjust
+                            + Adjust
                           </Button>
                         </td>
                       </tr>

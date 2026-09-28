@@ -196,14 +196,14 @@ export default function DriverAlarm() {
           onClick={arm}
           className="w-full rounded-xl border border-warning/30 bg-warning-subtle px-4 py-3 text-left text-sm"
         >
-          🔔 <b>Tap here to arm the siren.</b> Until you do, an order call can only buzz — it cannot
+          <b>Tap here to arm the siren.</b> Until you do, an order call can only buzz — it cannot
           make a sound.
         </button>
       )}
 
       {!ringing && armed && ios && (
         <div className="w-full rounded-xl border border-warning/30 bg-warning-subtle px-4 py-3 text-sm">
-          📱 <b>On iPhone the siren only sounds while this screen is open.</b> Leave the app on
+          <b>On iPhone the siren only sounds while this screen is open.</b> Leave the app on
           screen while you wait for orders — if you switch away or lock the phone, a call arrives as
           a normal notification instead.
         </div>
@@ -215,14 +215,14 @@ export default function DriverAlarm() {
           className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-8 p-6 text-center animate-pulse-alarm"
         >
           <div>
-            <div className="text-6xl">📞</div>
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden className="mx-auto"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z" strokeLinejoin="round" /></svg>
             <h2 className="mt-4 text-3xl font-extrabold text-white drop-shadow">Order ready!</h2>
             <p className="mt-2 text-lg font-medium text-white/90">
               The counter is calling you to collect an order.
             </p>
             {!armed && (
               <p className="mt-3 rounded-lg bg-black/30 px-3 py-2 text-base font-semibold text-white">
-                🔇 Tap the screen once to turn the siren on.
+                Tap the screen once to turn the siren on.
               </p>
             )}
           </div>

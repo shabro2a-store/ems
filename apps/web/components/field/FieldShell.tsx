@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { apiGet } from '@/lib/api';
 import { BrandMark } from '@/components/BrandMark';
 import DriverAlarm from '@/components/field/DriverAlarm';
+import { Button } from '@/components/ui';
 import { logout } from '@/lib/logout';
 
 interface Tab {
@@ -48,16 +49,17 @@ export default function FieldShell({ children }: { children: React.ReactNode }) 
       <header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur">
         <div className="mx-auto flex max-w-md items-center justify-between px-4 py-2.5">
           <BrandMark />
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={logout}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface-muted hover:text-content"
+            className="gap-1.5 px-2.5 text-muted hover:text-content"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path d="M10 17l5-5-5-5M15 12H3M21 3v18" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             Logout
-          </button>
+          </Button>
         </div>
       </header>
 

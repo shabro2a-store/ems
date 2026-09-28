@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiGet, apiSend } from '@/lib/api';
+import { Button } from '@/components/ui';
 
 type State = 'hidden' | 'prompt' | 'denied' | 'ios-install' | 'error';
 
@@ -97,10 +98,10 @@ export default function EnableAlerts() {
     return (
       <div className={`${base} border-primary/30 bg-primary-subtle`}>
         <div className="flex items-center justify-between gap-3">
-          <span>🔔 Turn on order alerts so you ring even when your phone is locked.</span>
-          <button onClick={enable} disabled={enabling} className="flex-none rounded-lg bg-primary px-3 py-1.5 font-semibold text-white disabled:opacity-50">
+          <span>Turn on order alerts so you ring even when your phone is locked.</span>
+          <Button size="sm" className="flex-none" onClick={enable} loading={enabling}>
             Enable
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -108,14 +109,14 @@ export default function EnableAlerts() {
   if (state === 'ios-install') {
     return (
       <div className={`${base} border-warning/30 bg-warning-subtle`}>
-        📲 To get alerts when your phone is locked: tap <b>Share</b> → <b>Add to Home Screen</b>, then open the app from your home screen.
+        To get alerts when your phone is locked: tap <b>Share</b> → <b>Add to Home Screen</b>, then open the app from your home screen.
       </div>
     );
   }
   if (state === 'denied') {
     return (
       <div className={`${base} border-warning/30 bg-warning-subtle`}>
-        🔕 Notifications are blocked. Enable them for this site in your phone settings to get order alerts when the app is closed.
+        Notifications are blocked. Enable them for this site in your phone settings to get order alerts when the app is closed.
       </div>
     );
   }

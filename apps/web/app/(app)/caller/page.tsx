@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend, errorMessage } from '@/lib/api';
-import { Alert, EmptyState, Spinner } from '@/components/ui';
+import { Alert, Button, EmptyState, Spinner } from '@/components/ui';
 import { BrandMark } from '@/components/BrandMark';
 import { usePolling } from '@/lib/usePolling';
 import { logout } from '@/lib/logout';
@@ -100,16 +100,18 @@ export default function CallerBoard() {
     <div className="mx-auto max-w-4xl px-4 py-4">
       <header className="mb-5 flex items-center justify-between gap-3">
         <BrandMark subtitle={branch ?? 'Your branch'} />
-        <button
+        <Button
+            size="sm"
+            variant="ghost"
           type="button"
           onClick={logout}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface-muted hover:text-content"
+          className="gap-1.5 px-2.5 text-muted hover:text-content"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path d="M10 17l5-5-5-5M15 12H3M21 3v18" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           Logout
-        </button>
+        </Button>
       </header>
       <div className="mb-4">
         <h1 className="text-xl font-semibold tracking-tight">Drivers</h1>

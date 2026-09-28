@@ -136,7 +136,7 @@ export default function AdminBranchesPage() {
                   : `Show archived (${branches.filter((b) => !b.is_active && !b.deleted_at).length})`}
               </Button>
             )}
-            <Button onClick={() => setAdding(true)}>＋ Add branch</Button>
+            <Button onClick={() => setAdding(true)}>+ Add branch</Button>
           </>
         }
       />

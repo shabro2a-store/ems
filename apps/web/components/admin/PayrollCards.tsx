@@ -181,7 +181,7 @@ export function PayrollCards<R extends PayrollCardRow>({
                     title={closed ? `${month} is closed — adjust the current month instead.` : undefined}
                     onClick={() => on.adjust(r)}
                   >
-                    ＋ Adjust
+                    + Adjust
                   </Button>
                 </div>
               </li>

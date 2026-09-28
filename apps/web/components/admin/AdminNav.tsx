@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { ChangePasswordModal } from '@/components/ChangePasswordModal';
 import { BrandMark } from '@/components/BrandMark';
 import { logout } from '@/lib/logout';
+import { Button } from '@/components/ui';
 
 export interface NavItem {
   href: string;
@@ -35,27 +36,29 @@ export default function AdminNav({ username }: AdminNavProps) {
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
         <BrandMark subtitle={username} />
         <div className="flex items-center gap-1">
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={() => setPwOpen(true)}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface-muted hover:text-content"
+            className="gap-1.5 px-2.5 text-muted hover:text-content"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <rect x="3" y="11" width="18" height="10" rx="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" strokeLinecap="round" />
             </svg>
             <span className="hidden sm:inline">Password</span>
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={logout}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface-muted hover:text-content"
+            className="gap-1.5 px-2.5 text-muted hover:text-content"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path d="M10 17l5-5-5-5M15 12H3M21 3v18" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             Logout
-          </button>
+          </Button>
         </div>
       </div>
       {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}

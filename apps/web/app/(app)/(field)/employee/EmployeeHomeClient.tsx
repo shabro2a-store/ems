@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiGet, apiSend, errorMessage, formatBeirutTime } from '@/lib/api';
 import { fixIsFresh, STALE_FIX_MESSAGE, type GpsFix } from '@/lib/gpsFix';
-import { Card, CardBody, StatTile, Alert } from '@/components/ui';
+import { Card, CardBody, StatTile, Alert, Button } from '@/components/ui';
 import { usePolling } from '@/lib/usePolling';
 
 interface TodayPayload {
@@ -112,7 +112,7 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Hi {username} 👋</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Hi {username}</h1>
         <p className="text-sm text-muted">{branch.name}</p>
       </div>
 
@@ -192,8 +192,8 @@ export default function EmployeeHomeClient({ username, branch }: { username: str
         <div className="rounded-xl border border-dashed border-warning/40 bg-warning-subtle p-3">
           <div className="mb-2 text-xs font-semibold text-warning">Dev bypass (testing without GPS)</div>
           <div className="flex gap-2">
-            <button disabled={busy} onClick={() => devPunch('IN')} className="h-11 flex-1 rounded-lg bg-warning text-sm font-medium text-white disabled:opacity-50">Dev IN</button>
-            <button disabled={busy} onClick={() => devPunch('OUT')} className="h-11 flex-1 rounded-lg bg-warning/80 text-sm font-medium text-white disabled:opacity-50">Dev OUT</button>
+            <Button variant="secondary" className="flex-1" disabled={busy} onClick={() => devPunch('IN')}>Dev IN</Button>
+            <Button variant="secondary" className="flex-1" disabled={busy} onClick={() => devPunch('OUT')}>Dev OUT</Button>
           </div>
         </div>
       )}

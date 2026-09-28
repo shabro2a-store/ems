@@ -177,7 +177,7 @@ export default function AdminEmployeesPage() {
               <option value="all">All branches</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </Select>
-            <Button onClick={() => { setErr(null); setCreateOpen(true); }}>＋ Add employee</Button>
+            <Button onClick={() => { setErr(null); setCreateOpen(true); }}>+ Add employee</Button>
           </>
         }
       />

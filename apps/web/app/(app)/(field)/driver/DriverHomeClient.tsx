@@ -192,7 +192,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Hi {username} 🚚</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Hi {username}</h1>
         <p className="text-sm text-muted">{branch.name}</p>
       </div>
       <EnableAlerts />
@@ -314,7 +314,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
           disabled={busy || !ready || (!open && (!isIn || !canGoOut))}
           className={`h-28 w-full rounded-2xl text-2xl font-bold text-white shadow-sm transition-colors disabled:opacity-40 ${open ? 'bg-primary hover:bg-primary-hover' : 'bg-warning hover:brightness-95'}`}
         >
-          {busy ? 'Please wait…' : open ? 'BACK' : '📷 OUT ON ORDER'}
+          {busy ? 'Please wait…' : open ? 'BACK' : 'OUT ON ORDER'}
         </button>
         <p className="mt-1.5 text-center text-xs text-muted">
           {open
@@ -322,8 +322,8 @@ export default function DriverHomeClient({ username, branch }: { username: strin
             : !isIn
               ? 'Clock in first to go out on orders.'
               : !canGoOut
-                ? '⏳ Waiting for the counter to call you — you can go out once they ring.'
-                : `📞 You've been called. Tap OUT, photograph the receipt, then tap BACK when you return.`}
+                ? 'Waiting for the counter to call you — you can go out once they ring.'
+                : `You've been called. Tap OUT, photograph the receipt, then tap BACK when you return.`}
         </p>
       </div>
 
@@ -354,8 +354,8 @@ export default function DriverHomeClient({ username, branch }: { username: strin
         <div className="rounded-xl border border-dashed border-warning/40 bg-warning-subtle p-3">
           <div className="mb-2 text-xs font-semibold text-warning">Dev bypass (clock without GPS)</div>
           <div className="flex gap-2">
-            <button disabled={busy} onClick={() => devPunch('IN')} className="h-11 flex-1 rounded-lg bg-warning text-sm font-medium text-white disabled:opacity-50">Dev IN</button>
-            <button disabled={busy} onClick={() => devPunch('OUT')} className="h-11 flex-1 rounded-lg bg-warning/80 text-sm font-medium text-white disabled:opacity-50">Dev OUT</button>
+            <Button variant="secondary" className="flex-1" disabled={busy} onClick={() => devPunch('IN')}>Dev IN</Button>
+            <Button variant="secondary" className="flex-1" disabled={busy} onClick={() => devPunch('OUT')}>Dev OUT</Button>
           </div>
         </div>
       )}
