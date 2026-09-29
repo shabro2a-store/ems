@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "paths": {
+      "@/*": ["../web/*"],
+      "time": ["../../packages/time/src/index.ts"],
+      "notify": ["../../packages/notify/src/index.ts"],
+      "pdf/payroll": ["../../packages/pdf/src/payroll.tsx"]
+    }
+  },
+  "include": ["src/**/*.test.ts"],
+  "exclude": ["node_modules"]
+}
