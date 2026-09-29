@@ -20,6 +20,8 @@ RUN pnpm --filter db exec prisma generate
 
 COPY packages ./packages
 COPY apps ./apps
+# One bundled file run by plain node: no TypeScript translation at every start.
+RUN pnpm --filter worker build
 ENV NODE_ENV=production
 RUN addgroup -S -g 1001 nodejs && adduser -S -u 1001 -G nodejs worker
 USER worker
@@ -29,4 +31,4 @@ USER worker
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD node -e "const t=Date.parse(require('fs').readFileSync('/tmp/ems-worker-heartbeat','utf8'));process.exit(Date.now()-t<=120000?0:1)"
 WORKDIR /app/apps/worker
-CMD ["/app/node_modules/.bin/tsx", "src/index.ts"]
+CMD ["node", "dist/index.js"]
