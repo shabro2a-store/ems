@@ -30,15 +30,6 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function GET() {
-  const me = await identity();
-  if (!me) return unauthorized();
-  const role = me.role;
-  if (role !== 'ADMIN') return jsonError('FORBIDDEN', 'Admin only', 403);
-  const branches = await prisma.branch.findMany({ orderBy: { name: 'asc' } });
-  return NextResponse.json({ ok: true, data: { branches } });
-}
-
 export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   const me = await identity();
   if (!me) return unauthorized();

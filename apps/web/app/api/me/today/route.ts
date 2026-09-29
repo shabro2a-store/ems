@@ -58,7 +58,7 @@ export async function GET() {
   });
 
   // Whether the open session has stopped being a shift at all - past
-  // MAX_OPEN_SESSION_MIN. Only then do the field screens hide the clock-out
+  // AUTO_CLOSE_AFTER_MIN (20h). Only then do the field screens hide the clock-out
   // button, because only then is a clock-out something the server will refuse
   // to take at face value.
   //
