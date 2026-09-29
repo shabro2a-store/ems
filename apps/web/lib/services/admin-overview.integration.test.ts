@@ -245,14 +245,16 @@ describe('admin overview: a forgotten checkout (HTTP)', () => {
   it('shows somebody who worked today and went home as left, not absent', async () => {
     const branch = await seedTestBranch();
     const weekday = beirutWeekday(new Date());
-    const { startUtc } = todayInBeirutDateRange(todayInBeirut());
-    const elapsed = Date.now() - startUtc.getTime();
     const worker = await seedTestUser({ username: 'ov-left', branch_id: branch.id });
     const admin = await seedTestUser({ username: 'ov-admin6', role: Role.ADMIN });
     await seedTestSchedule({ user_id: worker.id, weekday, shift_min: 480 });
-    // Both punches earlier today, whatever time this runs.
-    await seedTestPunch({ user_id: worker.id, branch_id: branch.id, kind: 'IN', at: new Date(startUtc.getTime() + elapsed / 4) });
-    await seedTestPunch({ user_id: worker.id, branch_id: branch.id, kind: 'OUT', at: new Date(startUtc.getTime() + elapsed / 2) });
+    // An hour, ending ten minutes ago: the day in progress whatever time this
+    // runs. Anchored to midnight instead (a quarter and a half of the time since
+    // it), the first minutes of the day left a session too short to show any
+    // hours, and the test failed between 00:00 and 00:12 Beirut.
+    const now = Date.now();
+    await seedTestPunch({ user_id: worker.id, branch_id: branch.id, kind: 'IN', at: new Date(now - 70 * 60_000) });
+    await seedTestPunch({ user_id: worker.id, branch_id: branch.id, kind: 'OUT', at: new Date(now - 10 * 60_000) });
 
     const session = await loginAs(admin.username, 'test-pass-1');
     const data = await overview(session);
