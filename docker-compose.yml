@@ -1,7 +1,20 @@
+# Every container's log is capped at 5 files of 10 MB. Docker's default keeps
+# one file forever, and a chatty worker filled the disk in weeks.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+
 services:
   db:
-    image: postgres:16-alpine
+    # Pinned to the exact image (Postgres 16.15). A floating tag can hand a
+    # rebuild a different Postgres than the one tested; to move on, pull the tag
+    # and paste the new digest here (RUNBOOK "Updating the base images").
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     restart: unless-stopped
+    logging: *logging
+    mem_limit: 1g
     environment:
       POSTGRES_USER: ems
       # Must be set in /opt/ems/.env. Fails closed if missing - a default here
@@ -23,11 +36,32 @@ services:
       timeout: 5s
       retries: 5
 
+  # Applies new migrations, then exits. web and worker start only after it
+  # succeeds, so `docker compose up -d` alone is a safe deploy: new code never
+  # serves a database still on the old schema. It runs the web image, which
+  # carries the Prisma CLI and the migrations; nothing new is built for it.
+  migrate:
+    image: ems-web:latest
+    pull_policy: never
+    working_dir: /app/packages/db
+    command: ['node_modules/.bin/prisma', 'migrate', 'deploy']
+    environment:
+      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
+    healthcheck:
+      disable: true
+    logging: *logging
+    depends_on:
+      db:
+        condition: service_healthy
+
   web:
+    image: ems-web:latest
     build:
       context: .
       dockerfile: Dockerfile.web
     restart: unless-stopped
+    logging: *logging
+    mem_limit: 1g
     ports:
       # Loopback only, for the same reason as db above: a 0.0.0.0 publish is
       # reachable from the internet whatever UFW says, which lets anybody who
@@ -38,6 +72,9 @@ services:
     environment:
       DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
       NODE_ENV: production
+      # Below mem_limit, so a heap that keeps growing fails as a JavaScript
+      # out-of-memory error in the log rather than a silent kill.
+      NODE_OPTIONS: --max-old-space-size=768
       # Must be set in /opt/ems/.env (openssl rand -hex 32). Fails closed if missing.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - add it to /opt/ems/.env}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://app.shabro2a.com}
@@ -55,15 +92,25 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
+    image: ems-worker:latest
     build:
       context: .
       dockerfile: Dockerfile.worker
     restart: unless-stopped
+    logging: *logging
+    mem_limit: 512m
+    volumes:
+      # backup.sh's folder, read-only. The worker reads last-success from it
+      # each morning; BACKUP_WATCH_DIR=/backups in .env turns the check on.
+      - ${BACKUP_LOCAL_DIR:-/var/backups/ems}:/backups:ro
     environment:
       DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=384
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - add it to /opt/ems/.env}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-https://app.shabro2a.com}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -76,9 +123,13 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@shabro2a.com}
       # The same project as web; a job that keeps failing reports once an hour.
       SENTRY_DSN: ${SENTRY_DSN:-}
+      # Empty = no backup check. /backups once backup.sh runs (RUNBOOK section 3).
+      BACKUP_WATCH_DIR: ${BACKUP_WATCH_DIR:-}
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   db_data:

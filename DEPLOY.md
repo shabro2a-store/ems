@@ -11,7 +11,6 @@ cd /opt/ems
 git pull
 grep -q '^POSTGRES_PASSWORD=' .env || echo 'POSTGRES_PASSWORD=ems_dev_password' >> .env
 docker compose build
-docker compose run --rm -w /app/packages/db web node_modules/.bin/prisma migrate deploy
 docker compose up -d
 ```
 **The `POSTGRES_PASSWORD` line is new in this release, and it is written for a server
@@ -23,31 +22,20 @@ changes what `web` and `worker` try to log in with, and every query then fails.
 Rotating to a strong password is a **separate, later** step — see **Required
 environment** below.
 
-Build first, migrate second, swap last. `migrate deploy` is a no-op when the pull
-added no migration, so this order is always safe to run. It matters because the
-new image's code expects the new columns: bringing the containers up *before*
-migrating serves requests against a database that is still on the old schema, and
-those requests fail for as long as the migration takes. Most migrations here are
-additive (new nullable columns and tables), so applying them while the old
-containers are still serving is harmless — **the migration in this release is not
-one of those.**
+`up -d` runs the `migrate` service first - `prisma migrate deploy`, a no-op when
+the pull added no migration - and starts `web` and `worker` only once it has exited
+cleanly. New code therefore never serves a database still on the old schema. The
+cost is a few seconds with the site down: the old containers stop when the new ones
+are created, before the migration runs. **If the migration fails, `web` and `worker`
+are not started**; `docker compose logs migrate` says why, and `docker compose up -d`
+again resumes once it is fixed.
 
-**This deploy's migration is destructive, and the order above is load-bearing, not
-just good practice.** It drops `Schedule`/`ScheduleOverride`/`LeaveRequest`'s old
-`start_time`/`end_time` columns and retires the `LATE`, `EARLY_LEAVE` and
-`TIME_CHANGE` enum values for good (Postgres can only replace an enum type, not
-trim one value out of it). The new image's Prisma client no longer has those
-values in its generated types at all. If the new containers ever serve traffic
-*before* `prisma migrate deploy` has run, every read that touches a
-`PenaltyWaiver`, `PenaltyAck`, `ScheduleOverride` or `LeaveRequest` row still
-carrying one of the retired values throws a Prisma enum-deserialisation error —
-and unlike the additive case above, that does not clear up once the migration
-finishes; it keeps failing on that data until it runs. Run the four commands in
-the order given; do not let `docker compose up -d` happen ahead of the migrate
-step. The same migration also **permanently deletes** every `PenaltyWaiver` and
-`PenaltyAck` row referencing the retired kinds — irreversible without a restore.
-Take a backup first if you want the option to go back (`scripts/backup.sh`; see
-[RUNBOOK.md](RUNBOOK.md) §3).
+A migration that deletes data cannot be undone without a restore.
+`20260815150000_drop_clock_windows` is one: it drops `Schedule`/`ScheduleOverride`/
+`LeaveRequest`'s old `start_time`/`end_time` columns and permanently deletes every
+`PenaltyWaiver` and `PenaltyAck` row referencing the retired `LATE`, `EARLY_LEAVE`
+and `TIME_CHANGE` kinds. A server that has not run it yet should take a backup first
+(`scripts/backup.sh`; see [RUNBOOK.md](RUNBOOK.md) §3).
 
 First build takes ~3–5 min. The Postgres volume persists, so no data loss.
 
@@ -69,9 +57,9 @@ Postgres reads `POSTGRES_PASSWORD` **only when it initialises an empty data
 directory**. Once the volume exists, the variable no longer sets the password — it
 only tells `web` and `worker` what password to connect *with*. Put a different value
 in `.env` and the two disagree: the database keeps the old password, every query from
-the app fails authentication, and **nothing catches it** — the healthcheck is
-`pg_isready`, which does not authenticate, so `docker compose ps` reports `db` healthy
-while the app is dead.
+the app fails authentication. `db`'s healthcheck is `pg_isready`, which does not
+authenticate, so `docker compose ps` still reports `db` healthy; it is `web` that turns
+unhealthy, because `/api/health` runs a real query and answers `503 DB_UNREACHABLE`.
 
 So there are exactly two cases, and only one of them applies to this deploy:
 
@@ -159,6 +147,7 @@ curl -m 5 http://<the VPS public IP>:3000/api/health
 ```
 
 ## Seed (first deploy only, on an empty database)
+After the first `docker compose up -d` has created the tables (the `migrate` service):
 ```bash
 docker compose run --rm -w /app/packages/db web node_modules/.bin/tsx prisma/seed.ts
 ```
@@ -202,8 +191,8 @@ Without a bot token the app still works — alerts just stay in the dashboard's
    TELEGRAM_BOT_TOKEN=<the token from BotFather>
    TELEGRAM_WEBHOOK_SECRET=<random hex>
    ```
-   Set the secret explicitly — `docker-compose.yml` otherwise falls back to the
-   literal `dev_webhook_secret_change_in_prod`.
+   Without it the bot refuses every message sent to it (/start and /stop do
+   nothing), and the Telegram card in the app says so.
 3. `docker compose up -d` to pick up the new environment.
 4. Point Telegram at the webhook (substitute both values):
    ```bash
@@ -269,4 +258,5 @@ accuracy** and/or radius via Edit.
 - [ ] Cloudflare Access removed/bypassed (or every user's email whitelisted)
 - [ ] One active **CALLER** account per branch — drivers cannot start a trip
       without a ring, so a branch with no caller cannot dispatch at all
-- [ ] `docker compose ps` all healthy, `/api/health` returns ok
+- [ ] `docker compose ps` all healthy, `/api/health` returns ok (it queries the database)
+- [ ] `docker compose ps -a migrate` shows it exited with code 0

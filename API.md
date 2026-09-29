@@ -60,7 +60,8 @@ whose access token has lapsed but which carries a refresh token. Renews like `re
 → cookies cleared, `307 /login`.
 
 ## Health (public)
-- **GET /api/health** → `200 { uptime_s, version }`.
+- **GET /api/health** → `200 { uptime_s, version }`, or `503 DB_UNREACHABLE` when
+  `SELECT 1` fails or takes over 3 s. The container healthcheck reads it.
 - **GET /api/health/db** → `200 { latency_ms }`, or `503 DB_UNREACHABLE` / `DB_SLOW`.
 
 ---

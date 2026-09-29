@@ -137,9 +137,9 @@ docker compose exec -T db dropdb -U ems --force ems || die "could not drop the l
 docker compose exec -T db createdb -U ems ems || die "could not recreate the live database (restore $SAFETY with --force)"
 restore_into ems
 
-if has_service web; then
+if has_service migrate; then
   log "running migrations"
-  docker compose run --rm -w /app/packages/db web node_modules/.bin/prisma migrate deploy \
+  docker compose run --rm migrate \
     || die "migrations failed (web and worker are stopped; the previous database is $SAFETY)"
 fi
 

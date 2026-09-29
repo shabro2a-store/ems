@@ -487,6 +487,11 @@ Full request/response detail is in [API.md](API.md). Summary:
 | 23:30 daily | endOfDayWatcher | Unresolved WATCHED flags → notify + close |
 | 23:00 daily | dailySummary | Attendance roll-up (all + per branch) → notify |
 | 03:20 daily | wipeReceipts | Deletes `TripReceipt` rows (the receipt photos) of trips older than **7 days** (`RECEIPT_KEEP_DAYS`). Their job is done once the owner has confirmed the day, which happens on its own 48h after the day's last trip at the latest; `Trip.receipt_taken_at` stays as the record that there was one |
+| 03:40 daily | prune | Deletes rows that only matter for a while: idempotency keys a day past expiry, rate-limit buckets untouched for a day, driver calls older than **90 days**, flags resolved more than **180 days** ago. Never `BlockedPunchAttempt` (past pay reads it) or `AuditLog` (append-only) |
+| 09:00 daily | backupWatch | Reads `last-success` from backup.sh's folder (mounted read-only, `BACKUP_WATCH_DIR`); missing or older than **26h** → **Backup missing** on Telegram. Off while `BACKUP_WATCH_DIR` is unset |
+
+A job that throws is logged and, with `SENTRY_DSN` set, reported to Sentry tagged with
+its name - once an hour while it keeps failing, and at once after a recovery.
 
 Notifications go to Telegram when `TELEGRAM_BOT_TOKEN` is set (admin binds via `/start`);
 otherwise a console notifier. Telegram messages are **informational only** (a smart summary +

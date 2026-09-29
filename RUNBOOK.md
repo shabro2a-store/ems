@@ -12,7 +12,7 @@ truth for first-time setup; this file covers running it day to day.
 
 ## 1. Local dev quickstart
 
-Prereqs: Node 20, pnpm 9, Docker (for the Postgres dev DB).
+Prereqs: Node 22 (`.nvmrc`), pnpm 9, Docker (for the Postgres dev DB).
 
 ```bash
 git clone <repo>
@@ -89,23 +89,14 @@ Full first-time setup (env file, VAPID keys, Telegram, Cloudflare) lives in
 cd /opt/ems
 git pull                                      # branch: master
 docker compose build
-docker compose run --rm -w /app/packages/db web node_modules/.bin/prisma migrate deploy
 docker compose up -d
 ```
 
-Build first, migrate second, swap last. `migrate deploy` is a no-op when the pull
-added no migration, so this order is always safe — **for this release specifically
-it is required, not just good practice.** The migration drops the old schedule
-`start_time`/`end_time` columns and retires the `LATE`, `EARLY_LEAVE` and
-`TIME_CHANGE` enum values; the new image's Prisma client no longer recognises
-those values at all. If the new containers serve traffic before `prisma migrate
-deploy` runs, every read touching a `PenaltyWaiver`, `PenaltyAck`,
-`ScheduleOverride` or `LeaveRequest` row still carrying a retired value throws a
-Prisma enum-deserialisation error, and it keeps failing until the migration runs —
-do not run `docker compose up -d` ahead of the migrate step above. The same
-migration also permanently deletes every `PenaltyWaiver`/`PenaltyAck` row
-referencing the retired kinds; take a backup first (§3 below) if you want the
-option to go back. See [DEPLOY.md](DEPLOY.md) for the full explanation.
+`up -d` runs the one-shot `migrate` service (`prisma migrate deploy`, a no-op when
+nothing is new) and starts `web` and `worker` only after it exits cleanly. The site is
+down for the seconds the migration takes. If it fails, `web` and `worker` stay down
+until it is fixed: `docker compose logs migrate`. Before a migration that deletes
+data, take a backup (§3). See [DEPLOY.md](DEPLOY.md) for the full explanation.
 
 Verify the swap actually happened — `uptime_s` should be near zero:
 
@@ -164,7 +155,10 @@ because it drives `docker compose`. Run once on the VPS:
    0 2 * * * /opt/ems/scripts/backup.sh >> /var/log/ems-backup.log 2>&1
    ```
 
-5. **Look at it now and then** — nothing alerts you yet when a night fails:
+5. **Turn on the morning check.** Add `BACKUP_WATCH_DIR=/backups` to `/opt/ems/.env`
+   and run `docker compose up -d`. The worker reads `last-success` (the folder is
+   mounted into it read-only) at 09:00 Beirut and sends **Backup missing** on
+   Telegram when it is absent or more than 26 hours old. By hand:
    ```bash
    cat /var/backups/ems/last-success           # should be today, around 02:00 UTC
    grep 'BACKUP FAILED' /var/log/ems-backup.log | tail
@@ -227,7 +221,20 @@ because it drives `docker compose`. Run once on the VPS:
 ### Deploy a hotfix
 - Push to `master`, then run the section 2 redeploy on the VPS. There is no
   auto-deploy webhook — deploys are manual.
-- Hotfixes that don't touch `schema.prisma` still run `migrate deploy` harmlessly.
+- The `migrate` service runs on every `up -d`; with no new migration it does nothing.
+
+### Updating the base images
+The Dockerfiles, `docker-compose.yml` and CI pin `node:22-alpine` and
+`postgres:16-alpine` to exact digests, so a rebuild never picks up a different base
+without anyone noticing. To take upstream security fixes (every month or two):
+```bash
+docker pull node:22-alpine && docker image inspect node:22-alpine --format '{{index .RepoDigests 0}}'
+docker pull postgres:16-alpine && docker image inspect postgres:16-alpine --format '{{index .RepoDigests 0}}'
+```
+Paste each new `sha256:...` into `Dockerfile.web` (both `FROM` lines),
+`Dockerfile.worker`, `docker-compose.yml` (`db`) and `.github/workflows/ci.yml`
+(both Postgres services), let CI pass, then redeploy. Postgres stays on 16: a new
+major version needs a dump and restore, not a new tag.
 
 ### Pause / resume the worker
 - `docker compose stop worker` — cron jobs halt; no missed-checkout detection,
@@ -392,28 +399,36 @@ docker compose exec worker env | grep -E 'VAPID|TELEGRAM'
 
 | Alert | Likely cause | First action |
 |---|---|---|
-| `GET /api/health` 3xx/5xx | Container crashed, or OOMKilled | `docker compose logs web`; check memory limit |
+| `GET /api/health` 503 `DB_UNREACHABLE` | `web` cannot query Postgres: down, or the password out of step with `.env` | `docker compose logs --tail=50 web db`; DEPLOY.md "If the app is broken after a deploy" |
+| `GET /api/health` no answer | Container crashed, or killed at its memory limit (`web` 1 GB) | `docker compose ps`, `docker compose logs web`, `docker stats` |
 | `GET /api/health/db` 503 | Postgres down or slow (>50ms) | `docker compose logs db`; check disk; check connection pool |
-| Backup didn't run (no new file in `/var/backups/ems/`) | Cron misconfigured, or rclone auth expired | Run `backup.sh` manually; rotate rclone token |
+| Telegram **Backup missing** | No successful backup for 26 hours: cron misconfigured, disk full, or rclone auth expired | `tail /var/log/ems-backup.log`; run `backup.sh` manually; rotate rclone token |
 | Telegram webhook 4xx spike | Bot token rotated but `TELEGRAM_BOT_TOKEN` env not refreshed | Update `/opt/ems/.env`, `docker compose up -d` |
 | Telegram webhook 5xx spike | Network issue to api.telegram.org | Check VPS outbound; usually self-resolves |
-| Sentry alert: spike of `UNAUTHORIZED` | `JWT_SECRET` rotated (expected) or cookie domain misconfigured | Check most recent deploy; correlate with `JWT_SECRET` changes |
-| Sentry alert: spike of `INVALID_INPUT` | Schema drift between client + server | Verify both are on the latest `master` |
+| Sentry: an error tagged `job=<name>` | A worker job keeps failing (reported once an hour while it does, and at once after a recovery) | `docker compose logs --tail=100 worker` |
+| Sentry: an error from a route | An exception escaped a route handler or page (a 500) | The event has the stack; `docker compose logs web` around that time |
 | Drivers stop receiving the ring on locked phones | `VAPID_*` keys missing from the container, or rolled | `docker compose exec web env \| grep VAPID` and the same for `worker` (it sends the repeats); if rolled, each driver re-taps **Enable** |
 | `/admin/punches` empty | Genuine fault — this page is backed by `/api/admin/punches` and should show history | Check `docker compose logs web` for the API error; verify the branch/date filters aren't excluding everything |
 
 **A single `DB_SLOW` right after a deploy or restart?** The connection pool is cold
 on the first query of a new process — one observed run measured 134ms against the
 50ms limit, then 1-12ms on every call right after. This is separate from the
-`/api/health` check the production checklist asks for (that one only reports
-uptime, never touches the DB) — if you also check `/api/health/db` right after a
+`/api/health` check the healthcheck and the production checklist use (one query with
+a 3 s limit, speed ignored) — if you also check `/api/health/db` right after a
 deploy, as is natural, re-run it a few seconds later before treating a `DB_SLOW`
 as real. Only one that persists across repeated checks is worth chasing as actual
 Postgres load or disk trouble.
 
 **No Sentry alerts at all?** Sentry only initialises when both `SENTRY_DSN` is set
 *and* `NODE_ENV=production`. Confirm with
-`docker compose exec web env | grep SENTRY_DSN`.
+`docker compose exec web env | grep SENTRY_DSN` (and the same for `worker`). Only
+exceptions are reported - a `400`/`401`/`409` the app answered on purpose is not one.
+
+**An unhealthy container is not restarted.** `restart: unless-stopped` brings back a
+container that exits or is killed at its memory limit, not one whose healthcheck
+fails: an `unhealthy` `web` or `worker` in `docker compose ps` keeps running as it is
+until `docker compose restart web` (or `worker`). Logs are capped at 5 x 10 MB per
+container, so `docker compose logs` reaches back days, not months.
 
 ---
 

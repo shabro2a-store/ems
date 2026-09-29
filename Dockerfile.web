@@ -1,4 +1,5 @@
-FROM node:20-alpine AS builder
+# Node 22 LTS, pinned to the exact image; docker-compose.yml says how to move it.
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS builder
 WORKDIR /app
 RUN apk add --no-cache openssl
 RUN corepack enable && corepack prepare pnpm@9.4.0 --activate
@@ -24,7 +25,7 @@ WORKDIR /app/apps/web
 
 RUN pnpm exec next build
 
-FROM node:20-alpine
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
 RUN apk add --no-cache openssl
 WORKDIR /app
 ENV NODE_ENV production
