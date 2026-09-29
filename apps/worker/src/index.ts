@@ -1,6 +1,12 @@
+import * as Sentry from '@sentry/node';
 import cron from 'node-cron';
 import { getNotifier } from 'notify';
 import { registerJobs } from './schedule';
+
+// Unset = off: captureException in guarded() is then a no-op.
+if (process.env.SENTRY_DSN) {
+  Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV, tracesSampleRate: 0 });
+}
 
 console.log('cron runner started');
 

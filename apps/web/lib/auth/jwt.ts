@@ -1,5 +1,4 @@
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
-import { randomBytes } from 'crypto';
 
 export type Role = 'EMPLOYEE' | 'DRIVER' | 'ADMIN' | 'CALLER';
 
@@ -27,8 +26,10 @@ function getSecret(): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
+// Web Crypto, not node:crypto: the middleware imports this file and runs on
+// the Edge runtime, where a Node module is not available.
 export function newJwtSecret(): string {
-  return randomBytes(48).toString('hex');
+  return Array.from(crypto.getRandomValues(new Uint8Array(48)), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export async function signToken(

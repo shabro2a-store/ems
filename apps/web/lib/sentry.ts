@@ -9,7 +9,10 @@ export function initSentry(): void {
 
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
-    tracesSampleRate: 0.1,
+    // Errors only. Every route is wrapped, and the field screens poll every few
+    // seconds, so sampled traces would spend a free plan's quota on requests
+    // that worked.
+    tracesSampleRate: 0,
     environment: process.env.NODE_ENV,
   });
   initialized = true;

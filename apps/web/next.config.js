@@ -1,3 +1,5 @@
+const { withSentryConfig } = require('@sentry/nextjs');
+
 // Everything the app loads is its own: no CDN, no client-side analytics.
 // 'unsafe-inline' for scripts because the App Router streams its hydration data
 // as inline scripts (a nonce would force every page dynamic); the dev server
@@ -48,4 +50,20 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+// Wraps every route handler and server component at build time so an error
+// that escapes one reaches Sentry; instrumentation.ts alone only initialised
+// the SDK, and nothing ever called captureException. With SENTRY_DSN unset the
+// wrappers do nothing. No source maps are uploaded (no auth token, no release)
+// and the plugin sends no telemetry of its own. The middleware is left
+// unwrapped: it is a few lines of token checks, and the security boundary
+// stays exactly as written. The browser is not reported - there is no client SDK
+// (the CSP allows no third-party connection), so the global-error.js notice
+// does not apply.
+process.env.SENTRY_SUPPRESS_GLOBAL_ERROR_HANDLER_FILE_WARNING = '1';
+module.exports = withSentryConfig(nextConfig, {
+  silent: true,
+  telemetry: false,
+  sourcemaps: { disable: true },
+  release: { create: false },
+  webpack: { autoInstrumentMiddleware: false },
+});

@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import type { Notifier } from 'notify';
 import { SHOP_TZ } from 'time';
 import { runWatchedDetector } from './jobs/watchedDetector';
@@ -21,12 +22,28 @@ export interface CronLike {
 
 const running = new Set<string>();
 
+// A job failing on every tick - the ring repeater runs every five seconds -
+// would send Sentry 17,000 copies of one outage a day and use up a free plan in
+// an afternoon. One report per job per hour while it keeps failing; the first
+// failure after a recovery is reported at once.
+const REPORT_EVERY_MS = 60 * 60_000;
+const lastReported = new Map<string, number>();
+
+function report(name: string, e: unknown): void {
+  const last = lastReported.get(name);
+  const now = Date.now();
+  if (last !== undefined && now - last < REPORT_EVERY_MS) return;
+  lastReported.set(name, now);
+  Sentry.captureException(e, { tags: { job: name } });
+}
+
 /**
  * One run of a job at a time. node-cron starts a job on its tick whether or not
  * the last run has finished, so a slow one - a big sweep, a slow database -
  * overlapped the next: two sweeps writing the same checkouts, two ring
  * repeaters pushing twice. A tick that finds its job still going skips; the
- * next tick runs as usual. A failed run is logged and does not stop the next.
+ * next tick runs as usual. A failed run is logged (and sent to Sentry when
+ * SENTRY_DSN is set; without it this is a no-op) and does not stop the next.
  */
 export function guarded(name: string, fn: () => Promise<unknown>) {
   return async () => {
@@ -37,8 +54,10 @@ export function guarded(name: string, fn: () => Promise<unknown>) {
     running.add(name);
     try {
       await fn();
+      lastReported.delete(name);
     } catch (e) {
       console.error(`[cron:${name}]`, e);
+      report(name, e);
     } finally {
       running.delete(name);
     }
