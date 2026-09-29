@@ -54,8 +54,8 @@ export function registerJobs(cron: CronLike, notifier: Notifier): void {
   // Six fields: this one runs every five SECONDS. A ring has to behave like a
   // phone ringing rather than a single notification nobody heard, and the driver
   // is standing in a shop waiting - a one-minute tick is not a ring, it is a
-  // reminder. The query is one indexed read over a table that is empty except in
-  // the forty-five seconds after somebody is called.
+  // reminder. The query reads the partial index driver_call_unanswered, which holds
+  // only the calls nobody has answered, not every call ever made.
   at('*/5 * * * * *', 'ringRepeater', () => runRingRepeater());
   // What the container healthcheck reads: a real query, then the time. Without
   // it the check was `process.exit(0)` and passed whatever the worker was doing.

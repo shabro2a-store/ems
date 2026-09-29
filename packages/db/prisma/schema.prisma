@@ -226,6 +226,7 @@ model Punch {
 
   @@index([user_id, at])
   @@index([branch_id, at])
+  @@index([at])
 }
 
 // A check-in the system refused because the employee still had an open session
@@ -303,6 +304,7 @@ model ScheduleOverride {
   //   ALTER TABLE "ScheduleOverride" ADD CONSTRAINT override_shift_min_chk CHECK ("shift_min" IS NULL OR ("shift_min" >= 0 AND "shift_min" <= 1440));
 
   @@unique([user_id, date])
+  @@index([date])
 }
 
 model LeaveRequest {
@@ -323,6 +325,7 @@ model LeaveRequest {
   //   ALTER TABLE "LeaveRequest" ADD CONSTRAINT leave_off_min_chk CHECK ("off_min" IS NULL OR ("off_min" >= 0 AND "off_min" <= 1440));
 
   @@index([user_id, status])
+  @@index([status])
 }
 
 // The per-trip rate a driver was on, and from when.
@@ -384,6 +387,7 @@ model Trip {
   //   CREATE INDEX trip_open_by_branch ON "Trip"(branch_id) WHERE back_at IS NULL;  -- supports /api/admin/now
 
   @@index([driver_id, out_at])
+  @@index([out_at])
 }
 
 // The photo itself, one row per trip, apart from Trip so listing trips never
@@ -413,6 +417,7 @@ model Advance {
   created_at  DateTime      @default(now())
 
   @@index([user_id, status])
+  @@index([status])
 }
 
 model Adjustment {
@@ -500,7 +505,6 @@ model OvertimeDecision {
   created_at DateTime             @default(now())
 
   @@unique([user_id, date])
-  @@index([user_id, date])
 }
 
 // The owner's ruling on one day's blocked-time credit. No row means pending,
@@ -525,7 +529,6 @@ model BlockedCreditDecision {
   created_at   DateTime           @default(now())
 
   @@unique([user_id, date])
-  @@index([user_id, date])
 }
 
 // A device's Web Push subscription (one per browser/device), used to ring a
@@ -560,6 +563,9 @@ model DriverCall {
 
   @@index([driver_id, created_at])
   @@index([driver_id, trip_id])
+  // Plus driver_call_unanswered, a partial index on created_at WHERE
+  // acknowledged_at IS NULL (migration 20260929100000): the ring repeater reads
+  // it every five seconds. Prisma cannot express a partial index.
 }
 
 model Flag {
@@ -580,6 +586,7 @@ model Flag {
 
   @@index([created_at(sort: Desc)])
   @@index([resolved_at])
+  @@index([user_id, kind])
 }
 
 model AuditLog {
