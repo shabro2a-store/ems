@@ -12,6 +12,7 @@ import { runDailySummary } from './jobs/dailySummary';
 import { runRingRepeater } from './jobs/ringRepeater';
 import { runWipeReceipts } from './jobs/wipeReceipts';
 import { runPrune } from './jobs/prune';
+import { runBackupWatch } from './jobs/backupWatch';
 import { beat } from './heartbeat';
 import { prisma } from './db/prisma';
 
@@ -104,4 +105,7 @@ export function registerJobs(cron: CronLike, notifier: Notifier): void {
   // Expired replay keys and rate-limit buckets, old driver calls and long
   // resolved flags (jobs/prune.ts says what is kept).
   at('40 3 * * *', 'prune', () => runPrune());
+  // backup.sh runs at 02:00 UTC; by 09:00 Beirut a failed night is known and
+  // there is a working day to fix it. Off unless BACKUP_WATCH_DIR is set.
+  at('0 9 * * *', 'backupWatch', () => runBackupWatch({ notifier }));
 }

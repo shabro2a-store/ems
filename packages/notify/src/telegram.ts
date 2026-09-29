@@ -218,6 +218,12 @@ export function renderTemplate(
         deepLink: `${publicAppUrl}/admin/punches`,
       };
 
+    case 'backup.stale':
+      return {
+        text: `<b>Backup missing</b>\n${c.message ?? 'No successful backup in the last day.'}`,
+        deepLink: `${publicAppUrl}/admin`,
+      };
+
     default:
       // Never raw JSON: an alert nobody wrote a template for still reads as a sentence.
       return {

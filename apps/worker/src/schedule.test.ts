@@ -20,7 +20,7 @@ function registered() {
 describe('the worker schedule', () => {
   it('reads every cron line on the shop clock', () => {
     const jobs = registered();
-    expect(jobs.length).toBe(12);
+    expect(jobs.length).toBe(13);
     for (const j of jobs) expect(j.timezone, j.expression).toBe('Asia/Beirut');
   });
 
@@ -33,5 +33,9 @@ describe('the worker schedule', () => {
   it('prunes expired rows once a night, after the receipt wipe', () => {
     const expressions = registered().map((j) => j.expression);
     expect(expressions).toContain('40 3 * * *');
+  });
+
+  it("checks the night's backup in the morning", () => {
+    expect(registered().map((j) => j.expression)).toContain('0 9 * * *');
   });
 });

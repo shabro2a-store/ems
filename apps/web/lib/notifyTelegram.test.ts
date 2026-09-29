@@ -26,6 +26,12 @@ describe('every alert the system sends', () => {
     },
   );
 
+  it('names a missed backup in words, with what to check', () => {
+    const { text } = renderTemplate('backup.stale', { message: 'No successful backup on record. Check the log.' }, APP);
+    expect(text).toContain('<b>Backup missing</b>');
+    expect(text).toContain('No successful backup on record. Check the log.');
+  });
+
   it('escapes what goes into the HTML', () => {
     const { text } = renderTemplate(
       'advance_requested',

@@ -13,7 +13,11 @@ set -euo pipefail
 #   4. Local copies older than KEEP_DAYS are deleted.
 #   5. rclone uploads it, then deletes remote copies older than KEEP_DAYS, so
 #      Drive neither fills up nor keeps receipt photos forever.
-#   6. On success, writes the time to $LOCAL_DIR/last-success.
+#   6. On success, writes the time to $LOCAL_DIR/last-success. The worker reads
+#      that one file each morning over a read-only mount and alerts on Telegram
+#      when it is missing or more than 26 hours old, so the folder can be
+#      entered but not listed (0711) and the file is world-readable; the dumps
+#      stay 0600.
 #
 # Every failure - the upload included - exits non-zero and says so in the log.
 #
@@ -83,4 +87,6 @@ else
 fi
 
 date -u +%FT%TZ > "$LOCAL_DIR/last-success"
+chmod 0644 "$LOCAL_DIR/last-success"
+chmod 0711 "$LOCAL_DIR"
 log "backup complete: $ENCRYPTED"
