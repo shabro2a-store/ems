@@ -280,6 +280,26 @@ Full request/response detail is in [API.md](API.md). Summary:
   predating the column) is stale for the same reason. Erring towards paying the employee for
   hours nobody has reviewed is deliberate: without it, one `@@unique([user_id, date])` row
   revoked against 120 minutes silently expanded to deduct a later 300.
+- **Which day a shift belongs to** (`assignWorkingDays` in `packages/time`, read through
+  `workingDaysOf` in `coverage.ts` by payroll, penalties, the dashboard and the worker). A
+  working day is a run of sessions separated by less than **4h15m** of rest (`SHIFT_GAP_MIN`,
+  measured from this shop's punches: the longest break inside a day was 2h58m, the shortest
+  rest between days 5h32m). A return after a longer rest opens a new working day, dated by
+  its check-in's Beirut calendar date - unless an earlier working day already took that date,
+  when it takes the next free one. That collision rule is what files a night worker's
+  consecutive nights on consecutive dates with no hour of the clock in it (in at 00:02
+  Wednesday is Wednesday; in again at 23:58 the same Wednesday is Thursday).
+  - **Split day** (from `SPLIT_DAY_RULE_FROM`, 2026-10-01, the start of a pay month): a return
+    after more than 4h15m on the same calendar date **stays on that day** when it is more than
+    4h before midnight (`NIGHT_START_WINDOW_MIN`, i.e. before 20:00) - out at noon, back at
+    17:00 is one day's split shift. A return from 20:00 on is a night shift starting and takes
+    the next date, as before. Before the cutover such a return took the next date and pushed
+    every later day of the run one weekday out.
+  - **Cutovers, not rewrites.** Attribution is recomputed from the punches whenever payroll is
+    opened, so each rule change has a start: arrivals before `REST_RULE_FROM` (2026-09-08)
+    keep the old calendar-day/`day_start_hour` answer, and every read of working days starts
+    at `workingDayHistoryFrom` (two days before that cutover) so all of them agree on the
+    chain of claimed dates. Months already paid keep their labels.
 - **One answer to "how long have they worked today"** (`currentShiftDayMinutes` in
   `coverage.ts`): the current shift-day is the Beirut day of the employee's open arrival,
   or today when nothing is open; its minutes are every closed pair that *started* on that
@@ -291,10 +311,16 @@ Full request/response detail is in [API.md](API.md). Summary:
   not a shift — so it contributes nothing and the person is not shown as present. Above a
   full 24h `shift_min` so a real shift is never truncated, and the MISSED_CHECKOUT flag in
   the attention queue is where a forgotten checkout belongs rather than the hours column.
+  This is only the live count's cap: the sweep below has normally closed such a session at
+  20h already, so it matters for a revoked auto-close or a stopped worker.
 - **An abandoned check-in is closed at the shift hours** (`autoCloseAbandoned`, worker):
-  past the same **30h** `MAX_OPEN_SESSION_MIN`, the job writes the OUT the employee never
-  made, at `check-in + requiredMinFor(that day)` — one notion of "abandoned", mirrored in
-  the worker and pinned to the web constant by `autoCloseAbandoned.test.ts`. The trigger
+  past **20h** (`AUTO_CLOSE_AFTER_MIN`, the owner's number - a double cover and a forgotten
+  checkout look identical, and 20h makes the visible mistake: it closes, tells him, and
+  offers Revoke), the job writes the OUT the employee never made, at
+  `check-in + requiredMinFor(that day)` — one notion of "abandoned", mirrored in the worker
+  and pinned to the web constant by `autoCloseAbandoned.test.ts`. It never writes a checkout
+  in the future (a 24h `shift_min` waits until arrival + 24h), and never one for an arrival
+  the owner revoked (`/api/admin/punches/revoke-auto-close`). The trigger
   deliberately is **not** `missedCheckout`'s `required + grace`: that is the moment
   legitimate overtime begins, and closing there would truncate every real overrun into the
   plain shift. Overtime genuinely worked that night is **not** paid by this and is the
@@ -410,28 +436,31 @@ Full request/response detail is in [API.md](API.md). Summary:
     same day, since those minutes are already counted from their own check-in.
 - **A stale session resolves itself at the punch, and the threshold is asymmetric**
   (`autoClose.ts`). Both paths close the session at `systemCheckoutAt` — the same instant the
-  30h sweep would use — but they need different amounts of evidence:
-  - **Check-in** (`staleSessionClose`): the arrival is on an **earlier Beirut calendar day**
-    *and* the session has run past its own `required + grace`. Somebody at the branch, past the
-    geofence, starting a new shift has demonstrably finished the old one, and nothing they made
-    is discarded — their IN is still written at `now`. Both conditions are needed: the day
-    boundary alone closes a 21:00–07:00 shift under somebody at 02:00; the elapsed condition
-    alone lets a same-day duplicate tap end a shift in progress. The close must also land
-    strictly before now, or it is invisible to every guard.
-  - **Clock-out** (`abandonedSessionClose`): only past **`MAX_OPEN_SESSION_MIN`**. The employee
+  20h sweep would use — but they need different amounts of evidence:
+  - **Check-in** (`staleSessionClose`): the session has run longer than its own
+    `required + grace` **plus** `SHIFT_GAP_MIN` (4h15m, the rest that ends a working day) -
+    time to have worked the day, gone home and come back, which is the only story that fits
+    a new check-in against an arrival that old. No hour of the clock is involved. Below it a
+    new IN is a duplicate tap and is refused (`ALREADY_PUNCHED_IN`), so a 21:00–07:00 shift is
+    never closed under somebody at 02:00. Somebody at the branch, past the geofence, starting a
+    new shift has demonstrably finished the old one, and nothing they made is discarded —
+    their IN is still written at `now`. The close must also land strictly before now, or it
+    is invisible to every guard.
+  - **Clock-out** (`abandonedSessionClose`): only past **20h** (`AUTO_CLOSE_AFTER_MIN`), and
+    never for a revoked arrival. The employee
     is standing there asserting the truth about their own shift and the system must not
     overrule them. Using the check-in threshold here silently truncated real work — a night
     worker on a 10h shift clocking out at 07:16 worked 616 minutes and was paid 600, with the
     record saying 07:00; a 16:00–00:40 day was paid 480 of 520; a day-off helper who worked
-    21:00–02:00 was paid one minute. Between `required + grace` and 30h an overrun is plausibly
-    real, and the overtime notice is the control the owner already has for it. Past 30h the
+    21:00–02:00 was paid one minute. Between `required + grace` and 20h an overrun is plausibly
+    real, and the overtime notice is the control the owner already has for it. Past 20h the
     employee's own punch is **not** written — writing it at `now` pays the runaway span, and
     backdating it would make the record lie about when they pressed the button.
 
   `open_session_stale` on `/api/me/today` uses the **clock-out** predicate, because the field
   screens compute `isIn = Boolean(in_at) && !stale` on a 30-second poll: on the check-in
   threshold a night worker sixteen minutes past grace would watch the clock-out button vanish
-  mid-shift, taking the driver's trip button with it. Only past 30h do the screens hide it,
+  mid-shift, taking the driver's trip button with it. Only past 20h do the screens hide it,
   show a warning and offer check-in instead — which is what makes the whole thing reachable at
   all, since before it they simply rendered a clock-out and payroll was handed the whole span.
 - **A system close on a 0-required day raises a MISSED_CHECKOUT flag.** Nothing else watches
@@ -479,9 +508,12 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 | Schedule | Job | Does |
 |---|---|---|
+| every 5 s | ringRepeater | Web-pushes every unanswered driver call again for **5 minutes** after it rang (`RING_REPEAT_WINDOW_MS`), so a locked phone keeps ringing. Reads the partial index `driver_call_unanswered`. Needs the `VAPID_*` keys in the worker |
+| every 30 s | heartbeat | `SELECT 1`, then writes the time to `/tmp/ems-worker-heartbeat`; the container healthcheck is unhealthy when that is over 2 minutes old |
 | 00:10 daily | watchedDetector | Judges the Beirut day that just closed: the day required more than 0 minutes (`requiredMinFor`, so an approved full day off is skipped whether it is a `DAY_OFF` or an `HOURS_CHANGE` to 0) and there were zero punches → WATCHED flag (absence notice, no automatic penalty) |
 | every 1 min | missedCheckout | Open check-in whose elapsed time exceeds that date's required minutes (`requiredMinFor`, so approved time off shortens the threshold) + the branch's shift grace → MISSED_CHECKOUT flag + notify. A date requiring 0 minutes is skipped, not measured against zero |
-| every 10 min | autoCloseAbandoned | Open check-in past **30h** (`MAX_OPEN_SESSION_MIN`) → write the missing OUT at `check-in + requiredMinFor(that day)`, marked `system_generated` and audited. Re-checks for a real checkout inside the transaction, so a live punch always wins |
+| every 10 min | autoCloseAbandoned | Open check-in past **20h** (`AUTO_CLOSE_AFTER_MIN`) → write the missing OUT at `check-in + requiredMinFor(that day)`, marked `system_generated`, audited and notified. Skips a revoked arrival and any close that would land in the future; takes the person's punch lock and re-checks for a real checkout inside the transaction, so a live punch always wins |
+| every 10 min | autoCloseAbandonedTrips | Open trip past **6h** (`MAX_OPEN_TRIP_MIN`) → write the BACK at `out + the branch's trip threshold`. Above driverStale's 4h alert, so the owner is always told first |
 | every 1 min | tripThreshold | Open trip past branch threshold → set over_threshold + notify |
 | every 30 min | driverStale | Trip open ≥ 4h → notify |
 | 23:30 daily | endOfDayWatcher | Unresolved WATCHED flags → notify + close |

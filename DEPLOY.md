@@ -13,11 +13,10 @@ grep -q '^POSTGRES_PASSWORD=' .env || echo 'POSTGRES_PASSWORD=ems_dev_password' 
 docker compose build
 docker compose up -d
 ```
-**The `POSTGRES_PASSWORD` line is new in this release, and it is written for a server
-that already has a Postgres volume** — every server deployed before this one. The
-variable used to be optional and is probably absent from `/opt/ems/.env`; it is now
-required, and the value must be the one the volume was *created* with,
-`ems_dev_password`. Putting anything else there does not change the database, it only
+**The `POSTGRES_PASSWORD` line is for a server set up before the variable became
+required (2026-09-26) - the production VPS.** There it is probably absent from
+`/opt/ems/.env`, and the value must be the one the volume was *created* with,
+`ems_dev_password`; where `.env` already has the line, it does nothing. Putting anything else there does not change the database, it only
 changes what `web` and `worker` try to log in with, and every query then fails.
 Rotating to a strong password is a **separate, later** step — see **Required
 environment** below.
@@ -61,9 +60,10 @@ the app fails authentication. `db`'s healthcheck is `pg_isready`, which does not
 authenticate, so `docker compose ps` still reports `db` healthy; it is `web` that turns
 unhealthy, because `/api/health` runs a real query and answers `503 DB_UNREACHABLE`.
 
-So there are exactly two cases, and only one of them applies to this deploy:
+So there are exactly two cases:
 
-- **Existing server (this deploy).** The volume already exists. Set the password the
+- **Existing server** (any set up before 2026-09-26, production included). The volume
+  already exists. Set the password the
   volume was created with — `ems_dev_password` — and change nothing else:
   ```bash
   grep -q '^POSTGRES_PASSWORD=' .env || echo 'POSTGRES_PASSWORD=ems_dev_password' >> .env
@@ -134,7 +134,7 @@ Cloudflare — and talk to the app directly. The tunnel is unaffected as long as
 `cloudflared` runs **on the host**, the layout these docs describe
 (`https://app.shabro2a.com` → `localhost:3000`).
 
-**Before the first deploy with this change**, confirm that:
+**Before the first deploy with the loopback bind (the commits of 2026-09-26)**, confirm that:
 ```bash
 systemctl status cloudflared         # expect: active (running)
 ```
@@ -244,7 +244,7 @@ accuracy** and/or radius via Edit.
 ## Production checklist
 - [ ] `JWT_SECRET` set to a real random value (not the dev placeholder)
 - [ ] `POSTGRES_PASSWORD` present in `.env` and **matching the existing Postgres
-      volume** (`ems_dev_password` on any server deployed before this release) — a
+      volume** (`ems_dev_password` on any server set up before 2026-09-26) — a
       random value here breaks every query while `docker compose ps` still shows
       `db` healthy. Rotate it *after* the deploy is up, via `ALTER USER`
 - [ ] `docker compose logs --tail=50 web` shows no `password authentication failed`

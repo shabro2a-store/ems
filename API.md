@@ -92,12 +92,13 @@ the flag says now, so revoking the privilege mid-cover cannot strand somebody.
 carries a message written for the employee's phone — the endpoint used to render
 `Punch rejected: <CODE>` for all of them.
 
-A check-in that meets a session left open from a shift-day that is over does NOT
-fail: that session is closed at its scheduled hours and the punch goes through,
-returning `system_closed_at` and a `notice` for the employee.
+A check-in that meets a session open longer than its hours + grace + the 4h15m rest
+that ends a working day does NOT fail: that session is closed at its scheduled hours
+and the punch goes through, returning `system_closed_at` and a `notice` for the
+employee. A younger open session is a duplicate tap: `409 ALREADY_PUNCHED_IN`.
 
 A **clock-out** is only overruled once the open session is past
-`MAX_OPEN_SESSION_MIN`, and then returns `system_closed_instead_of_punch: true`
+`AUTO_CLOSE_AFTER_MIN` (20h) and was not revoked by the owner, and then returns `system_closed_instead_of_punch: true`
 with no punch of theirs written. Below that the employee's own OUT is recorded
 at `now`, however far past their scheduled hours it is - overruling them there
 truncated real overtime and wrote a record saying they left earlier than they
@@ -128,8 +129,8 @@ their earnings (see `GET /api/me/payroll`).
   past midnight. This is what the tile labelled "Today" shows. It counts accepted
   blocked-time credit for that day, because `hours_month` does - the two used to
   disagree about the same day on the same screen.
-- `open_session_stale` marks an open session past **MAX_OPEN_SESSION_MIN** - no longer
-  a shift at all. Only then do the screens hide the clock-out button, show a warning and
+- `open_session_stale` marks an open session past **AUTO_CLOSE_AFTER_MIN** (20h), not
+  revoked, whose system close time has passed - no longer a shift at all. Only then do the screens hide the clock-out button, show a warning and
   offer check-in instead. Deliberately NOT the check-in threshold: the screens derive
   `isIn` from this on a 30 second poll, so a night worker minutes past their grace would
   watch the button vanish mid-shift.
@@ -356,6 +357,14 @@ chars). Ends every other session of the admin's; this one is re-issued.
   `corrected_by`, `correction_reason`) and audits before/after. GPS evidence is kept.
   `newAt` must be in the past and strictly between the person's punches either side of it:
   `400 IN_THE_FUTURE` / `400 OUT_OF_ORDER` (the message names the neighbouring punch).
+- **POST /api/admin/punches/revoke-auto-close** *(CSRF, Idempotent)* `{ punchId, reason }` →
+  `{ revokedPunchId, arrivalPunchId, arrivalAt, shiftDate }`. The owner saying the 20h
+  auto-close guessed wrong: deletes the system-written checkout (only a `system_generated`
+  OUT, else `400`), marks the arrival `auto_close_revoked_at` so neither the sweep nor the
+  clock-out rule closes it again, and leaves the session open for the employee's own
+  punch-out. `409 MONTH_CLOSED` when the shift's month is closed; `409 PUNCHED_SINCE` when
+  they have punched again after that checkout (correct it instead - reopening would join the
+  two shifts). Audited as `punch.revoke_auto_close`.
 
 ### Trips review (receipts)
 The owner reviews a driver's deliveries one **working day** at a time, beside the cash count
@@ -398,6 +407,9 @@ Photos are wiped by the worker a week after the trip (`Trip.receipt_taken_at` st
   rate dialog starts from - the two differ when the rate has changed since that month).
 - **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
   scoped to the branch filter.
+- **GET /api/admin/adjustments?userId=&month=YYYY-MM** → `{ adjustments: [{ id, kind,
+  amount_cent, reason, created_at, created_by }] }`, oldest first: every bonus and deduction
+  for one person in one month with its reason. `created_by` is the author's name.
 - **POST /api/admin/adjustments** *(CSRF, Idempotent)* `{ userId, month, kind:
   "BONUS"|"DEDUCTION", amountCent, reason }` → `{ adjustment }`. `month` is the one being
   VIEWED and is required. It used to stamp the period from the server clock, so a bonus added
@@ -495,6 +507,10 @@ so it surfaces in payroll only if revoked.
   amount, and nothing is deducted until the owner rules again.
 
 ### Blocked-time credit
+- **GET /api/admin/blocked-credit?userId=&month=YYYY-MM** → `{ credits: [{ date, blocked_at,
+  credit_from_at, clocked_in_at, waitedMin, creditedMin, amount_cent, decision }] }`: every
+  blocked-time credit in the month, decided or not. The attention queue shows only the last
+  seven days' undecided ones; this is where an older or stale one is ruled on (payroll page).
 - **POST /api/admin/blocked-credit/decision** *(CSRF, Idempotent)* `{ userId, date:
   "YYYY-MM-DD", decision: "ACCEPTED"|"REVOKED"|"PENDING", creditedMin, reason? }` — upserts the
   one `BlockedCreditDecision` row for that (user, date). Credit grants nothing until it is

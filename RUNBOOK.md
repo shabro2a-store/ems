@@ -245,7 +245,7 @@ major version needs a dump and restore, not a new tag.
   driver still gets the first push from the ring itself, but it will not repeat,
   so a missed ring stays missed. Restart the worker before a busy service.
 - Two of the halted jobs write rather than alert: `autoCloseAbandoned` closes a
-  check-in left open past 30h, and `autoCloseAbandonedTrips` closes a delivery
+  check-in left open past 20h, and `autoCloseAbandonedTrips` closes a delivery
   left open past 6h. Neither is load-bearing for staff — an employee's next
   check-in closes their own stale session, and a driver's next punch closes
   their own stale trip, both without the worker. What only the worker does is
