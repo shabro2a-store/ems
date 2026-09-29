@@ -10,13 +10,16 @@ On the VPS:
 cd /opt/ems
 git pull
 grep -q '^POSTGRES_PASSWORD=' .env || echo 'POSTGRES_PASSWORD=ems_dev_password' >> .env
+grep -q '^APP_DB_PASSWORD=' .env || echo "APP_DB_PASSWORD=$(openssl rand -hex 24)" >> .env
 docker compose build
 docker compose up -d
 ```
 **The `POSTGRES_PASSWORD` line is for a server set up before the variable became
 required (2026-09-26) - the production VPS.** There it is probably absent from
 `/opt/ems/.env`, and the value must be the one the volume was *created* with,
-`ems_dev_password`; where `.env` already has the line, it does nothing. Putting anything else there does not change the database, it only
+`ems_dev_password`; where `.env` already has the line, it does nothing. The
+`APP_DB_PASSWORD` line is the same kind of guard: it generates the app's own database
+password once and never touches it again (see **`APP_DB_PASSWORD`** below). Putting anything else there does not change the database, it only
 changes what `web` and `worker` try to log in with, and every query then fails.
 Rotating to a strong password is a **separate, later** step — see **Required
 environment** below.
@@ -90,10 +93,27 @@ docker compose logs --tail=50 web    # must show no authentication errors
 auth), which is also the recovery path if the two ever get out of step: either
 `ALTER USER` the database to match `.env`, or edit `.env` back to match the database.
 
+### `APP_DB_PASSWORD` — the app's own database login
+`web` and `worker` log in as `ems_app`, not as the owner `ems`. That role can read and
+write rows and nothing else: it cannot create, change or drop tables, cannot switch
+off the trigger that keeps the audit log append-only, and can only add to the audit
+log, never edit or empty it. `ems` is used only by the `migrate` service and by
+`backup.sh`/`restore.sh`.
+
+The `migrate` service creates `ems_app` if it is missing and sets its password to
+`APP_DB_PASSWORD` on **every** `docker compose up -d`, then grants it the tables - so
+unlike `POSTGRES_PASSWORD`, this one cannot drift out of step. Rotating it is: put a
+new value in `.env`, `docker compose up -d`. Letters, digits, `-` and `_` only, 16+
+characters (it goes inside a connection URL); `openssl rand -hex 24` is right:
+```bash
+grep -q '^APP_DB_PASSWORD=' .env || echo "APP_DB_PASSWORD=$(openssl rand -hex 24)" >> .env
+```
+
 ### The rest
 ```bash
 JWT_SECRET=<openssl rand -hex 32>          # REQUIRED — auth token signing secret
 POSTGRES_PASSWORD=ems_dev_password         # REQUIRED — must match the existing volume; see above
+APP_DB_PASSWORD=<openssl rand -hex 24>     # REQUIRED — what web and worker log in with; see above
 PUBLIC_APP_URL=https://app.shabro2a.com    # makes auth cookies Secure
 ENABLE_DEV_ENDPOINTS=false                 # keep the GPS-bypass endpoints OFF in prod
 # TELEGRAM_BOT_TOKEN / TELEGRAM_WEBHOOK_SECRET  # see "Telegram alerts" below
@@ -113,10 +133,16 @@ Changing `JWT_SECRET` invalidates all sessions (everyone logs in again).
 `pg_isready` answers before authentication, so a healthy `db` proves nothing about
 whether the app can log in. Check the app's own logs:
 ```bash
-docker compose logs --tail=50 web     # look for: password authentication failed for user "ems"
+docker compose logs --tail=50 migrate # look for: password authentication failed for user "ems"
+docker compose logs --tail=50 web     # look for: ... for user "ems_app", or permission denied
 ```
-That message means `POSTGRES_PASSWORD` in `.env` does not match the database. Fix it
-with one of the two options in the rotation note above, then `docker compose up -d`.
+`user "ems"` in the migrate log means `POSTGRES_PASSWORD` in `.env` does not match the
+database; fix it with one of the two options in the rotation note above, then
+`docker compose up -d`. `user "ems_app"` in the web log means web started with a
+password the migrate step did not set - run `docker compose up -d` again and read the
+migrate log. `permission denied for table ...` means code needs a privilege
+`packages/db/prisma/appRole.ts` does not grant; CI runs the whole suite as `ems_app`
+to catch that before a deploy.
 
 ## Network exposure
 `db` publishes to `127.0.0.1:5433` — the host only. Docker inserts its own
@@ -247,7 +273,9 @@ accuracy** and/or radius via Edit.
       volume** (`ems_dev_password` on any server set up before 2026-09-26) — a
       random value here breaks every query while `docker compose ps` still shows
       `db` healthy. Rotate it *after* the deploy is up, via `ALTER USER`
+- [ ] `APP_DB_PASSWORD` present in `.env` (generated, hex)
 - [ ] `docker compose logs --tail=50 web` shows no `password authentication failed`
+- [ ] `docker compose logs migrate` ends with `app role: ems_app has row access and nothing more`
 - [ ] `docker compose port db 5432` reports `127.0.0.1:5433`, and Postgres refuses
       a connection to the VPS's public IP
 - [ ] `ENABLE_DEV_ENDPOINTS=false`

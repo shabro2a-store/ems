@@ -75,6 +75,13 @@ jobs:
           --shadow-database-url postgresql://ems:test@localhost:5433/ems_shadow
           --exit-code
 
+      # The role production's web and worker log in as. The server below runs as
+      # it, so code that needs more than row access fails here, not in production.
+      - name: App database role
+        run: pnpm --filter db db:app-role
+        env:
+          APP_DB_PASSWORD: test-app-role-password-0123456789
+
       - run: pnpm -r typecheck
       - run: pnpm --filter web lint
 
@@ -90,7 +97,7 @@ jobs:
           NODE_ENV: production
           TEST_BASE_URL: http://127.0.0.1:3000
         run: |
-          pnpm --filter web exec next start -p 3000 &
+          DATABASE_URL=postgresql://ems_app:test-app-role-password-0123456789@localhost:5432/ems_test pnpm --filter web exec next start -p 3000 &
           SERVER_PID=$!
           echo "web server pid=$SERVER_PID; waiting for health..."
           for i in $(seq 1 60); do

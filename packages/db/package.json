@@ -8,7 +8,8 @@
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:app-role": "tsx prisma/grantAppRole.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

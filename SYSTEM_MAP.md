@@ -27,6 +27,12 @@ check `/api/health`'s `uptime_s` if in doubt.
 | CALLER (POS cashier) | Read-only board of the branch's drivers (live status + trips today) and a **Ring** button per driver. One active caller per branch. Rings only — never starts/ends trips. Not paid hourly, not in payroll. |
 | ADMIN (owner) | Everything: live dashboard, employees + schedules, branches + GPS, punches + corrections, payroll + PDF, approvals |
 
+- **Database roles.** `web` and `worker` connect as `ems_app`: SELECT/INSERT/UPDATE/DELETE
+  on the tables, INSERT/SELECT only on `AuditLog`, nothing on `_prisma_migrations`, no DDL -
+  so it cannot drop the append-only trigger or rewrite the log. The owner `ems` runs
+  migrations and backups. `packages/db/prisma/appRole.ts` holds the grants; the compose
+  `migrate` service applies them after every `migrate deploy`, and CI runs the test server
+  as `ems_app`.
 - **Login** issues 3 cookies: `ems_access` (JWT, httpOnly), `ems_refresh` (JWT, httpOnly, 7d), `csrf` (readable).
   Each token says which it is (`typ`) and carries the user's `session_version`; the
   middleware accepts only an access token, and a refresh is refused once the version has

@@ -88,6 +88,7 @@ Full first-time setup (env file, VAPID keys, Telegram, Cloudflare) lives in
 ```bash
 cd /opt/ems
 git pull                                      # branch: master
+grep -q '^APP_DB_PASSWORD=' .env || echo "APP_DB_PASSWORD=$(openssl rand -hex 24)" >> .env   # once; a no-op after
 docker compose build
 docker compose up -d
 ```
@@ -387,7 +388,9 @@ you set it. Setting it does re-attribute PAST nights at that branch, which moves
 between days - check the affected month's payroll after changing it.
 
 ### Check what the containers actually received
-Env vars must be listed in `docker-compose.yml`, not just present in `.env`:
+Env vars must be listed in `docker-compose.yml`, not just present in `.env`.
+`web` and `worker` connect as `ems_app` (DEPLOY.md "APP_DB_PASSWORD"); only `migrate`
+has the owner's password:
 ```bash
 docker compose exec web env | grep -E 'VAPID|TELEGRAM|SENTRY|ENABLE_DEV'
 docker compose exec worker env | grep -E 'VAPID|TELEGRAM'

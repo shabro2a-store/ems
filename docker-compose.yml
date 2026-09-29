@@ -36,17 +36,19 @@ services:
       timeout: 5s
       retries: 5
 
-  # Applies new migrations, then exits. web and worker start only after it
-  # succeeds, so `docker compose up -d` alone is a safe deploy: new code never
-  # serves a database still on the old schema. It runs the web image, which
-  # carries the Prisma CLI and the migrations; nothing new is built for it.
+  # Applies new migrations as the owner, then (re)grants the app's role, then
+  # exits. web and worker start only after it succeeds, so `docker compose up -d`
+  # alone is a safe deploy: new code never serves a database still on the old
+  # schema, and a table a migration added is granted in the same deploy. It runs
+  # the web image, which carries the Prisma CLI and the migrations.
   migrate:
     image: ems-web:latest
     pull_policy: never
     working_dir: /app/packages/db
-    command: ['node_modules/.bin/prisma', 'migrate', 'deploy']
+    command: ['sh', '-c', 'node_modules/.bin/prisma migrate deploy && node_modules/.bin/tsx prisma/grantAppRole.ts']
     environment:
       DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD is required - add it to /opt/ems/.env}
     healthcheck:
       disable: true
     logging: *logging
@@ -70,7 +72,9 @@ services:
       # targets localhost:3000 (DEPLOY.md "Network exposure").
       - '127.0.0.1:3000:3000'
     environment:
-      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
+      # ems_app, not the owner: rows only - no schema changes, no switching off
+      # the audit trigger, no rewriting the audit log (packages/db/prisma/appRole.ts).
+      DATABASE_URL: postgresql://ems_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
       NODE_ENV: production
       # Below mem_limit, so a heap that keeps growing fails as a JavaScript
       # out-of-memory error in the log rather than a silent kill.
@@ -108,7 +112,7 @@ services:
       # each morning; BACKUP_WATCH_DIR=/backups in .env turns the check on.
       - ${BACKUP_LOCAL_DIR:-/var/backups/ems}:/backups:ro
     environment:
-      DATABASE_URL: postgresql://ems:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
+      DATABASE_URL: postgresql://ems_app:${APP_DB_PASSWORD:?APP_DB_PASSWORD is required - add it to /opt/ems/.env}@db:5432/ems
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=384
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - add it to /opt/ems/.env}
