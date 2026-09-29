@@ -29,6 +29,7 @@ export default defineConfig({
       '@': here,
       time: path.resolve(repoRoot, 'packages', 'time', 'src', 'index.ts'),
       notify: path.resolve(repoRoot, 'packages', 'notify', 'src', 'index.ts'),
+      'pdf/payroll': path.resolve(repoRoot, 'packages', 'pdf', 'src', 'payroll.tsx'),
     },
   },
 });
