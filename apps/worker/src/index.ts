@@ -16,6 +16,7 @@ console.log('  */30    driverStale');
 console.log('  30 23   endOfDayWatcher');
 console.log('  0 23    dailySummary');
 console.log('  20 3    wipeReceipts');
+console.log('  40 3    prune');
 
 process.on('SIGTERM', () => {
   console.log('worker received SIGTERM, shutting down');

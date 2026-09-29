@@ -10,6 +10,7 @@ import { runEndOfDayWatcher } from './jobs/endOfDayWatcher';
 import { runDailySummary } from './jobs/dailySummary';
 import { runRingRepeater } from './jobs/ringRepeater';
 import { runWipeReceipts } from './jobs/wipeReceipts';
+import { runPrune } from './jobs/prune';
 import { beat } from './heartbeat';
 import { prisma } from './db/prisma';
 
@@ -81,4 +82,7 @@ export function registerJobs(cron: CronLike, notifier: Notifier): void {
   // Receipt photos older than a week. Daily rather than weekly so the database
   // never carries more than eight days of them; the hour is a quiet one.
   at('20 3 * * *', 'wipeReceipts', () => runWipeReceipts());
+  // Expired replay keys and rate-limit buckets, old driver calls and long
+  // resolved flags (jobs/prune.ts says what is kept).
+  at('40 3 * * *', 'prune', () => runPrune());
 }
