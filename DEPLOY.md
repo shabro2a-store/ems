@@ -158,13 +158,18 @@ moves to the host. After the deploy, from another machine this must refuse:
 curl -m 5 http://<the VPS public IP>:3000/api/health
 ```
 
-## Migrations & seed (first deploy, or after schema changes)
+## Seed (first deploy only, on an empty database)
 ```bash
-docker compose run --rm -w /app/packages/db web node_modules/.bin/prisma migrate deploy
 docker compose run --rm -w /app/packages/db web node_modules/.bin/tsx prisma/seed.ts
 ```
 Seed creates `owner` (admin) + two branches + `emp1`/`emp2`, all password `change-me`.
-Change the owner password immediately (top bar → **Password**).
+The first `owner` login asks for a new password before anything else. Deactivate
+`emp1`/`emp2` once real staff exist.
+
+The seed only fills an **empty** database. On one that already has any user or
+branch it prints `seed: refused - the database already has data` and changes
+nothing, so it is never part of a redeploy (schema changes are `migrate deploy`,
+above).
 
 ## Web Push (caller ring on locked phones)
 Optional but recommended. Without these keys the caller still rings drivers with the

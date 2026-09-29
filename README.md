@@ -31,7 +31,7 @@ docker compose up -d db                       # Postgres on 127.0.0.1:5433 (host
 pnpm install
 pnpm --filter db exec prisma generate
 pnpm --filter db exec prisma migrate deploy   # or `prisma migrate dev` for a fresh DB
-pnpm --filter db db:seed                       # owner + 2 branches + emp1/emp2 (password: change-me)
+pnpm --filter db db:seed                       # empty DB only: owner + 2 branches + emp1/emp2 (password: change-me)
 
 # env for the web/worker processes:
 #   DATABASE_URL=postgresql://ems:ems_dev_password@localhost:5433/ems

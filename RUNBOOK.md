@@ -22,7 +22,7 @@ docker compose up -d db                       # Postgres on 127.0.0.1:5433 (host
 pnpm install
 pnpm --filter db exec prisma generate
 pnpm --filter db exec prisma migrate deploy   # or `prisma migrate dev` on a fresh DB
-pnpm --filter db db:seed
+pnpm --filter db db:seed                      # empty database only; refuses otherwise
 ```
 
 The web and worker processes need these in the environment:
@@ -42,7 +42,9 @@ pnpm --filter worker dev   # cron runner in foreground (Ctrl+C to stop)
 
 Seed credentials (development only — never in prod):
 - Admin: `owner` / `change-me`
-- Sample employee/driver per branch: see `packages/db/prisma/seed.ts`
+- Sample employees `emp1`/`emp2` (one per branch), same password; no driver
+- The seed refuses a database that already has users or branches, so it cannot
+  be re-run over existing data. For a clean local start: `pnpm --filter db exec prisma migrate reset`
 
 Run checks:
 ```bash
