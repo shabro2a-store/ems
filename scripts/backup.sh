@@ -12,7 +12,7 @@ set -euo pipefail
 #      rows. A dump that does not restore is deleted and the run fails.
 #   4. Local copies older than KEEP_DAYS are deleted.
 #   5. rclone uploads it, then deletes remote copies older than KEEP_DAYS, so
-#      Drive neither fills up nor keeps receipt photos forever.
+#      Drive does not fill up. Receipt photos are not in the dump at all.
 #   6. On success, writes the time to $LOCAL_DIR/last-success. The worker reads
 #      that one file each morning over a read-only mount and alerts on Telegram
 #      when it is missing or more than 26 hours old, so the folder can be
@@ -57,8 +57,14 @@ log "pg_dump (inside the db container)"
 # Written to a file inside the container and then copied out, not piped: a
 # custom-format archive written to a pipe has no data offsets, and pg_restore
 # can then refuse to restore it.
+#
+# Receipt photos are left out (the owner's call, 2026-09-30): they are most of
+# the bytes, the app deletes them after 7 days anyway, and 30 days of copies on
+# Drive would keep them four times longer. The table itself is in the dump, so a
+# restore comes up whole; the trips keep receipt_taken_at, only the images of
+# the last week are gone.
 docker compose exec -T db sh -c '
-  pg_dump -U ems -d ems -Fc --no-owner --no-privileges -f /tmp/ems-backup.dump && cat /tmp/ems-backup.dump
+  pg_dump -U ems -d ems -Fc --no-owner --no-privileges --exclude-table-data="\"TripReceipt\"" -f /tmp/ems-backup.dump && cat /tmp/ems-backup.dump
   rc=$?; rm -f /tmp/ems-backup.dump; exit $rc' > "$DUMP" || fail "pg_dump failed"
 [ -s "$DUMP" ] || fail "pg_dump produced an empty file"
 

@@ -122,7 +122,18 @@ block in `docker-compose.yml`, or the container never sees it.
 `scripts/backup.sh` dumps the database from inside the `db` container, encrypts it,
 **restores it into a scratch database to prove it works**, keeps 30 days on the VPS,
 uploads to Google Drive and deletes Drive copies older than 30 days. It runs as root,
-because it drives `docker compose`. Run once on the VPS:
+because it drives `docker compose`. **Receipt photos are not backed up** (the owner's
+call): the app deletes them after 7 days anyway, and they were most of every dump. A
+restore brings back every trip with its `receipt_taken_at`; only the photos of the
+last week are missing.
+
+It reads `/opt/ems/.env` through `docker compose`, so that file must already have
+`POSTGRES_PASSWORD`, `JWT_SECRET` and `APP_DB_PASSWORD`. On a server still running
+code from before 2026-09-26, do steps 1-3 **after** `git pull` and the two `.env`
+lines of the redeploy (section 2), **before** `docker compose build` - the first backup
+is then the database exactly as it was before that deploy's migrations.
+
+Run once on the VPS:
 
 1. **The passphrase.** It lives in `/etc/ems`, which survives a reboot — `/run/secrets`
    (the old location) is wiped by every reboot, taking the only key with it.
@@ -139,8 +150,19 @@ because it drives `docker compose`. Run once on the VPS:
 
 2. **Google Drive** (as root, so the cron job finds the config):
    ```bash
-   sudo apt-get install -y rclone
-   sudo rclone config        # name: gdrive, type: drive, follow the wizard
+   sudo apt-get install -y rclone gnupg
+   sudo rclone config
+   ```
+   In the wizard: `n` (new remote), name **`gdrive`**, storage **`drive`**, leave
+   client id and secret empty, scope **`drive.file`** (rclone sees only the files it
+   made, not the rest of the Drive), leave the rest at the defaults. The VPS has no
+   browser, so answer **`n`** to "Use web browser to automatically authenticate". It
+   prints a command like `rclone authorize "drive" "..."`: run that on your own
+   computer (Windows: `winget install Rclone.Rclone`, in a new terminal), sign in to
+   the Google account the backups should go to, and paste the token it prints back
+   into the VPS. Check it:
+   ```bash
+   sudo rclone lsd gdrive:        # lists folders, no error
    ```
    No Drive? Put `RCLONE_REMOTE=none` in front of the command in the cron line, and
    backups stay on the VPS only — which does not survive losing the VPS.
@@ -149,6 +171,7 @@ because it drives `docker compose`. Run once on the VPS:
    ```bash
    sudo /opt/ems/scripts/backup.sh
    # expect: "check passed: N users, N punches ..." then "backup complete"
+   sudo rclone ls gdrive:EMS-Backups   # the new ems-<date>.dump.gpg is there
    ```
 
 4. **Schedule it** (`sudo crontab -e`):
