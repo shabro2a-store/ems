@@ -5,7 +5,7 @@ Conventions for anyone (human or AI) working on this repo. Read
 endpoint contract.
 
 ## Stack
-- pnpm workspace. Apps: `apps/web` (Next.js 14 App Router), `apps/worker` (node-cron).
+- pnpm workspace. Apps: `apps/web` (Next.js 16 App Router), `apps/worker` (node-cron).
   Packages: `db` (Prisma/Postgres), `time` (Asia/Beirut), `notify` (Telegram), `pdf`.
 - TypeScript strict mode everywhere. pnpm only (no npm/yarn).
 
@@ -34,10 +34,11 @@ endpoint contract.
 
 ## API conventions
 - Every response is `{ ok: true, data }` or `{ ok: false, error: { code, message } }`.
-- Auth: middleware turns away requests with no valid token; every route and app
+- Auth: the proxy (`proxy.ts`, Next 16's name for middleware) turns away requests with
+  no valid token; every route and app
   layout then calls `identity()` (`lib/auth/identity.ts`) - the signed cookie, checked
   against the user's session version - and re-checks the role. Never read `x-user-*`
-  headers; the middleware strips them. `me/*` is scoped to the caller's own id.
+  headers; the proxy strips them. `me/*` is scoped to the caller's own id.
 - Mutations require a CSRF token; most POSTs require an `Idempotency-Key`.
 - Never return `password_hash` (or other secrets) to the client — select explicitly.
 - The admin account is protected: it can't be created via the app, promoted/demoted,
@@ -45,7 +46,9 @@ endpoint contract.
 - Every mutation writes an append-only `AuditLog` entry.
 
 ## Testing
-- `pnpm -r typecheck`, `pnpm --filter web lint` and `pnpm -r test` must be green.
+- `pnpm -r typecheck`, `pnpm --filter web lint` (ESLint 9, `eslint.config.mjs`) and
+  `pnpm -r test` must be green.
+- Next 16: `cookies()`/`headers()` and route `params` are Promises - always `await` them.
 - Unit tests run standalone; HTTP integration tests need the app running at
   `TEST_BASE_URL` (default `http://127.0.0.1:3000`) plus Postgres — see the CI
   workflow and README.

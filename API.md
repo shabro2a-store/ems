@@ -54,7 +54,7 @@ role change, retirement all bump `session_version`) or the account is inactive. 
 a kind (`access`/`refresh`): a refresh token in the access cookie is refused.
 
 ### GET /api/auth/resume
-Where the middleware hands a page request (`/admin`, `/employee`, `/driver`, `/caller`)
+Where the proxy hands a page request (`/admin`, `/employee`, `/driver`, `/caller`)
 whose access token has lapsed but which carries a refresh token. Renews like `refresh`, then
 `307` back to the page (a same-site path only; anything else goes to `/`). An ended session
 → cookies cleared, `307 /login`.

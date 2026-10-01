@@ -6,7 +6,7 @@ scheduling, cash advances, and a Telegram-notifying cron worker. Business timezo
 **Asia/Beirut**. Response envelope everywhere: `{ ok: true, data }` or
 `{ ok: false, error: { code, message } }`.
 
-Stack: Next.js 14 (App Router) web app + a `node-cron` worker + Postgres (Prisma).
+Stack: Next.js 16 (App Router) web app + a `node-cron` worker + Postgres (Prisma).
 Packages: `db` (schema/seed), `time` (Beirut tz), `notify` (Telegram), `pdf` (payroll PDF).
 
 **Status:** feature-complete and running in production. Everything below is built,
@@ -35,12 +35,12 @@ check `/api/health`'s `uptime_s` if in doubt.
   as `ems_app`.
 - **Login** issues 3 cookies: `ems_access` (JWT, httpOnly), `ems_refresh` (JWT, httpOnly, 7d), `csrf` (readable).
   Each token says which it is (`typ`) and carries the user's `session_version`; the
-  middleware accepts only an access token, and a refresh is refused once the version has
+  proxy accepts only an access token, and a refresh is refused once the version has
   moved on — sign-out (everywhere), a password reset or change, a role change and
-  retirement all bump it. Access tokens are not checked against it (the middleware cannot
-  reach the database), which is why they live only `ACCESS_TTL_MIN` (15 min): an ended
+  retirement all bump it. Access tokens are not checked against it by the proxy (it does
+  not read the database), which is why they live only `ACCESS_TTL_MIN` (15 min): an ended
   session stops within that.
-- **Middleware** verifies the access JWT: any `/api/me/*` or `/api/admin/*` without one → `401`.
+- **Proxy** (`proxy.ts`, formerly `middleware.ts`; Node runtime) verifies the access JWT: any `/api/me/*` or `/api/admin/*` without one → `401`.
   It strips any `x-user-*` header a client sends and sets none. Each route and app layout
   reads who is asking with `identity()` (`lib/auth/identity.ts`): the signed cookie, checked
   against `User.session_version` and `is_active` - so an ended session is refused on its
@@ -71,7 +71,7 @@ check `/api/health`'s `uptime_s` if in doubt.
   token on the repeat) and repeating the request; a refused renewal sends the person to
   `/login` instead of leaving the screen frozen on its last data. A page opened after the
   access token lapsed (`/admin`, `/employee`, `/driver`, `/caller`) is rewritten by the
-  middleware to `/api/auth/resume`, which renews and redirects back to the same page — so
+  proxy to `/api/auth/resume`, which renews and redirects back to the same page — so
   somebody signed in within the week is never shown the login form. There is no longer a
   12h driver session re-issued at the punch; renewal covers a shift of any length.
   The seed's admin password `change-me` (published in the repo) opens no session: the login

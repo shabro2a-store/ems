@@ -21,11 +21,11 @@ scheduling, cash advances, and a Telegram-notifying background worker.
 - [AGENTS.md](AGENTS.md) — code conventions.
 
 ## Tech stack
-Next.js 14 (App Router) · PostgreSQL 16 + Prisma · node-cron worker ·
+Next.js 16 (App Router, Turbopack) · React 19 · PostgreSQL 16 + Prisma · node-cron worker ·
 pnpm workspaces · Tailwind design system · react-pdf. Node 22 LTS.
 
-Next.js 14.2 is the last 14.x line; moving to 15 (async `cookies()`/`headers()`,
-React 19) is planned as its own step, not folded into other work.
+Next.js 16 is the Active LTS line; each major gets security fixes for about two
+years from its release (16: October 2025), see nextjs.org/support-policy.
 
 ## Local development
 ```bash
@@ -70,7 +70,7 @@ at the job level, so every step inherits them.
 
 ## Layout
 ```
-apps/web      Next.js app (UI + API routes + middleware)
+apps/web      Next.js app (UI + API routes + proxy.ts)
 apps/worker   node-cron background jobs (flags, alerts, daily summary)
 packages/db   Prisma schema, migrations, seed
 packages/time Asia/Beirut date helpers
