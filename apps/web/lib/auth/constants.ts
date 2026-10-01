@@ -13,7 +13,7 @@ export const LOGIN_ADDRESS_WINDOW_MS = 60_000;
 export const PASSWORD_MIN_LENGTH = 8;
 export const ADVANCE_RATE_LIMIT_PER_MIN = 5;
 export const IDEMPOTENCY_TTL_HOURS = 24;
-// How long an access token lives. Short on purpose: the middleware cannot
+// How long an access token lives. Short on purpose: the proxy does not
 // read the database, so this is how long an ended session (sign-out, reset,
 // retirement) can keep working. The client renews it on a 401 with the
 // refresh token (7 days, sliding), which is checked against session_version -

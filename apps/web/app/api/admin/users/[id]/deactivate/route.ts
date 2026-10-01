@@ -8,7 +8,8 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function POST(req: Request, ctx: { params: { id: string } }) {
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -18,7 +19,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
 
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 
-  const before = await prisma.user.findUnique({ where: { id: ctx.params.id } });
+  const before = await prisma.user.findUnique({ where: { id } });
   if (!before) return jsonError('NOT_FOUND', 'User not found', 404);
 
   // Never let an admin be deactivated — that could lock everyone out of the system.
@@ -27,7 +28,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   }
 
   const user = await prisma.user.update({
-    where: { id: ctx.params.id },
+    where: { id },
     // Either way round, sessions from before start over: deactivating ends them,
     // and reactivating must not bring a week-old refresh token back to life.
     data: { is_active: !before.is_active, session_version: { increment: 1 } },

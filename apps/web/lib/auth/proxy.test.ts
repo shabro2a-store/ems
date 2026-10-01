@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { NextRequest } from 'next/server';
-import { middleware } from '@/middleware';
+import { proxy } from '@/proxy';
 import { signToken } from '@/lib/auth/jwt';
 import { ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME } from '@/lib/auth/constants';
 
 /*
- * The middleware is the first gate on every request, and it was only ever
+ * The proxy (formerly middleware) is the first gate on every request, and it was only ever
  * exercised through the live server. These pin its four decisions directly:
  * strip headers a client could forge, turn away /api/me|admin|caller without a
  * valid access token, send a page whose access token lapsed through
@@ -39,9 +39,9 @@ function forwarded(res: Response): string[] {
   return (res.headers.get('x-middleware-override-headers') ?? '').split(',').filter(Boolean);
 }
 
-describe('middleware', () => {
+describe('proxy', () => {
   it('strips x-user-* and x-resume-next a client sent, whoever is signed in', async () => {
-    const res = await middleware(
+    const res = await proxy(
       req('/api/me/ping', {
         access,
         headers: { 'x-user-id': 'someone-else', 'x-user-role': 'ADMIN', 'x-user-branch-id': 'b9', 'x-resume-next': '//evil.example' },
@@ -55,41 +55,41 @@ describe('middleware', () => {
   });
 
   it.each(['/api/me/ping', '/api/admin/overview', '/api/caller/drivers'])('turns away %s without an access token', async (path) => {
-    const res = await middleware(req(path));
+    const res = await proxy(req(path));
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ ok: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
   });
 
   it('does not take a refresh token in the access cookie', async () => {
-    const res = await middleware(req('/api/me/ping', { access: refresh }));
+    const res = await proxy(req('/api/me/ping', { access: refresh }));
     expect(res.status).toBe(401);
   });
 
   it('answers an API call with a lapsed access token 401, not a resume', async () => {
-    const res = await middleware(req('/api/me/ping', { refresh }));
+    const res = await proxy(req('/api/me/ping', { refresh }));
     expect(res.status).toBe(401);
     expect(res.headers.get('x-middleware-rewrite')).toBeNull();
   });
 
   it.each(['/employee?tab=month', '/admin/payroll', '/'])('sends %s through /api/auth/resume when only the refresh token is left', async (path) => {
-    const res = await middleware(req(path, { refresh }));
+    const res = await proxy(req(path, { refresh }));
     expect(new URL(res.headers.get('x-middleware-rewrite')!).pathname).toBe('/api/auth/resume');
     expect(res.headers.get('x-middleware-request-x-resume-next')).toBe(path);
   });
 
   it('leaves a page alone while the access token is good', async () => {
-    const res = await middleware(req('/employee', { access, refresh }));
+    const res = await proxy(req('/employee', { access, refresh }));
     expect(res.headers.get('x-middleware-rewrite')).toBeNull();
   });
 
   it('never resumes the service worker, icons or sounds', async () => {
-    const res = await middleware(req('/sw.js', { refresh }));
+    const res = await proxy(req('/sw.js', { refresh }));
     expect(res.headers.get('x-middleware-rewrite')).toBeNull();
   });
 
   it('lets public API routes through without a token', async () => {
     for (const path of ['/api/health', '/api/auth/login', '/api/telegram/webhook']) {
-      expect((await middleware(req(path))).status, path).toBe(200);
+      expect((await proxy(req(path))).status, path).toBe(200);
     }
   });
 });

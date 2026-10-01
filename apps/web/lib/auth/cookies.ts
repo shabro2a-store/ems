@@ -14,8 +14,8 @@ function accessCookieMaxAge(expiresAt: Date): number {
 //   2. forwarded-proto header is https — same thing, alternative source.
 //   3. NODE_ENV === 'production' AND no PUBLIC_APP_URL — legacy fallback.
 //   4. Otherwise (local dev over http://localhost): NOT secure.
-function serveOverHttps(): boolean {
-  const store = cookies();
+async function serveOverHttps(): Promise<boolean> {
+  const store = await cookies();
   const appUrl = process.env.PUBLIC_APP_URL ?? '';
   const forwardedProto = (store as unknown as { get?: (k: string) => unknown }).get?.('x-forwarded-proto');
   return (
@@ -25,14 +25,14 @@ function serveOverHttps(): boolean {
   );
 }
 
-export function setAuthCookies(
+export async function setAuthCookies(
   accessToken: string,
   refreshToken: string,
   csrfToken: string,
   accessExpiresAt: Date,
-): void {
-  const store = cookies();
-  const isHttps = serveOverHttps();
+): Promise<void> {
+  const store = await cookies();
+  const isHttps = await serveOverHttps();
   const baseAttrs = {
     httpOnly: true,
     secure: isHttps,
@@ -50,8 +50,8 @@ export function setAuthCookies(
   });
 }
 
-export function clearAuthCookies(): void {
-  const store = cookies();
+export async function clearAuthCookies(): Promise<void> {
+  const store = await cookies();
   for (const name of [ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME, CSRF_COOKIE_NAME]) {
     store.set(name, '', { path: '/', maxAge: 0 });
   }

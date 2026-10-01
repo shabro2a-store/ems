@@ -44,7 +44,8 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -61,7 +62,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
 
-  const before = await prisma.user.findUnique({ where: { id: ctx.params.id } });
+  const before = await prisma.user.findUnique({ where: { id } });
   if (!before) return jsonError('NOT_FOUND', 'User not found', 404);
 
   // Protect the single admin account: you can't promote anyone to ADMIN, and you
@@ -94,7 +95,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
 
   const user = await prisma.$transaction(async (tx) => {
     const updated = await tx.user.update({
-      where: { id: ctx.params.id },
+      where: { id },
       data: {
         ...(body.username ? { username: body.username } : {}),
         ...(body.name !== undefined ? { name: body.name.trim() || null } : {}),
@@ -184,7 +185,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
  * The audit row survives the person: AuditLog.actor_id carries no foreign key,
  * so the record of the deletion is still there when the user is not.
  */
-export async function DELETE(req: Request, ctx: { params: { id: string } }) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -193,7 +195,7 @@ export async function DELETE(req: Request, ctx: { params: { id: string } }) {
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 
-  const user = await prisma.user.findUnique({ where: { id: ctx.params.id } });
+  const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return jsonError('NOT_FOUND', 'User not found', 404);
 
   // The same guard deactivate carries. Deleting the owner's own account would

@@ -7,14 +7,15 @@ import { prisma } from '@/lib/db/prisma';
  * database behind the admin session - there is no public URL to a receipt.
  * 404 once the weekly wipe has taken it.
  */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   if (me.role !== 'ADMIN') {
     return NextResponse.json({ ok: false, error: { code: 'FORBIDDEN', message: 'Admin only' } }, { status: 403 });
   }
   const receipt = await prisma.tripReceipt.findUnique({
-    where: { trip_id: params.id },
+    where: { trip_id: id },
     select: { mime: true, bytes: true, size: true },
   });
   if (!receipt) {

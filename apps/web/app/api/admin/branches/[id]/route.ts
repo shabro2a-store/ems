@@ -30,7 +30,8 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -47,11 +48,11 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     return jsonError('INVALID_INPUT', 'Invalid request body: ' + (err instanceof Error ? err.message : ''), 400);
   }
 
-  const before = await prisma.branch.findUnique({ where: { id: ctx.params.id } });
+  const before = await prisma.branch.findUnique({ where: { id } });
   if (!before) return jsonError('NOT_FOUND', 'Branch not found', 404);
 
   const branch = await prisma.branch.update({
-    where: { id: ctx.params.id },
+    where: { id },
     data: {
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.lat !== undefined ? { lat: body.lat } : {}),
@@ -76,7 +77,8 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
   return NextResponse.json({ ok: true, data: { branch } });
 }
 
-export async function DELETE(req: Request, ctx: { params: { id: string } }) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -85,7 +87,7 @@ export async function DELETE(req: Request, ctx: { params: { id: string } }) {
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 
-  const branch = await prisma.branch.findUnique({ where: { id: ctx.params.id } });
+  const branch = await prisma.branch.findUnique({ where: { id } });
   if (!branch) return jsonError('NOT_FOUND', 'Branch not found', 404);
 
   // Same rule as a person, one scale up: the branch goes today, what happened

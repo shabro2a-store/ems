@@ -19,7 +19,7 @@ export async function issueSession(
   const claims = { sub: user.id, role: user.role, branchId: user.branch_id ?? null, sv: user.session_version };
   const access = await signToken(claims, exp, 'access');
   const refresh = await signToken(claims, new Date(now.getTime() + REFRESH_TTL_DAYS * 86_400_000), 'refresh');
-  setAuthCookies(access, refresh, generateCsrfToken(), exp);
+  await setAuthCookies(access, refresh, generateCsrfToken(), exp);
 }
 
 /**

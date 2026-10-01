@@ -14,7 +14,8 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function PATCH(req: Request, ctx: { params: { id: string } }) {
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -35,11 +36,11 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
     return jsonError('INVALID_INPUT', 'At least one field required', 400);
   }
 
-  const before = await prisma.user.findUnique({ where: { id: ctx.params.id } });
+  const before = await prisma.user.findUnique({ where: { id } });
   if (!before) return jsonError('NOT_FOUND', 'User not found', 404);
 
   const user = await prisma.user.update({
-    where: { id: ctx.params.id },
+    where: { id },
     data: {
       ...(body.dailySummary !== undefined ? { notify_daily_summary: body.dailySummary } : {}),
       ...(body.routinePings !== undefined ? { notify_routine_pings: body.routinePings } : {}),

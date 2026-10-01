@@ -90,7 +90,7 @@ export async function GET(req: Request) {
     rows,
     branchName,
   });
-  const buffer = await renderToBuffer(doc as React.ReactElement);
+  const buffer = await renderToBuffer(doc as Parameters<typeof renderToBuffer>[0]);
 
   return new NextResponse(buffer as unknown as BodyInit, {
     status: 200,

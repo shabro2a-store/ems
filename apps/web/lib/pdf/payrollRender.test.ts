@@ -27,7 +27,7 @@ const row = (over: Partial<PayrollRow> = {}): PayrollRow => ({
 
 async function render(rows: PayrollRow[]) {
   const doc = React.createElement(PayrollDocument, { month: '2026-09', generatedAt: new Date('2026-10-01T08:00:00Z'), rows, branchName: 'Hamra' });
-  return renderToBuffer(doc as React.ReactElement);
+  return renderToBuffer(doc as Parameters<typeof renderToBuffer>[0]);
 }
 
 describe('the payroll PDF', () => {

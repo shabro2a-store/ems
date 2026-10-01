@@ -10,7 +10,8 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -19,14 +20,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!adminId) return jsonError('UNAUTHORIZED', 'Authentication required', 401);
   if (!csrfFromRequest(req)) return jsonError('FORBIDDEN', 'CSRF token mismatch', 403);
 
-  const flag = await prisma.flag.findUnique({ where: { id: params.id } });
+  const flag = await prisma.flag.findUnique({ where: { id } });
   if (!flag) return jsonError('NOT_FOUND', 'Flag not found', 404);
   if (flag.resolved_at) {
     return NextResponse.json({ ok: true, data: { id: flag.id, resolved_at: flag.resolved_at.toISOString() } });
   }
 
   const updated = await prisma.flag.update({
-    where: { id: params.id },
+    where: { id },
     data: { resolved_at: new Date() },
   });
   await writeAuditLog({

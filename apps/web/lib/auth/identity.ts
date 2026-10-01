@@ -22,7 +22,7 @@ export interface Identity {
  * null means "not signed in": answer 401 (or send a page to /login).
  */
 export async function identity(): Promise<Identity | null> {
-  const token = cookies().get(ACCESS_COOKIE_NAME)?.value;
+  const token = (await cookies()).get(ACCESS_COOKIE_NAME)?.value;
   const payload = token ? await verifyToken(token, 'access') : null;
   if (!payload) return null;
   const user = await prisma.user.findUnique({

@@ -17,7 +17,8 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function POST(req: Request, ctx: { params: { id: string } }) {
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -29,11 +30,11 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   // This route needs no current password, so on the owner's own account it
   // would hand the admin login to anyone at an unlocked admin tab. Their own
   // goes through the Password dialog, which asks for the current one.
-  if (ctx.params.id === adminId) {
+  if (id === adminId) {
     return jsonError('OWN_PASSWORD', 'Change your own password with the Password button at the top of the page.', 400);
   }
 
-  const user = await prisma.user.findUnique({ where: { id: ctx.params.id } });
+  const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return jsonError('NOT_FOUND', 'User not found', 404);
 
   // Admin may either set a chosen password or leave it blank for a random one.
@@ -56,7 +57,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   // A new password ends every session opened with the old one - which is
   // usually the reason for resetting it.
   await prisma.user.update({
-    where: { id: ctx.params.id },
+    where: { id },
     data: { password_hash: passwordHash, session_version: { increment: 1 } },
   });
 
@@ -64,7 +65,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
     actorId: adminId,
     action: 'user.reset_password',
     entity: 'User',
-    entityId: ctx.params.id,
+    entityId: id,
   });
 
   return NextResponse.json({ ok: true, data: { temp_password: tempPassword } });

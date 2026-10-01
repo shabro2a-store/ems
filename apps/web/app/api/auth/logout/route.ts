@@ -32,6 +32,6 @@ export async function POST(req: Request) {
     });
     await writeAuditLog({ actorId: who.sub, action: 'auth.logout', entity: 'User', entityId: who.sub });
   }
-  clearAuthCookies();
+  await clearAuthCookies();
   return NextResponse.json({ ok: true, data: { loggedOut: true } });
 }

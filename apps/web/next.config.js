@@ -1,4 +1,4 @@
-const { withSentryConfig } = require('@sentry/nextjs');
+const { withSentryConfig } = require('@sentry/nextjs/config');
 
 // Everything the app loads is its own: no CDN, no client-side analytics.
 // 'unsafe-inline' for scripts because the App Router streams its hydration data
@@ -38,32 +38,19 @@ const nextConfig = {
   },
   // output: 'standalone' disabled - causes EPERM symlink errors on Windows
   // and unnecessary complexity. The full build still works fine for our use case.
-  experimental: {
-    // Runs instrumentation.ts on server boot so Sentry also wraps API routes,
-    // not just page rendering.
-    instrumentationHook: true,
-  },
-  eslint: {
-    // Linted as its own step (`pnpm --filter web lint`, run in CI), not inside
-    // `next build`, so a lint finding never blocks building a fix for deploy.
-    ignoreDuringBuilds: true,
-  },
 };
 
-// Wraps every route handler and server component at build time so an error
-// that escapes one reaches Sentry; instrumentation.ts alone only initialised
-// the SDK, and nothing ever called captureException. With SENTRY_DSN unset the
-// wrappers do nothing. No source maps are uploaded (no auth token, no release)
-// and the plugin sends no telemetry of its own. The middleware is left
-// unwrapped: it is a few lines of token checks, and the security boundary
-// stays exactly as written. The browser is not reported - there is no client SDK
-// (the CSP allows no third-party connection), so the global-error.js notice
-// does not apply.
+// An error that escapes a route handler or a server component reaches Sentry
+// through Next's own onRequestError hook (instrumentation.ts): the build is
+// Turbopack, where Sentry wraps nothing at build time. With SENTRY_DSN unset
+// the hook does nothing. No source maps are uploaded (no auth token, no
+// release) and the plugin sends no telemetry of its own. The browser is not
+// reported - there is no client SDK (the CSP allows no third-party connection),
+// so the global-error.js notice does not apply.
 process.env.SENTRY_SUPPRESS_GLOBAL_ERROR_HANDLER_FILE_WARNING = '1';
 module.exports = withSentryConfig(nextConfig, {
   silent: true,
   telemetry: false,
   sourcemaps: { disable: true },
   release: { create: false },
-  webpack: { autoInstrumentMiddleware: false },
 });

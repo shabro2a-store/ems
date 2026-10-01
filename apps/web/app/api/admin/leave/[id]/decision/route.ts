@@ -13,7 +13,8 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function POST(req: Request, ctx: { params: { id: string } }) {
+export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -35,7 +36,7 @@ export async function POST(req: Request, ctx: { params: { id: string } }) {
   const cached = await readIdempotentResponse({ userId: adminId, key: idemKey, scope: new URL(req.url).pathname });
   if (cached) return NextResponse.json(cached.response_json, { status: cached.status_code });
 
-  const result = await decideLeave({ adminId, leaveId: ctx.params.id, decision: body.decision });
+  const result = await decideLeave({ adminId, leaveId: id, decision: body.decision });
 
   if (!result.ok) {
     if (result.code === 'NOT_FOUND') return jsonError('NOT_FOUND', 'Leave request not found', 404);

@@ -19,7 +19,8 @@ function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
 
-export async function GET(_req: Request, ctx: { params: { userId: string } }) {
+export async function GET(_req: Request, ctx: { params: Promise<{ userId: string }> }) {
+  const { userId } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -27,15 +28,15 @@ export async function GET(_req: Request, ctx: { params: { userId: string } }) {
 
   const [rows, overrides, pendingLeaves] = await Promise.all([
     prisma.schedule.findMany({
-      where: { user_id: ctx.params.userId },
+      where: { user_id: userId },
       orderBy: { weekday: 'asc' },
     }),
     prisma.scheduleOverride.findMany({
-      where: { user_id: ctx.params.userId },
+      where: { user_id: userId },
       orderBy: { date: 'asc' },
     }),
     prisma.leaveRequest.findMany({
-      where: { user_id: ctx.params.userId, status: 'PENDING' },
+      where: { user_id: userId, status: 'PENDING' },
       orderBy: { created_at: 'desc' },
     }),
   ]);
@@ -47,7 +48,8 @@ export async function GET(_req: Request, ctx: { params: { userId: string } }) {
   return NextResponse.json({ ok: true, data: { weeklySchedule, overrides, pendingLeaves } });
 }
 
-export async function PUT(req: Request, ctx: { params: { userId: string } }) {
+export async function PUT(req: Request, ctx: { params: Promise<{ userId: string }> }) {
+  const { userId } = await ctx.params;
   const me = await identity();
   if (!me) return unauthorized();
   const role = me.role;
@@ -70,7 +72,7 @@ export async function PUT(req: Request, ctx: { params: { userId: string } }) {
   // that actually change get a row, and a weekday switched off gets a 0.
   const today = todayInBeirut();
   const effectiveFrom = new Date(`${today}T00:00:00.000Z`);
-  const rows = await prisma.schedule.findMany({ where: { user_id: ctx.params.userId } });
+  const rows = await prisma.schedule.findMany({ where: { user_id: userId } });
   const before = weekInForce(rows, today);
   const wanted = new Map(body.weeklySchedule.map((s) => [s.weekday, Math.round(s.shift_hours * 60)]));
 
@@ -80,8 +82,8 @@ export async function PUT(req: Request, ctx: { params: { userId: string } }) {
       const current = before.find((r) => r.weekday === weekday)?.shift_min ?? 0;
       if (shiftMin === current) continue;
       await tx.schedule.upsert({
-        where: { user_id_weekday_effective_from: { user_id: ctx.params.userId, weekday, effective_from: effectiveFrom } },
-        create: { user_id: ctx.params.userId, weekday, shift_min: shiftMin, effective_from: effectiveFrom },
+        where: { user_id_weekday_effective_from: { user_id: userId, weekday, effective_from: effectiveFrom } },
+        create: { user_id: userId, weekday, shift_min: shiftMin, effective_from: effectiveFrom },
         update: { shift_min: shiftMin },
       });
     }
@@ -89,7 +91,7 @@ export async function PUT(req: Request, ctx: { params: { userId: string } }) {
       actorId: adminId,
       action: 'schedule.update',
       entity: 'User',
-      entityId: ctx.params.userId,
+      entityId: userId,
       before: { schedule: before.filter((s) => s.shift_min > 0).map((s) => ({ weekday: s.weekday, shift_min: s.shift_min })) },
       after: { schedule: body.weeklySchedule, effective_from: today },
       db: tx,

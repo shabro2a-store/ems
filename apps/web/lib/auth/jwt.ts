@@ -26,8 +26,8 @@ function getSecret(): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
-// Web Crypto, not node:crypto: the middleware imports this file and runs on
-// the Edge runtime, where a Node module is not available.
+// Web Crypto, not node:crypto: it runs the same in the proxy, the routes and
+// the tests, whatever the runtime.
 export function newJwtSecret(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(48)), (b) => b.toString(16).padStart(2, '0')).join('');
 }

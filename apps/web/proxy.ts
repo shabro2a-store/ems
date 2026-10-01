@@ -26,7 +26,7 @@ function isAppPage(pathname: string): boolean {
   return pathname === '/' || APP_SECTIONS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const token = request.cookies.get(ACCESS_COOKIE_NAME)?.value;
   const requestHeaders = new Headers(request.headers);
