@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { readIdempotentResponse, storeIdempotentResponse } from '@/lib/services/idempotency';
 import { writeAuditLog } from '@/lib/services/audit';
+import { recordOvertimeRate } from '@/lib/services/overtime';
 import { PASSWORD_MIN_LENGTH } from '@/lib/auth/constants';
 
 const Create = z.object({
@@ -18,6 +19,8 @@ const Create = z.object({
   // Per completed trip, drivers only. Ignored for any other role rather than
   // rejected, so a form that always sends it does not have to know.
   tripRateCent: z.number().int().nonnegative().optional(),
+  // Optional; null or absent = overtime at the hourly rate (overtime.ts).
+  overtimeRateCent: z.number().int().nonnegative().nullable().optional(),
   // Omitted on every normal create, and the column defaults to false: a new
   // account is single-branch until the owner deliberately grants otherwise.
   canRoamBranches: z.boolean().optional(),
@@ -54,6 +57,11 @@ export async function GET() {
       role: true,
       branch_id: true,
       hourly_rate_cent: true,
+      // Both rates the edit form starts from. trip_rate_cent was missing, so a
+      // driver's edit form opened with an empty "Per trip" box, and saving it
+      // sent a value the route refuses - every driver edit failed.
+      trip_rate_cent: true,
+      overtime_rate_cent: true,
       is_active: true,
       can_roam_branches: true,
       day_start_hour: true,
@@ -118,6 +126,7 @@ export async function POST(req: Request) {
         branch_id: ROLES_FOR_BRANCH.has(body.role) ? body.branchId : null,
         hourly_rate_cent: body.hourlyRateCent,
         trip_rate_cent: body.role === 'DRIVER' ? (body.tripRateCent ?? 0) : 0,
+        overtime_rate_cent: ROLES_WITH_RATE.has(body.role) ? (body.overtimeRateCent ?? null) : null,
         can_roam_branches: body.canRoamBranches ?? false,
         is_active: true,
       },
@@ -138,12 +147,21 @@ export async function POST(req: Request) {
         data: { user_id: u.id, rate_cent: body.tripRateCent!, effective_from: new Date() },
       });
     }
+    if (ROLES_WITH_RATE.has(body.role) && body.overtimeRateCent != null) {
+      await recordOvertimeRate(tx, u.id, body.overtimeRateCent, null);
+    }
     await writeAuditLog({
       actorId: adminId,
       action: 'user.create',
       entity: 'User',
       entityId: u.id,
-      after: { username: u.username, role: u.role, branch_id: u.branch_id, hourly_rate_cent: u.hourly_rate_cent },
+      after: {
+        username: u.username,
+        role: u.role,
+        branch_id: u.branch_id,
+        hourly_rate_cent: u.hourly_rate_cent,
+        overtime_rate_cent: u.overtime_rate_cent,
+      },
       db: tx,
     });
     return u;

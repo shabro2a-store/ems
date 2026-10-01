@@ -17,6 +17,8 @@ interface User {
   branch: { id: string; name: string } | null;
   hourly_rate_cent: number;
   trip_rate_cent: number;
+  // null = overtime at the hourly rate.
+  overtime_rate_cent: number | null;
   is_active: boolean;
   can_roam_branches: boolean;
   day_start_hour: number | null;
@@ -27,6 +29,8 @@ interface Status { status: 'IN' | 'ON_TRIP' | 'DAY_OFF' | 'ABSENT' | 'LEFT'; sin
 const ROLE_TONE: Record<Role, 'primary' | 'warning' | 'neutral' | 'success'> = { EMPLOYEE: 'primary', DRIVER: 'warning', ADMIN: 'neutral', CALLER: 'success' };
 // Roles paid hourly (show/edit a rate). Callers and admin are not.
 const PAID_ROLES = new Set<Role>(['EMPLOYEE', 'DRIVER']);
+// An optional money box: blank means "not set" (null), not $0.
+const optionalCents = (v: string): number | null => (v.trim() === '' ? null : Math.round(parseFloat(v) * 100));
 const DAYS = [
   { wd: 0, name: 'Sunday' }, { wd: 1, name: 'Monday' }, { wd: 2, name: 'Tuesday' },
   { wd: 3, name: 'Wednesday' }, { wd: 4, name: 'Thursday' }, { wd: 5, name: 'Friday' }, { wd: 6, name: 'Saturday' },
@@ -256,6 +260,9 @@ export default function AdminEmployeesPage() {
                             {u.role === 'DRIVER' && u.trip_rate_cent > 0 && (
                               <span className="ml-1 text-xs text-muted">+ {centsToUsd(u.trip_rate_cent)}/trip</span>
                             )}
+                            {PAID_ROLES.has(u.role) && u.overtime_rate_cent !== null && (
+                              <span className="ml-1 text-xs text-muted">· OT {centsToUsd(u.overtime_rate_cent)}</span>
+                            )}
                           </td>
                           <td>
                             {st ? <StatusChip st={st} /> : <span className="text-xs text-muted">—</span>}
@@ -427,6 +434,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
   const [branch, setBranch] = useState(branches[0]?.id ?? '');
   const [rate, setRate] = useState('2.00');
   const [tripRate, setTripRate] = useState('0.00');
+  const [overtimeRate, setOvertimeRate] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -440,6 +448,7 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
         branchId: role === 'ADMIN' ? null : branch,
         hourlyRateCent: Math.round(parseFloat(rate || '0') * 100),
         ...(role === 'DRIVER' ? { tripRateCent: Math.round(parseFloat(tripRate || '0') * 100) } : {}),
+        ...(PAID_ROLES.has(role) ? { overtimeRateCent: optionalCents(overtimeRate) } : {}),
       },
     });
     setBusy(false);
@@ -469,6 +478,11 @@ function CreateEmployeeModal({ branches, onClose, onCreated }: { branches: Branc
         {PAID_ROLES.has(role) && (
           <Field label="Hourly rate (USD)" htmlFor="crate"><Input id="crate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} required /></Field>
         )}
+        {PAID_ROLES.has(role) && (
+          <Field label="Overtime rate (USD per hour)" htmlFor="cot" hint="Paid for overtime past the grace and for work on a day off. Blank = the hourly rate. The first overtime rate covers this whole month; a change applies from today.">
+            <Input id="cot" type="number" step="0.01" min="0" value={overtimeRate} onChange={(e) => setOvertimeRate(e.target.value)} placeholder="Same as hourly rate" />
+          </Field>
+        )}
         {role === 'DRIVER' && (
           <Field label="Per trip (USD)" htmlFor="ctrip" hint="Paid on top of the hour for every completed delivery.">
             <Input id="ctrip" type="number" step="0.01" min="0" value={tripRate} onChange={(e) => setTripRate(e.target.value)} />
@@ -488,6 +502,7 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
   const [branch, setBranch] = useState(user.branch_id ?? branches[0]?.id ?? '');
   const [rate, setRate] = useState((user.hourly_rate_cent / 100).toFixed(2));
   const [tripRate, setTripRate] = useState((user.trip_rate_cent / 100).toFixed(2));
+  const [overtimeRate, setOvertimeRate] = useState(user.overtime_rate_cent === null ? '' : (user.overtime_rate_cent / 100).toFixed(2));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -501,6 +516,7 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
           name, username, role, branchId: role === 'ADMIN' ? null : branch,
           hourlyRateCent: Math.round(parseFloat(rate || '0') * 100),
           ...(role === 'DRIVER' ? { tripRateCent: Math.round(parseFloat(tripRate || '0') * 100) } : {}),
+          ...(PAID_ROLES.has(role) ? { overtimeRateCent: optionalCents(overtimeRate) } : {}),
         };
     const res = await apiSend(`/api/admin/users/${user.id}`, { method: 'PATCH', body });
     setBusy(false);
@@ -531,6 +547,11 @@ function EditEmployeeModal({ user, branches, onClose, onSaved }: { user: User; b
             {PAID_ROLES.has(role) && (
               <Field label="Hourly rate (USD)" htmlFor="erate" hint="A rate change applies from now on; past shifts keep the old rate.">
                 <Input id="erate" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} />
+              </Field>
+            )}
+            {PAID_ROLES.has(role) && (
+              <Field label="Overtime rate (USD per hour)" htmlFor="eot" hint="Paid for overtime past the grace and for work on a day off. Blank = the hourly rate. The first overtime rate covers this whole month; a change applies from today.">
+                <Input id="eot" type="number" step="0.01" min="0" value={overtimeRate} onChange={(e) => setOvertimeRate(e.target.value)} placeholder="Same as hourly rate" />
               </Field>
             )}
             {role === 'DRIVER' && (

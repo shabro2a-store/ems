@@ -3,7 +3,7 @@ import { identity, unauthorized } from '@/lib/auth/identity';
 import { z } from 'zod';
 import { prisma } from '@/lib/db/prisma';
 import { payoutForUser, payrollRoster } from '@/lib/services/payout';
-import { monthEndRates } from '@/lib/services/payrollRates';
+import { monthEndOvertimeRates, monthEndRates } from '@/lib/services/payrollRates';
 import { PayrollDocument } from 'pdf/payroll';
 import { renderToBuffer } from '@react-pdf/renderer';
 import React from 'react';
@@ -44,6 +44,7 @@ export async function GET(req: Request) {
   // disagree about who was paid this month.
   const users = await payrollRoster(prisma, month, branchId);
   const rateAtMonthEnd = await monthEndRates(prisma, users, month);
+  const overtimeRateAtMonthEnd = await monthEndOvertimeRates(prisma, users.map((u) => u.id), month);
 
   const rows = await Promise.all(
     users.map(async (u) => {
@@ -64,7 +65,9 @@ export async function GET(req: Request) {
         branch_name: u.branch?.name ?? null,
         hours: payout.hours,
         rate_cent: rateAtMonthEnd.get(u.id)!,
+        overtime_rate_cent: overtimeRateAtMonthEnd.get(u.id) ?? null,
         gross_cent: payout.grossCent,
+        overtime_premium_cent: payout.overtimePremiumCent,
         blocked_credit_cent: payout.blockedCreditCent,
         adjustments_cent: payout.adjustmentsCent,
         penalties_cent: payout.penaltiesCent,

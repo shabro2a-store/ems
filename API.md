@@ -275,9 +275,12 @@ chars). Ends every other session of the admin's; this one is re-issued.
   `overview`; kept only because integration tests still exercise it).
 
 ### Employees
-- **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`).
+- **GET /api/admin/users** → `{ users: [...] }` (no `password_hash`). Each carries
+  `hourly_rate_cent`, `trip_rate_cent` and `overtime_rate_cent` (null = the hourly rate) -
+  what the edit form starts from.
 - **POST /api/admin/users** *(CSRF, Idempotent)* `{ username, name?, password, role:
-  "EMPLOYEE"|"DRIVER"|"CALLER", branchId, hourlyRateCent, canRoamBranches? }` →
+  "EMPLOYEE"|"DRIVER"|"CALLER", branchId, hourlyRateCent, tripRateCent?, overtimeRateCent?,
+  canRoamBranches? }` →
   `{ user }` (`password` ≥ 8 chars; not sent back - the owner typed it, and the answer is
   kept as the Idempotency-Key replay). `canRoamBranches` defaults to **false**: a new account is
   single-branch until the owner grants otherwise.
@@ -285,8 +288,11 @@ chars). Ends every other session of the admin's; this one is re-issued.
   rejected (403)**. **CALLER** needs a branch, gets no pay rate/RateChange, and is capped at
   **one active caller per branch** → `409 CALLER_EXISTS`.
 - **PATCH /api/admin/users/[id]** *(CSRF)* `{ username?, name?, role?, branchId?,
-  hourlyRateCent?, expectedMonthlySalaryCent?, canRoamBranches? }` (a rate change inserts a
-  new `RateChange`;
+  hourlyRateCent?, tripRateCent?, overtimeRateCent?, expectedMonthlySalaryCent?, canRoamBranches? }`
+  (a rate change inserts a new `RateChange` / `TripRateChange`; `overtimeRateCent` - or `null`
+  for "the hourly rate" - writes an `OvertimeRateChange` dated by working day: a person's
+  first one covers the whole current month, a later change applies from today, a second change
+  the same day replaces the first;
   `username` is uniqueness-checked → `409 USERNAME_TAKEN`). Promoting to admin, or changing the
   admin's role, is **rejected (403)** (the admin's username/name are still editable).
   `expectedMonthlySalaryCent` (or `null` to clear) is a reference figure only — it is never
@@ -405,6 +411,9 @@ Photos are wiped by the worker a week after the trip (`Trip.receipt_taken_at` st
   from `totals`, since it is never summed or built into `net_cent`. `rate_cent` is the
   rate the month was paid at; `current_rate_cent` is the rate in force today (what the
   rate dialog starts from - the two differ when the rate has changed since that month).
+  `overtime_rate_cent` / `current_overtime_rate_cent` are the same pair for the overtime rate
+  (null = the hourly rate), and `overtime_premium_cent` (rows and `totals`) is a memo line
+  **inside** `gross_cent`: what overtime at the overtime rate added over the hourly rate.
 - **GET /api/admin/reports/payroll?month=&branchId=** → a **PDF** (`application/pdf`),
   scoped to the branch filter.
 - **GET /api/admin/adjustments?userId=&month=YYYY-MM** → `{ adjustments: [{ id, kind,
@@ -478,13 +487,18 @@ raises no shortfall between its sessions. Unclosed days stay out too.
 `amount_cent` on an overtime day is what the excess minutes were **actually paid** (the
 last `overtimeMin` minutes, priced per interval), not `overtimeMin × one rate` — so a
 revoke after a mid-shift raise takes back the excess and leaves the required hours intact.
+From 2026-10-01 the excess is paid at the person's **overtime rate** when one is set
+(`OvertimeRateChange`, by working day): `rate_cent` is then that rate, `amount_cent` the
+minutes at it, and `premium_cent` the difference from the hourly rate, which payroll adds
+to gross. A revoke takes back `amount_cent`, premium included. With no overtime rate,
+`premium_cent` is 0 and nothing changes.
 
 A day that ran past its required hours by more than the branch's shift grace
 is **computed**, not stored, until the owner decides it (see `overtimeForUser`).
 A pending day (no decision) is already paid — pairHours pays every worked minute —
 so it surfaces in payroll only if revoked.
 - **GET /api/admin/overtime?userId=&month=YYYY-MM** → `{ overtime: [{ date,
-  overtimeMin, rate_cent, amount_cent, decision: "ACCEPTED"|"REVOKED"|null }] }`.
+  overtimeMin, rate_cent, amount_cent, premium_cent, decision: "ACCEPTED"|"REVOKED"|null }] }`.
   Unlike the attention queue this keeps **decided** days, which is what makes a
   decision reversible — the queue drops a day the moment it has one.
 - **POST /api/admin/overtime/decision** *(CSRF, Idempotent)* `{ userId, date:

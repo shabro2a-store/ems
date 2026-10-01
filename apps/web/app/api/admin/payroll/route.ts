@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { payoutForUser, payrollRoster } from '@/lib/services/payout';
-import { monthEndRates } from '@/lib/services/payrollRates';
+import { monthEndOvertimeRates, monthEndRates } from '@/lib/services/payrollRates';
 import { currentPayMonth, isMonthOpen } from '@/lib/services/periodLock';
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
@@ -41,6 +41,7 @@ export async function GET(req: Request) {
   //
   // Shared with the PDF, which printed $0 where this printed today's rate.
   const rateAtMonthEnd = await monthEndRates(prisma, users, month);
+  const overtimeRateAtMonthEnd = await monthEndOvertimeRates(prisma, users.map((u) => u.id), month);
 
   const rows = await Promise.all(
     users.map(async (u) => {
@@ -61,6 +62,10 @@ export async function GET(req: Request) {
         // the rate the MONTH was paid at; starting the dialog from it made "open
         // August, press Save" set August's rate as the rate from now on.
         current_rate_cent: u.hourly_rate_cent,
+        // The overtime rate the month ended on; null = the hourly rate.
+        overtime_rate_cent: overtimeRateAtMonthEnd.get(u.id) ?? null,
+        // Today's overtime rate, for the same dialog; null = the hourly rate.
+        current_overtime_rate_cent: u.overtime_rate_cent,
         // Reference only — what the owner expects to pay this person. Deliberately
         // excluded from `totals` below: it must never be summed or compared, only
         // displayed next to what they actually earned.
@@ -77,6 +82,9 @@ export async function GET(req: Request) {
         // netCent subtracts this too. Leaving it out of the response made the
         // table stop adding up, with nothing on screen to explain the gap.
         overtime_deduction_cent: r.overtimeDeductionCent,
+        // Inside gross_cent: what overtime at the overtime rate added over the
+        // hourly rate. Shown so a gross that includes it says so.
+        overtime_premium_cent: r.overtimePremiumCent,
         trips_count: r.tripsCount,
         trips_cent: r.tripsCent,
         net_cent: r.netCent,
@@ -93,6 +101,7 @@ export async function GET(req: Request) {
       advances_cent: s.advances_cent + r.advances_cent,
       penalties_cent: s.penalties_cent + r.penalties_cent,
       overtime_deduction_cent: s.overtime_deduction_cent + r.overtime_deduction_cent,
+      overtime_premium_cent: s.overtime_premium_cent + r.overtime_premium_cent,
       trips_count: s.trips_count + r.trips_count,
       trips_cent: s.trips_cent + r.trips_cent,
       net_cent: s.net_cent + r.net_cent,
@@ -105,6 +114,7 @@ export async function GET(req: Request) {
       advances_cent: 0,
       penalties_cent: 0,
       overtime_deduction_cent: 0,
+      overtime_premium_cent: 0,
       trips_count: 0,
       trips_cent: 0,
       net_cent: 0,

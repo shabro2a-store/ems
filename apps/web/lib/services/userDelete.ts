@@ -175,6 +175,10 @@ export async function deleteUserAndSetup(db: PrismaClient, userId: string): Prom
     await tx.schedule.deleteMany({ where: { user_id: userId } });
     await tx.leaveRequest.deleteMany({ where: { user_id: userId } });
     await tx.rateChange.deleteMany({ where: { user_id: userId } });
+    // The trip-rate history was missing here, so deleting a driver who had a
+    // per-trip rate but never worked failed on its foreign key.
+    await tx.tripRateChange.deleteMany({ where: { user_id: userId } });
+    await tx.overtimeRateChange.deleteMany({ where: { user_id: userId } });
     // Flag.user_id is nullable, so this would survive as an orphan rather than
     // block. A flag naming nobody is worse than no flag.
     await tx.flag.deleteMany({ where: { user_id: userId } });

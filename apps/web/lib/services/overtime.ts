@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { workingDayHistoryFrom } from 'time';
+import { todayInBeirut, workingDayHistoryFrom } from 'time';
 import { hourlyRateAt, monthRangeUtc, PAIR_LOOKAROUND_MS } from './payout';
 import {
   centsForLastMinutes,
@@ -19,9 +19,83 @@ interface RateChangeLite {
 export interface OvertimeItem {
   date: string; // YYYY-MM-DD (Beirut)
   overtimeMin: number;
+  // The overtime rate that day, or the hourly rate when none is set.
   rate_cent: number;
-  amount_cent: number; // already inside gross pay - pairHours pays every minute
+  // What the overtime minutes are paid - at the overtime rate when one is set.
+  // Inside gross pay: pairHours pays every minute at the hourly rate, and the
+  // premium below is added on top. Revoke takes back exactly this.
+  amount_cent: number;
+  // amount_cent minus what the same minutes earn at the hourly rate. Zero with
+  // no overtime rate, or on a day before OVERTIME_RATE_FROM.
+  premium_cent: number;
   decision: 'ACCEPTED' | 'REVOKED' | null; // null means pending, and pending is paid
+}
+
+/**
+ * The first working day overtime is paid at a person's own overtime rate
+ * (the owner's rule, 2026-10-01). Every day before keeps the hourly rate, so no
+ * month already paid can move.
+ */
+export const OVERTIME_RATE_FROM = '2026-10-01';
+
+export interface OvertimeRateRow {
+  rate_cent: number | null;
+  effective_from: Date;
+}
+
+/**
+ * The working day a newly saved overtime rate takes effect from.
+ *
+ * A person's FIRST rate covers the whole month it is set in - the owner chose
+ * "from 1 October", and the 1st of the current month is never a closed month.
+ * Every later change applies from today, like the hourly rate. Never before
+ * OVERTIME_RATE_FROM.
+ */
+export function overtimeRateEffectiveDate(isFirstRate: boolean, now: Date = new Date()): string {
+  const today = todayInBeirut(now);
+  const date = isFirstRate ? `${today.slice(0, 7)}-01` : today;
+  return date < OVERTIME_RATE_FROM ? OVERTIME_RATE_FROM : date;
+}
+
+/**
+ * Saves a person's overtime rate change, if it is one: one row per working day,
+ * so a second change the same day replaces the first. Returns whether it wrote.
+ */
+export async function recordOvertimeRate(
+  tx: Pick<PrismaClient, 'overtimeRateChange'>,
+  userId: string,
+  rateCent: number | null,
+  previous: number | null,
+): Promise<boolean> {
+  if (rateCent === previous) return false;
+  const isFirstRate = (await tx.overtimeRateChange.count({ where: { user_id: userId } })) === 0;
+  // A first "no overtime rate" is what everyone already has: nothing to record.
+  if (isFirstRate && rateCent === null) return false;
+  const effective_from = new Date(`${overtimeRateEffectiveDate(isFirstRate)}T00:00:00.000Z`);
+  await tx.overtimeRateChange.upsert({
+    where: { user_id_effective_from: { user_id: userId, effective_from } },
+    create: { user_id: userId, rate_cent: rateCent, effective_from },
+    update: { rate_cent: rateCent },
+  });
+  return true;
+}
+
+/**
+ * The overtime rate in force on a working day, or null for "the hourly rate".
+ *
+ * Dated by working day rather than instant because overtime is judged per day:
+ * a day has one overtime rate, and a row dated today cannot reach back into a
+ * night shift that started yesterday - or into a closed month.
+ */
+export function overtimeRateOn(rows: OvertimeRateRow[], date: string): number | null {
+  if (date < OVERTIME_RATE_FROM) return null;
+  const day = new Date(`${date}T00:00:00.000Z`).getTime();
+  let best: OvertimeRateRow | undefined;
+  for (const r of rows) {
+    if (r.effective_from.getTime() > day) continue;
+    if (!best || r.effective_from > best.effective_from) best = r;
+  }
+  return best?.rate_cent ?? null;
 }
 
 /** A stored ruling plus the overtime it was made against. */
@@ -55,16 +129,30 @@ export function computeOvertime(args: {
   rateChanges: RateChangeLite[];
   graceMin: number;
   decisionsByDate: Map<string, DecisionLite>;
+  /** The person's overtime rate on a working day (overtimeRateOn); omitted, the hourly rate. */
+  overtimeRateOn?: (date: string) => number | null;
 }): OvertimeItem[] {
   const items: OvertimeItem[] = [];
   for (const day of args.coverage) {
     if (!day.closed) continue;
     if (day.deltaMin <= args.graceMin) continue;
     const rate = hourlyRateAt(args.rateChanges, day.lastPunchAt);
+    // What payroll already paid the overtime minutes, at the hourly rate.
+    const hourlyCent = centsForLastMinutes(day.intervals, day.deltaMin);
+    const overtimeRate = args.overtimeRateOn?.(day.date) ?? null;
+    // The same minutes repriced at the overtime rate, floored per interval the
+    // way the hourly figure is, so the premium is exactly the difference.
+    const amount =
+      overtimeRate === null
+        ? hourlyCent
+        : centsForLastMinutes(
+            day.intervals.map((iv) => ({ minutes: iv.minutes, rateCent: overtimeRate })),
+            day.deltaMin,
+          );
     items.push({
       date: day.date,
       overtimeMin: day.deltaMin,
-      rate_cent: rate,
+      rate_cent: overtimeRate ?? rate,
       // What the excess minutes were actually paid, not deltaMin at one rate.
       // The excess is the part of the day worked after the required minutes
       // were covered, so it is the LAST deltaMin minutes - priced per interval
@@ -74,7 +162,8 @@ export function computeOvertime(args: {
       // and on a day requiring nothing it can exceed the day's entire gross.
       // Revoking has to leave the employee their required hours' pay, and this
       // is the only expression that does.
-      amount_cent: centsForLastMinutes(day.intervals, day.deltaMin),
+      amount_cent: amount,
+      premium_cent: amount - hourlyCent,
       decision: liveDecision(args.decisionsByDate.get(day.date), day.deltaMin),
     });
   }
@@ -84,6 +173,15 @@ export function computeOvertime(args: {
 
 export function sumRevokedOvertimeCent(items: OvertimeItem[]): number {
   return items.reduce((s, o) => (o.decision === 'REVOKED' ? s + o.amount_cent : s), 0);
+}
+
+/**
+ * The overtime premium a month adds to gross - every overtime day, revoked ones
+ * included, because a revoked day's deduction (sumRevokedOvertimeCent) takes
+ * back the premium along with the hourly part.
+ */
+export function sumOvertimePremiumCent(items: OvertimeItem[]): number {
+  return items.reduce((s, o) => s + o.premium_cent, 0);
 }
 
 /** Load everything needed and compute this user's overtime for a month. */
@@ -101,7 +199,7 @@ export async function overtimeForUser(
   // every overnight worker, in either month. Same seam payout.ts pairs across.
   const punchFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
   const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
-  const [punches, schedules, overrides, rateChanges, decisions, user, blocked] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, decisions, user, blocked, overtimeRates] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: workingDayHistoryFrom(punchFrom), lt: punchTo } },
       orderBy: { at: 'asc' },
@@ -129,6 +227,10 @@ export async function overtimeForUser(
       select: { day_start_hour: true, branch: { select: { shift_grace_min: true } } },
     }),
     loadBlockedCreditInputs([userId], punchFrom, punchTo, db),
+    db.overtimeRateChange.findMany({
+      where: { user_id: userId },
+      select: { rate_cent: true, effective_from: true },
+    }),
   ]);
 
   // The hours in force on each day judged - not today's - so an edit never
@@ -176,6 +278,7 @@ export async function overtimeForUser(
     rateChanges: rateChanges as RateChangeLite[],
     graceMin,
     decisionsByDate,
+    overtimeRateOn: (date) => overtimeRateOn(overtimeRates, date),
   }).filter((o) => o.date.slice(0, 7) === month);
 }
 
@@ -231,7 +334,7 @@ export async function pendingOvertimeNotices(
   const punchFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
   const punchTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
 
-  const [punches, schedules, overrides, rateChanges, decisions, userBranches, blocked] = await Promise.all([
+  const [punches, schedules, overrides, rateChanges, decisions, userBranches, blocked, overtimeRates] = await Promise.all([
     db.punch.findMany({
       where: { user_id: { in: ids }, at: { gte: workingDayHistoryFrom(punchFrom), lt: punchTo } },
       orderBy: { at: 'asc' },
@@ -259,6 +362,10 @@ export async function pendingOvertimeNotices(
       select: { id: true, day_start_hour: true, branch: { select: { shift_grace_min: true } } },
     }),
     loadBlockedCreditInputs(ids, punchFrom, punchTo, db),
+    db.overtimeRateChange.findMany({
+      where: { user_id: { in: ids } },
+      select: { user_id: true, rate_cent: true, effective_from: true },
+    }),
   ]);
 
   const by = <T extends { user_id: string }>(rows: T[]): Map<string, T[]> => {
@@ -274,6 +381,7 @@ export async function pendingOvertimeNotices(
   const schedulesBy = by(schedules);
   const overridesBy = by(overrides);
   const ratesBy = by(rateChanges);
+  const overtimeRatesBy = by(overtimeRates);
 
   const decisionsByUser = new Map<string, Map<string, DecisionLite>>();
   for (const d of decisions) {
@@ -318,6 +426,7 @@ export async function pendingOvertimeNotices(
       rateChanges: userRates,
       graceMin: graceByUser.get(u.id) ?? 15,
       decisionsByDate: decisionsByUser.get(u.id) ?? new Map(),
+      overtimeRateOn: (date) => overtimeRateOn(overtimeRatesBy.get(u.id) ?? [], date),
     }).filter((o) => o.date.slice(0, 7) === month);
 
     for (const o of items) {

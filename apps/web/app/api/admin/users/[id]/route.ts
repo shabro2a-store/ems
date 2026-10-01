@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db/prisma';
 import { csrfFromRequest } from '@/lib/auth/csrf';
 import { writeAuditLog } from '@/lib/services/audit';
 import { userHistory, hasHistory, deleteUserAndSetup, retireUser } from '@/lib/services/userDelete';
+import { recordOvertimeRate } from '@/lib/services/overtime';
 
 const Patch = z.object({
   username: z.string().min(1).max(64).optional(),
@@ -16,6 +17,9 @@ const Patch = z.object({
   // a TripRateChange, exactly as the hourly rate does, so trips already taken
   // keep the price they were taken at.
   tripRateCent: z.number().int().nonnegative().optional(),
+  // What their overtime pays per hour (overtime.ts). null = the hourly rate.
+  // The first one covers the month it is set in; a change applies from today.
+  overtimeRateCent: z.number().int().nonnegative().nullable().optional(),
   // Reference only (see schema.prisma). null clears it back to unset.
   expectedMonthlySalaryCent: z.number().int().nonnegative().nullable().optional(),
   // Clock in and out at any active branch, not only their own. Revoking it
@@ -103,6 +107,9 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         ...(body.tripRateCent !== undefined && body.tripRateCent !== before.trip_rate_cent
           ? { trip_rate_cent: body.tripRateCent }
           : {}),
+        ...(body.overtimeRateCent !== undefined && body.overtimeRateCent !== before.overtime_rate_cent
+          ? { overtime_rate_cent: body.overtimeRateCent }
+          : {}),
         ...(body.expectedMonthlySalaryCent !== undefined
           ? { expected_monthly_salary_cent: body.expectedMonthlySalaryCent }
           : {}),
@@ -125,6 +132,9 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         data: { user_id: updated.id, rate_cent: body.tripRateCent, effective_from: new Date() },
       });
     }
+    if (body.overtimeRateCent !== undefined) {
+      await recordOvertimeRate(tx, updated.id, body.overtimeRateCent, before.overtime_rate_cent);
+    }
     await writeAuditLog({
       actorId: adminId,
       action: 'user.update',
@@ -136,6 +146,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         branch_id: before.branch_id,
         hourly_rate_cent: before.hourly_rate_cent,
         trip_rate_cent: before.trip_rate_cent,
+        overtime_rate_cent: before.overtime_rate_cent,
         expected_monthly_salary_cent: before.expected_monthly_salary_cent,
         can_roam_branches: before.can_roam_branches,
         day_start_hour: before.day_start_hour,
@@ -146,6 +157,7 @@ export async function PATCH(req: Request, ctx: { params: { id: string } }) {
         branch_id: updated.branch_id,
         hourly_rate_cent: updated.hourly_rate_cent,
         trip_rate_cent: updated.trip_rate_cent,
+        overtime_rate_cent: updated.overtime_rate_cent,
         expected_monthly_salary_cent: updated.expected_monthly_salary_cent,
         can_roam_branches: updated.can_roam_branches,
         day_start_hour: updated.day_start_hour,

@@ -13,6 +13,10 @@ interface Row {
   branch_name: string | null;
   rate_cent: number;
   current_rate_cent: number;
+  // The overtime rate the month ended on, and today's (what the dialog edits).
+  // null = overtime at the hourly rate.
+  overtime_rate_cent: number | null;
+  current_overtime_rate_cent: number | null;
   // Reference only — what the owner expects to pay this person monthly. Never
   // part of any total; shown next to net pay so he can eyeball the gap himself.
   expected_salary_cent: number | null;
@@ -24,6 +28,8 @@ interface Row {
   advances_cent: number;
   penalties_cent: number;
   overtime_deduction_cent: number;
+  // Inside gross_cent: what the overtime rate added over the hourly rate.
+  overtime_premium_cent: number;
   // Drivers only. Inside gross_cent, like blocked credit - a memo, never added again.
   trips_count: number;
   trips_cent: number;
@@ -38,12 +44,22 @@ interface Totals {
   advances_cent: number;
   penalties_cent: number;
   overtime_deduction_cent: number;
+  overtime_premium_cent: number;
   // Drivers only. Inside gross_cent, like blocked credit - a memo, never added again.
   trips_count: number;
   trips_cent: number;
   net_cent: number;
 }
 interface Branch { id: string; name: string }
+
+/** What gross includes that nobody clocked at the hourly rate, or nothing. */
+function grossHint(t: Totals): string | undefined {
+  const parts = [
+    t.blocked_credit_cent > 0 ? `${centsToUsd(t.blocked_credit_cent)} blocked time` : null,
+    t.overtime_premium_cent > 0 ? `${centsToUsd(t.overtime_premium_cent)} overtime extra` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? `incl. ${parts.join(' · ')}` : undefined;
+}
 
 export default function AdminPayrollPage() {
   // Empty until the server names the month it is paying: the browser's clock
@@ -172,7 +188,7 @@ export default function AdminPayrollPage() {
             value={centsToUsd(totals.gross_cent)}
             // Inside gross, not on top of it. A gross figure that includes
             // hours nobody clocked has to say so somewhere on the screen.
-            hint={totals.blocked_credit_cent > 0 ? `incl. ${centsToUsd(totals.blocked_credit_cent)} blocked time` : undefined}
+            hint={grossHint(totals)}
           />
           <StatTile
             label="Adjustments"
@@ -250,10 +266,13 @@ export default function AdminPayrollPage() {
                           <button
                             onClick={() => setRateFor(r)}
                             className="tabular border-b border-dashed border-primary/50 font-medium hover:text-primary"
-                            title="Change hourly rate"
+                            title="Change the hourly and overtime rates"
                           >
                             {centsToUsd(r.rate_cent)}
                           </button>
+                          {r.overtime_rate_cent !== null && (
+                            <div className="tabular text-[11px] text-muted">OT {centsToUsd(r.overtime_rate_cent)}</div>
+                          )}
                         </td>
                         <td className="tabular text-right">
                           {centsToUsd(r.gross_cent)}
@@ -268,6 +287,11 @@ export default function AdminPayrollPage() {
                           >
                             {r.blocked_credit_cent > 0 ? `incl. ${centsToUsd(r.blocked_credit_cent)} blocked` : 'blocked time'}
                           </button>
+                          {r.overtime_premium_cent > 0 && (
+                            <div className="text-[11px] text-muted" title="What overtime at the overtime rate added over the hourly rate. Already inside Gross.">
+                              incl. {centsToUsd(r.overtime_premium_cent)} OT extra
+                            </div>
+                          )}
                         </td>
                         <td className="text-right">
                           {r.role === 'DRIVER' ? (
@@ -735,6 +759,7 @@ interface OvertimeItem {
   overtimeMin: number;
   rate_cent: number;
   amount_cent: number;
+  premium_cent: number;
   decision: 'ACCEPTED' | 'REVOKED' | null;
 }
 
@@ -790,8 +815,9 @@ function OvertimeModal({ row, month, closed, onClose, onChanged }: { row: Row; m
         </div>
       )}
       <p className="mb-3 text-sm text-muted">
-        Every day worked past its scheduled hours. Overtime is paid automatically, so a pending day
-        is already in their pay — revoking one deducts it. Undo puts a day back to pending.
+        Every day worked past its scheduled hours (and any work on a day off), paid at their
+        overtime rate when one is set. Overtime is paid automatically, so a pending day is already
+        in their pay — revoking one deducts it. Undo puts a day back to pending.
       </p>
       {err && <div className="mb-3"><Alert tone="danger">{err}</Alert></div>}
       {items === null ? (
@@ -809,7 +835,8 @@ function OvertimeModal({ row, month, closed, onClose, onChanged }: { row: Row; m
                     Over by <span className="tabular">{o.overtimeMin} min</span>
                   </div>
                   <div className="text-xs text-muted">
-                    {o.date} · {centsToUsd(o.amount_cent)} · <span className={state.tone}>{state.label}</span>
+                    {o.date} · {centsToUsd(o.amount_cent)}
+                    {o.premium_cent !== 0 && <> at {centsToUsd(o.rate_cent)}/h</>} · <span className={state.tone}>{state.label}</span>
                   </div>
                 </div>
                 <div className="flex shrink-0 gap-2">
@@ -955,6 +982,9 @@ function RateModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; o
   // Starts from TODAY's rate, never the month on screen: saving unchanged must
   // change nothing.
   const [rate, setRate] = useState((row.current_rate_cent / 100).toFixed(2));
+  const [overtimeRate, setOvertimeRate] = useState(
+    row.current_overtime_rate_cent === null ? '' : (row.current_overtime_rate_cent / 100).toFixed(2),
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   async function submit(e: React.FormEvent) {
@@ -962,14 +992,18 @@ function RateModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; o
     setBusy(true); setErr(null);
     const res = await apiSend(`/api/admin/users/${row.user_id}`, {
       method: 'PATCH',
-      body: { hourlyRateCent: Math.round(parseFloat(rate || '0') * 100) },
+      body: {
+        hourlyRateCent: Math.round(parseFloat(rate || '0') * 100),
+        // Blank is "no overtime rate" (the hourly rate), not $0.
+        overtimeRateCent: overtimeRate.trim() === '' ? null : Math.round(parseFloat(overtimeRate) * 100),
+      },
     });
     setBusy(false);
     if (!res.ok) { setErr(errorMessage(res)); return; }
     onSaved();
   }
   return (
-    <Modal title={`Hourly rate · ${row.username}`} onClose={onClose}
+    <Modal title={`Pay rates · ${row.username}`} onClose={onClose}
       footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button form="rate" type="submit" loading={busy}>Save rate</Button></>}>
       <form id="rate" onSubmit={submit} className="space-y-4">
         {row.rate_cent !== row.current_rate_cent && (
@@ -983,6 +1017,9 @@ function RateModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; o
           hint="Applies to every shift clocked out from now on - including one still open, which is paid at the rate in force when it ends."
         >
           <Input id="rr" type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} required />
+        </Field>
+        <Field label="Overtime rate (USD per hour)" htmlFor="ro" hint="Paid for overtime past the grace and for work on a day off. Blank = the hourly rate. The first overtime rate covers this whole month; a change applies from today.">
+          <Input id="ro" type="number" step="0.01" min="0" value={overtimeRate} onChange={(e) => setOvertimeRate(e.target.value)} placeholder="Same as hourly rate" />
         </Field>
         {err && <Alert tone="danger">{err}</Alert>}
       </form>

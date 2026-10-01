@@ -19,6 +19,11 @@ export interface PayrollRow {
   // only way to see the difference is to reconcile against a screen. Optional
   // so a caller that predates the column still renders.
   overtime_deduction_cent?: number;
+  // Inside gross_cent: what overtime at the person's overtime rate added over
+  // the hourly rate. Optional so a caller that predates it still renders.
+  overtime_premium_cent?: number;
+  // The overtime rate the month ended on; null or absent = the hourly rate.
+  overtime_rate_cent?: number | null;
   // Drivers only. Inside gross_cent, the way blocked credit is - shown so a
   // gross that includes deliveries says so, never added to it again.
   trips_count?: number;
@@ -143,8 +148,8 @@ function partColor(p: SummaryPart): string {
 export function PayrollDocument({ month, generatedAt, rows, branchName }: PayrollPdfProps): React.ReactElement {
   const cards = summaryCards(rows);
   const totals = rows.reduce(
-    (a, r) => ({ gross: a.gross + r.gross_cent, credit: a.credit + (r.blocked_credit_cent ?? 0), trips: a.trips + (r.trips_count ?? 0), tripsCent: a.tripsCent + (r.trips_cent ?? 0), adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, ot: a.ot + (r.overtime_deduction_cent ?? 0), adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
-    { gross: 0, credit: 0, trips: 0, tripsCent: 0, adj: 0, pen: 0, ot: 0, adv: 0, net: 0, hours: 0 },
+    (a, r) => ({ gross: a.gross + r.gross_cent, credit: a.credit + (r.blocked_credit_cent ?? 0), trips: a.trips + (r.trips_count ?? 0), tripsCent: a.tripsCent + (r.trips_cent ?? 0), adj: a.adj + r.adjustments_cent, pen: a.pen + r.penalties_cent, ot: a.ot + (r.overtime_deduction_cent ?? 0), otPremium: a.otPremium + (r.overtime_premium_cent ?? 0), adv: a.adv + r.advances_cent, net: a.net + r.net_cent, hours: a.hours + r.hours }),
+    { gross: 0, credit: 0, trips: 0, tripsCent: 0, adj: 0, pen: 0, ot: 0, otPremium: 0, adv: 0, net: 0, hours: 0 },
   );
 
   return (
@@ -178,8 +183,8 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
               a check-in for, which the owner approved. Shown because a gross
               figure that includes hours nobody clocked has to say so. */}
           <View style={styles.card}><Text style={styles.cardK}>of which blocked time</Text><Text style={styles.cardV}>{totals.credit > 0 ? usd(totals.credit) : '—'}</Text></View>
+          <View style={styles.card}><Text style={styles.cardK}>of which overtime extra</Text><Text style={styles.cardV}>{totals.otPremium > 0 ? usd(totals.otPremium) : '—'}</Text></View>
           <View style={styles.card}><Text style={styles.cardK}>Hours</Text><Text style={styles.cardV}>{totals.hours.toFixed(1)}</Text></View>
-          <View style={[styles.card, { borderWidth: 0 }]} />
           <View style={[styles.card, { borderWidth: 0 }]} />
           <View style={[styles.card, { borderWidth: 0 }]} />
           <View style={[styles.card, { borderWidth: 0 }]} />
@@ -205,11 +210,17 @@ export function PayrollDocument({ month, generatedAt, rows, branchName }: Payrol
             <View key={i} style={[styles.tr, ...(i % 2 === 1 ? [styles.trAlt] : [])]}>
               <View style={styles.cName}>
                 <Text style={[styles.td, styles.name]}>{r.username}</Text>
-                <Text style={styles.role}>{r.role.toLowerCase()} · {usd(r.rate_cent)}/h</Text>
+                <Text style={styles.role}>
+                  {r.role.toLowerCase()} · {usd(r.rate_cent)}/h
+                  {r.overtime_rate_cent != null ? ` · OT ${usd(r.overtime_rate_cent)}/h` : ''}
+                </Text>
               </View>
               <Text style={[styles.td, styles.cBranch]}>{r.branch_name ?? '—'}</Text>
               <Text style={[styles.td, styles.cNum]}>{r.hours.toFixed(1)}</Text>
-              <Text style={[styles.td, styles.cNum]}>{usd(r.gross_cent)}</Text>
+              <View style={styles.cNum}>
+                <Text style={styles.td}>{usd(r.gross_cent)}</Text>
+                {(r.overtime_premium_cent ?? 0) > 0 && <Text style={styles.role}>incl. OT +{usd(r.overtime_premium_cent!)}</Text>}
+              </View>
               <Text style={[styles.td, styles.cNum, { color: (r.trips_count ?? 0) > 0 ? C.ink : C.faint }]}>{(r.trips_count ?? 0) > 0 ? `${r.trips_count} · ${usd(r.trips_cent ?? 0)}` : '—'}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.adjustments_cent > 0 ? C.success : r.adjustments_cent < 0 ? C.danger : C.faint }]}>{signedUsd(r.adjustments_cent)}</Text>
               <Text style={[styles.td, styles.cNum, { color: r.penalties_cent > 0 ? C.danger : C.faint }]}>{r.penalties_cent > 0 ? `−${usd(r.penalties_cent)}` : '—'}</Text>

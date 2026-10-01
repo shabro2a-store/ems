@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
-import { hourlyRateAt, monthRangeBeirut } from './payout';
+import { hourlyRateAt, monthRangeBeirut, monthRangeUtc } from './payout';
+import { overtimeRateOn } from './overtime';
 
 /**
  * The hourly rate printed beside each person's month - on the payroll screen
@@ -29,6 +30,27 @@ export async function monthEndRates(
   for (const u of users) {
     const rates = byUser.get(u.id);
     out.set(u.id, rates && rates.length > 0 ? hourlyRateAt(rates, lastInstant) : u.hourly_rate_cent);
+  }
+  return out;
+}
+
+/**
+ * The overtime rate beside the hourly one, on the payroll screen and in the
+ * PDF: the one in force on the month's last day, or null for "the hourly rate".
+ */
+export async function monthEndOvertimeRates(
+  db: Pick<PrismaClient, 'overtimeRateChange'>,
+  userIds: string[],
+  month: string,
+): Promise<Map<string, number | null>> {
+  const lastDay = new Date(monthRangeUtc(month).end.getTime() - 86_400_000).toISOString().slice(0, 10);
+  const history = await db.overtimeRateChange.findMany({
+    where: { user_id: { in: userIds } },
+    select: { user_id: true, rate_cent: true, effective_from: true },
+  });
+  const out = new Map<string, number | null>();
+  for (const id of userIds) {
+    out.set(id, overtimeRateOn(history.filter((h) => h.user_id === id), lastDay));
   }
   return out;
 }

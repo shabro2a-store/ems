@@ -76,6 +76,10 @@ model User {
   // hourly_rate_cent; the history that prices past months lives in
   // TripRateChange, exactly as RateChange does for the hour.
   trip_rate_cent       Int                @default(0)
+  // What this person's overtime pays per hour, from 2026-10-01 (the owner's
+  // rule). Null means the hourly rate - so adding the column changes nobody's
+  // pay. The current value; OvertimeRateChange holds the history payroll reads.
+  overtime_rate_cent   Int?
   // What the owner expects to pay this person monthly. Reference only: never
   // read by payout.ts or any other calculation, purely for the admin payroll
   // screen to display next to actual earnings. Edited freely, no history kept.
@@ -125,6 +129,7 @@ model User {
   punches              Punch[]
   rate_changes         RateChange[]
   trip_rate_changes    TripRateChange[]
+  overtime_rate_changes OvertimeRateChange[]
   schedules            Schedule[]
   schedule_overrides   ScheduleOverride[]
   leave_requests       LeaveRequest[]
@@ -335,6 +340,23 @@ model LeaveRequest {
 // the other, and a mid-month hourly raise would silently re-price every trip
 // that month. A trip is priced at the rate in force when it went OUT, the same
 // way an hour is priced at the rate in force when it was clocked out.
+// The overtime rate from a working day on (overtime.ts, overtimeRateOn). Dated
+// by working DAY, not instant: overtime is judged per day, so a day has one
+// overtime rate, and a change can never reach into a month already closed (the
+// first rate is dated the 1st of the month it is set in, later ones today).
+// rate_cent null puts the person back on the hourly rate. One row per day: a
+// second change the same day replaces the first.
+model OvertimeRateChange {
+  id             String   @id @default(cuid())
+  user_id        String
+  user           User     @relation(fields: [user_id], references: [id])
+  rate_cent      Int?
+  effective_from DateTime @db.Date
+  created_at     DateTime @default(now())
+
+  @@unique([user_id, effective_from])
+}
+
 model TripRateChange {
   id             String   @id @default(cuid())
   user_id        String

@@ -9,6 +9,7 @@ export interface EmployeeCardUser {
   role: string;
   hourly_rate_cent: number;
   trip_rate_cent: number;
+  overtime_rate_cent: number | null;
   is_active: boolean;
   can_roam_branches: boolean;
 }
@@ -61,6 +62,7 @@ export function EmployeeCards<U extends EmployeeCardUser>({
                         <span className="tabular text-muted">
                           {centsToUsd(u.hourly_rate_cent)}/h
                           {u.role === 'DRIVER' && u.trip_rate_cent > 0 && <> + {centsToUsd(u.trip_rate_cent)}/trip</>}
+                          {u.overtime_rate_cent !== null && <> · OT {centsToUsd(u.overtime_rate_cent)}/h</>}
                         </span>
                       )}
                       {status(u)}

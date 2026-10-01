@@ -35,6 +35,9 @@ describe('the payroll PDF', () => {
     const buf = await render([
       row(),
       row({ username: 'driver1', role: 'DRIVER', trips_count: 41, trips_cent: 8_200, gross_cent: 51_325, net_cent: 41_075 }),
+      // Overtime at the overtime rate: the extra is inside gross, and the rate
+      // is printed beside the hourly one.
+      row({ username: 'overtimer', overtime_rate_cent: 375, overtime_premium_cent: 1_250, gross_cent: 44_375, net_cent: 34_125 }),
     ]);
     expect(buf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
     expect(buf.length).toBeGreaterThan(1_000);

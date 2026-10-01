@@ -99,6 +99,10 @@ cuid PKs, money = Int cents.
   open: user, branch, `at`, `open_in_at` (the check-in in the way) and the same GPS evidence a
   real punch carries. Written **only** past `verifyWithinGeofence`, which is what makes it
   evidence rather than a claim — see the blocked-time credit in §4.
+- **OvertimeRateChange** — a person's overtime rate from a working day on (`rate_cent` null =
+  the hourly rate), one row per day; `User.overtime_rate_cent` mirrors the current value. Dated
+  by working day, not instant: overtime is judged per day, and the first rate is dated the 1st
+  of the month it is set in, later ones today - so no change reaches a closed month.
 - **RateChange** — point-in-time hourly rate history (payroll uses the rate in effect at each shift).
   Work from before the first row (a correction moved back past the day the person was added) is
   paid at the first rate, never $0 (`hourlyRateAt`). Trip rates do not fall back: a trip from
@@ -257,6 +261,17 @@ Full request/response detail is in [API.md](API.md). Summary:
   Penalties are computed live, so nothing needs a worker job to release the day - it simply becomes
   judgeable when the Beirut day turns over, everywhere at once (attention queue, `payoutForUser`,
   the employee payslip, the advance entitlement cap).
+- **Overtime rate** (the owner's rule from 2026-10-01, `OVERTIME_RATE_FROM`): overtime is paid
+  at each person's own overtime rate, set beside the hourly rate (Users edit form, or the
+  payroll rate dialog). Overtime means exactly what the notice below reports - the whole
+  overrun of a day past its hours + grace, and every minute of a day requiring none (a day
+  off). A run inside the grace stays at the hourly rate. Payroll adds the difference from the
+  hourly rate to gross as `overtimePremiumCent` (a memo line, like blocked credit and trips),
+  for pending, accepted and revoked days alike; a revoke then deducts the minutes at the
+  overtime rate, so revoked overtime nets to nothing. No rate set = the hourly rate, so
+  nobody's pay changed until the owner set one. Days before 2026-10-01 never use it. The
+  advance cap counts the premium as earned. (The 2026-08-15 design had "overtime pays the
+  normal rate"; the owner changed that.)
 - **Overtime (`overtime.ts`)**: covering more than the day required by more than the branch's
   `shift_grace_min` (default 15) raises a notice — the same `DayCoverage` as a shortfall,
   just `deltaMin` positive past the grace instead of negative. The grace only decides whether

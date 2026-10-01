@@ -12,6 +12,7 @@ export interface PayrollCardRow {
   hours: number;
   gross_cent: number;
   blocked_credit_cent: number;
+  overtime_premium_cent: number;
   adjustments_cent: number;
   advances_cent: number;
   penalties_cent: number;
@@ -112,7 +113,7 @@ export function PayrollCards<R extends PayrollCardRow>({
                         type="button"
                         onClick={() => on.rate(r)}
                         className="tabular border-b border-dashed border-primary/50 text-content"
-                        title="Change hourly rate"
+                        title="Change the hourly and overtime rates"
                       >
                         {centsToUsd(r.rate_cent)}/h
                       </button>
@@ -129,7 +130,7 @@ export function PayrollCards<R extends PayrollCardRow>({
                     label="Gross"
                     value={centsToUsd(r.gross_cent)}
                     onClick={() => on.blockedCredit(r)}
-                    title="Includes any blocked time you accepted. Tap to review blocked time."
+                    title={`Includes any blocked time you accepted${r.overtime_premium_cent > 0 ? ` and ${centsToUsd(r.overtime_premium_cent)} of overtime at the overtime rate` : ''}. Tap to review blocked time.`}
                   />
                   {r.role === 'DRIVER' ? (
                     <Figure

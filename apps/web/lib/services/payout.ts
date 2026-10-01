@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { shiftDateOf, scheduledToUtc, inBeirut, nextBeirutDate, SHIFT_GAP_MIN, workingDayHistoryFrom } from 'time';
 import { penaltiesForUser, sumActivePenaltiesCent } from './penalty';
-import { overtimeDeductionForUser } from './overtime';
+import { overtimeForUser, sumOvertimePremiumCent, sumRevokedOvertimeCent } from './overtime';
 import { blockedCreditForUser, grantedIntervals } from './blockedCredit';
 import { approvedAdvancesForMonth } from './advanceMonth';
 import { sumIntervalMinutes, sumIntervalsCent, type WorkInterval, type PunchLite, dayStartHourFor, workingDaysOf, currentShiftDayMinutes } from './coverage';
@@ -20,6 +20,10 @@ export interface PayoutForUserResult {
   advancesCent: number;
   penaltiesCent: number;
   overtimeDeductionCent: number;
+  // What overtime at the person's overtime rate adds over their hourly rate
+  // (overtime.ts). INSIDE grossCent, like blocked credit and trips: a memo line
+  // so a gross that includes it says so. Zero with no overtime rate set.
+  overtimePremiumCent: number;
   // Drivers only. Completed trips this month and what they paid, each priced at
   // the per-trip rate in force when it went out. INSIDE grossCent, the same way
   // blocked credit is: gross is what the month earned, and for a driver that is
@@ -361,6 +365,9 @@ export function computePayoutFromRows(args: {
   approvedAdvances: AdvanceRow[];
   penaltiesCent?: number;
   overtimeDeductionCent?: number;
+  // sumOvertimePremiumCent of the month's overtime: added to gross. Optional,
+  // so a caller with no overtime rates in hand pays the hourly rate as before.
+  overtimePremiumCent?: number;
   // Blocked-time credit, already priced, exactly as computeCoverage received
   // it. Paid time with no punch behind it, so it belongs in gross rather than
   // in adjustments: it is hours worked, and the day's own gross already counts
@@ -401,8 +408,10 @@ export function computePayoutFromRows(args: {
     args.month,
     tripDayResolver(args.punches as PunchLite[], args.dayStartHour ?? 0),
   );
-  // Trips are earnings, so they are gross. Net does not add them again.
-  const grossWithTrips = grossCent + trips.cent;
+  // Trips and the overtime premium are earnings, so they are gross. Net does
+  // not add them again.
+  const overtimePremiumCent = args.overtimePremiumCent ?? 0;
+  const grossWithTrips = grossCent + trips.cent + overtimePremiumCent;
   const netCent = grossWithTrips + adjustmentsCent - advancesCent - penaltiesCent - overtimeDeductionCent;
   return {
     hours,
@@ -413,6 +422,7 @@ export function computePayoutFromRows(args: {
     advancesCent,
     penaltiesCent,
     overtimeDeductionCent,
+    overtimePremiumCent,
     tripsCount: trips.count,
     tripsCent: trips.cent,
     tripsDenied: trips.denied,
@@ -431,7 +441,7 @@ export async function payoutForUser(
   // window as-is.
   const pairFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
   const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
-  const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtimeDeductionCent, credits, user] = await Promise.all([
+  const [punches, rateChanges, adjustments, approvedAdvances, penalties, overtime, credits, user] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: workingDayHistoryFrom(pairFrom), lt: pairTo } },
       orderBy: { at: 'asc' },
@@ -453,7 +463,7 @@ export async function payoutForUser(
     // for - see advancePayMonth.
     approvedAdvancesForMonth(db, userId, month),
     penaltiesForUser(userId, month, db),
-    overtimeDeductionForUser(userId, month, db),
+    overtimeForUser(userId, month, db),
     blockedCreditForUser(userId, month, db),
     db.user.findUnique({
       where: { id: userId },
@@ -484,7 +494,8 @@ export async function payoutForUser(
     adjustments: adjustments as AdjustmentRow[],
     approvedAdvances: approvedAdvances as AdvanceRow[],
     penaltiesCent: sumActivePenaltiesCent(penalties),
-    overtimeDeductionCent,
+    overtimeDeductionCent: sumRevokedOvertimeCent(overtime),
+    overtimePremiumCent: sumOvertimePremiumCent(overtime),
     creditedIntervals: grantedIntervals(credits),
     trips,
     tripRateChanges: tripRateChanges as RateChangeRow[],
@@ -501,7 +512,7 @@ export async function accruedEarningsThisMonth(
   const { start, end } = monthRangeUtc(month);
   const pairFrom = new Date(start.getTime() - PAIR_LOOKAROUND_MS);
   const pairTo = new Date(end.getTime() + PAIR_LOOKAROUND_MS);
-  const [punches, rateChanges, credits, user] = await Promise.all([
+  const [punches, rateChanges, credits, user, overtime] = await Promise.all([
     db.punch.findMany({
       where: { user_id: userId, at: { gte: workingDayHistoryFrom(pairFrom), lt: pairTo } },
       orderBy: { at: 'asc' },
@@ -520,6 +531,8 @@ export async function accruedEarningsThisMonth(
       where: { id: userId },
       select: { day_start_hour: true, role: true },
     }),
+    // The overtime premium is earned too, for the same reason.
+    overtimeForUser(userId, month, db),
   ]);
   const earned = grossWithCredit(
     punches as PunchRow[],
@@ -548,7 +561,7 @@ export async function accruedEarningsThisMonth(
     month,
     tripDayResolver(punches as PunchLite[], dayStartHourFor(user)),
   ).cent;
-  return { hours: earned.hours, grossCent: earned.grossCent + tripsCent };
+  return { hours: earned.hours, grossCent: earned.grossCent + tripsCent + sumOvertimePremiumCent(overtime) };
 }
 
 export interface RosterUser {
@@ -558,6 +571,7 @@ export interface RosterUser {
   role: string;
   branch_id: string | null;
   hourly_rate_cent: number;
+  overtime_rate_cent: number | null;
   expected_monthly_salary_cent: number | null;
   deleted_at: Date | null;
   branch: { name: string } | null;
@@ -665,6 +679,7 @@ export async function payrollRoster(
       role: true,
       branch_id: true,
       hourly_rate_cent: true,
+      overtime_rate_cent: true,
       expected_monthly_salary_cent: true,
       deleted_at: true,
       branch: { select: { name: true } },
