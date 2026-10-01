@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { Role } from '@prisma/client';
 import { todayInBeirut } from 'time';
+import { currentPayMonth } from './periodLock';
 import {
   getTestPrisma,
   cleanDb,
@@ -13,6 +14,10 @@ import { loginAs } from '../test-helpers/auth';
 
 const BASE_URL = process.env.TEST_BASE_URL ?? 'http://127.0.0.1:3000';
 
+// Shifts on the 1st of this month. On the 1st itself the checkout can still be
+// in the future, so every person is seeded at the rate the test means them to
+// have: seedTestUser stamps its own rate row "now", and a checkout later than
+// that row was priced by it (the default $2) instead of the $6 below.
 function currentMonth(): string {
   return todayInBeirut(new Date()).slice(0, 7);
 }
@@ -59,7 +64,7 @@ describe('advances integration', () => {
 
   it('employee requests a small advance: pending count goes to 1', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
-    const user = await seedTestUser({ username: 'adv-emp1', branch_id: branch.id });
+    const user = await seedTestUser({ username: 'adv-emp1', branch_id: branch.id, hourly_rate_cent: 600 });
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: new Date(`${currentMonth()}-01T08:00:00Z`) });
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${currentMonth()}-01T20:00:00Z`) });
     await seedTestRateChange({ user_id: user.id, rate_cent: 600, effective_from: new Date('2026-01-01T00:00:00Z') });
@@ -98,7 +103,7 @@ describe('advances integration', () => {
 
   it('admin GETs pending list, approves; approved this month updates', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
-    const employee = await seedTestUser({ username: 'adv-emp3', branch_id: branch.id });
+    const employee = await seedTestUser({ username: 'adv-emp3', branch_id: branch.id, hourly_rate_cent: 600 });
     const admin = await seedTestUser({ username: 'adv-admin3', role: Role.ADMIN });
     await seedTestPunch({ user_id: employee.id, branch_id: branch.id, kind: 'IN', at: new Date(`${currentMonth()}-01T08:00:00Z`) });
     await seedTestPunch({ user_id: employee.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${currentMonth()}-01T20:00:00Z`) });
@@ -132,7 +137,10 @@ describe('advances integration', () => {
       { cookies: eSession.cookies, csrf: eSession.csrf },
     );
     expect(summaryRes.body.data.pending).toBe(0);
-    expect(summaryRes.body.data.approved_this_month_cent).toBe(5000);
+    // "This month" is the pay month. For the first 24h15m of a month that is
+    // still the last one, and an advance asked for today comes out of the new
+    // month - so it shows there, not here.
+    expect(summaryRes.body.data.approved_this_month_cent).toBe(currentPayMonth() === currentMonth() ? 5000 : 0);
 
     const audit = await getTestPrisma().auditLog.findMany({
       where: { entity: 'Advance', entity_id: advanceId },
@@ -145,7 +153,7 @@ describe('advances integration', () => {
 
   it('rate limit triggers on 6th advance POST in 1 minute', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
-    const user = await seedTestUser({ username: 'adv-emp-rl', branch_id: branch.id });
+    const user = await seedTestUser({ username: 'adv-emp-rl', branch_id: branch.id, hourly_rate_cent: 600 });
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'IN', at: new Date(`${currentMonth()}-01T08:00:00Z`) });
     await seedTestPunch({ user_id: user.id, branch_id: branch.id, kind: 'OUT', at: new Date(`${currentMonth()}-02T08:00:00Z`) });
     await seedTestRateChange({ user_id: user.id, rate_cent: 600, effective_from: new Date('2026-01-01T00:00:00Z') });

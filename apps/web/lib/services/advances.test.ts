@@ -42,6 +42,9 @@ const mocks = vi.hoisted(() => ({
   // Trips count for everybody who has any, whatever their role now.
   trip: { findMany: vi.fn(async () => []) },
   tripRateChange: { findMany: vi.fn(async () => []) },
+  // The advance cap counts the overtime premium as earned (overtime.ts).
+  overtimeDecision: { findMany: vi.fn(async () => []) },
+  overtimeRateChange: { findMany: vi.fn(async () => []) },
 }));
 
 vi.mock('@/lib/db/prisma', () => ({
@@ -49,6 +52,7 @@ vi.mock('@/lib/db/prisma', () => ({
 }));
 
 import { requestAdvance, decideAdvance, advancesSummary } from './advances';
+import { currentPayMonth } from './periodLock';
 
 function resetStore() {
   store.advances.length = 0;
@@ -283,7 +287,10 @@ describe('advancesSummary', () => {
    * out of THIS month's pay.
    */
   it('returns the pending count and what comes out of this month', async () => {
-    const now = new Date();
+    // Inside the pay month, not "now": for the first 24h15m of a month the pay
+    // month is still the last one, and an advance approved at that moment is
+    // filed in the new month - this test failed on the 1st of every month.
+    const now = new Date(`${currentPayMonth()}-01T12:00:00Z`);
     store.advances.push(
       { id: 'a', user_id: 'u1', amount_cent: 1000, reason: null, status: 'PENDING', decided_by: null, decided_at: null, created_at: new Date('2026-07-01T00:00:00Z') },
       { id: 'b', user_id: 'u1', amount_cent: 3000, reason: null, status: 'PENDING', decided_by: null, decided_at: null, created_at: new Date('2026-07-01T00:00:00Z') },
