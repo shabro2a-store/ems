@@ -269,7 +269,9 @@ Full request/response detail is in [API.md](API.md). Summary:
   hourly rate to gross as `overtimePremiumCent` (a memo line, like blocked credit and trips),
   for pending, accepted and revoked days alike; a revoke then deducts the minutes at the
   overtime rate, so revoked overtime nets to nothing. No rate set = the hourly rate, so
-  nobody's pay changed until the owner set one. Days before 2026-10-01 never use it. The
+  nobody's pay changed until the owner set one. For a driver only the hourly part changes:
+  every trip keeps the per-trip rate, in overtime or not, and a revoke never touches trips
+  (the owner's call, 2026-10-01). Days before 2026-10-01 never use it. The
   advance cap counts the premium as earned. (The 2026-08-15 design had "overtime pays the
   normal rate"; the owner changed that.)
 - **Overtime (`overtime.ts`)**: covering more than the day required by more than the branch's
