@@ -17,8 +17,11 @@ export type TripErrorCode =
   | 'LOW_GPS_ACCURACY';
 
 // A driver may only go out on an order after the caller has rung them. The ring
-// (DriverCall) is valid for this long and can dispatch exactly one trip.
-export const DISPATCH_WINDOW_MS = 30 * 60 * 1000;
+// (DriverCall) is valid for this long and can dispatch exactly one trip. Short
+// because the counter packs the order before ringing: a ring is for right now,
+// and one the driver has not used in time needs the counter to ring again. The
+// ring itself stops at the same moment (RING_WINDOW_MS in caller.ts).
+export const DISPATCH_WINDOW_MS = 2 * 60 * 1000;
 
 /**
  * The receipt photo, already inspected by the route (receiptImage.ts): a JPEG
@@ -74,8 +77,8 @@ export async function startTrip(
 
   // A delivery is work, so the driver has to be on shift to go out on one.
   //
-  // Checked here as well as at the ring because the two are half an hour apart:
-  // DISPATCH_WINDOW_MS lets a ring authorise a trip for thirty minutes, and a
+  // Checked here as well as at the ring because the two are apart:
+  // DISPATCH_WINDOW_MS lets a ring authorise a trip for two minutes, and a
   // driver can clock out inside that window. Without it they go out off shift,
   // and the open trip then blocks their own next clock-in until the six-hour
   // sweep closes it - they lock themselves out of the shift they were about to

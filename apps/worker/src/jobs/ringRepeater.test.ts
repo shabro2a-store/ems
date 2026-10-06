@@ -80,11 +80,11 @@ describe('runRingRepeater', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('is still ringing minutes later if nobody has answered', async () => {
-    // The owner's rule: it rings until the driver shuts it off. Two minutes in,
-    // where the old 45-second window had long since given up, it is still going.
+  it('is still ringing a minute and a half later if nobody has answered', async () => {
+    // The owner's rule: it rings until the driver shuts it off. Ninety seconds
+    // in, where the old 45-second window had long since given up, it is still going.
     seedCall();
-    expect((await runRingRepeater({ db: makeDb(), now: at(120) })).repushed).toBe(1);
+    expect((await runRingRepeater({ db: makeDb(), now: at(90) })).repushed).toBe(1);
   });
 
   it('stops at the backstop, for the phone that never answers at all', async () => {

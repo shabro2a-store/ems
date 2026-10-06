@@ -5,6 +5,7 @@ import { sendPushToUser } from './push';
 import { openCheckInBranchId } from './branchScope';
 import { tripsOnCurrentWorkingDay } from './payout';
 import { dayStartHourFor, type PunchLite } from './coverage';
+import { DISPATCH_WINDOW_MS } from './trip';
 
 export interface DriverStatus {
   id: string;
@@ -26,12 +27,14 @@ export interface DriverStatus {
  * driver's alarm screen, and in the worker's repeater, which holds its own copy
  * (it cannot import from apps/web) pinned to this one by ringRepeater.test.ts.
  *
- * The ring lasts until the driver shuts it off; this is the backstop for the
- * phone that never answers. If the board stopped showing "ringing" before the
- * pushes stopped, the caller would think the ring was over while the driver's
- * phone was still buzzing.
+ * The ring lasts until the driver shuts it off, or until it stops authorising a
+ * trip (DISPATCH_WINDOW_MS), whichever is first. Past that the alarm would only
+ * send the driver to an OUT button that is not there, so the board goes back to
+ * "Available" and the counter rings again. If the board stopped showing
+ * "ringing" before the pushes stopped, the caller would think the ring was over
+ * while the driver's phone was still buzzing.
  */
-export const RING_WINDOW_MS = 5 * 60 * 1000;
+export const RING_WINDOW_MS = DISPATCH_WINDOW_MS;
 
 // Live status of every driver in a branch — for the caller board and the admin dashboard.
 export async function branchDriverStatuses(

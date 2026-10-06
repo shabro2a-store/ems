@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { compareForRotation, type DriverStatus } from './caller';
+import { compareForRotation, RING_WINDOW_MS, type DriverStatus } from './caller';
+import { DISPATCH_WINDOW_MS } from './trip';
+
+describe('ring window', () => {
+  it('stops ringing at the moment the ring stops authorising a trip', () => {
+    // A ring still buzzing after its authority ran out has the driver answer
+    // it and find no OUT button; one that stops first leaves the caller's
+    // board saying "Available" while the driver may still go out.
+    expect(RING_WINDOW_MS).toBe(DISPATCH_WINDOW_MS);
+  });
+});
 
 function driver(over: Partial<DriverStatus> & { name: string }): DriverStatus {
   return {

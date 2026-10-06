@@ -152,6 +152,24 @@ describe('trip integration', () => {
     expect(await getTestPrisma().driverCall.count({ where: { driver_id: driver.id, trip_id: null } })).toBe(0);
   });
 
+  it('a ring older than two minutes neither rings nor lets the driver go out', async () => {
+    const branch = await seedTestBranch({ gps_radius_m: 200 });
+    const driver = await seedTestDriver({ username: 'trip-drv2c', branch_id: branch.id });
+    await dispatch(driver, branch);
+    await getTestPrisma().driverCall.updateMany({
+      where: { driver_id: driver.id },
+      data: { created_at: new Date(Date.now() - 3 * 60_000) },
+    });
+    const { cookies, csrf } = await loginAs(driver.username, 'test-pass-1');
+
+    const inbox = await fetch(`${BASE_URL}/api/me/calls`, { headers: { Cookie: cookies } });
+    expect(((await inbox.json()) as { data: unknown }).data).toMatchObject({ ringing: false, canGoOut: false });
+
+    const r = await postTripStart({ cookies, csrf, body: { lat: 33.8962, lng: 35.4827, accuracy: 10 } });
+    expect(r.status).toBe(409);
+    expect((r.body as { error?: { code: string } }).error?.code).toBe('NOT_DISPATCHED');
+  });
+
   it('driver ends trip with duration_min > 0', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const driver = await seedTestDriver({ username: 'trip-drv3', branch_id: branch.id });

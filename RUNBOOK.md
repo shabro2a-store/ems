@@ -316,13 +316,14 @@ So the goal is to keep drivers in case A, with case B set up as the fallback.
    plays on **notification**. They are separate on Android — press volume, then
    the ⋮/gear, and raise both.
 
-**How long it rings.** Until the driver stops it. The worker re-pushes every five
-seconds while the ring is unacknowledged, and the siren loops continuously. A
-ring nobody ever answers is dropped after `RING_REPEAT_WINDOW_MS` (5 minutes,
-`apps/worker/src/jobs/ringRepeater.ts`, pinned to the web app's `RING_WINDOW_MS`
-by a test) — that backstop exists so a handset switched off or shut in a drawer
-overnight does not collect twelve alerts a minute until morning. Raise it there
-if 5 minutes is short.
+**How long it rings.** Until the driver stops it, for at most 2 minutes. The
+worker re-pushes every five seconds while the ring is unacknowledged, and the
+siren loops continuously. A ring is good for one trip for 2 minutes
+(`DISPATCH_WINDOW_MS`, `apps/web/lib/services/trip.ts`), because the counter
+packs the order before ringing; after that the ring stops, the board shows the
+driver as available again, and the counter rings again. The worker's
+`RING_REPEAT_WINDOW_MS` (`apps/worker/src/jobs/ringRepeater.ts`) and the web
+app's `RING_WINDOW_MS` are pinned to it by tests. To change it, change all three.
 
 **iPhone cannot do case A. Use Android for driver handsets.** Everything above
 is written for Android and the difference is not cosmetic:

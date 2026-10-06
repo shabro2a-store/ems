@@ -122,7 +122,7 @@ cuid PKs, money = Int cents.
 - **DriverCall** — a caller ringing a driver (driver, caller, branch?, created_at, acknowledged_at?,
   trip_id?). The driver's app polls for an unacknowledged ring in the last 2 min and raises the
   alarm. `trip_id` links the ring to the trip it dispatched; a driver can only start a trip against
-  a recent ring with no `trip_id` yet.
+  a ring from the last 2 min with no `trip_id` yet.
 - **BlockedCreditDecision** — (user, date) unique, `decision` ACCEPTED/REVOKED, plus
   **`credited_min?`** — the day's credited minutes at the moment the owner ruled, stamped
   server-side. Mirrors `OvertimeDecision` including the safe default: no row means pending,
@@ -398,9 +398,11 @@ Full request/response detail is in [API.md](API.md). Summary:
   unreviewed the same way, so nothing needs backfilling and no forgiven day is re-docked by the
   deploy.
 - **Caller dispatch gate**: a driver can only go "out on order" (start a trip) after the caller
-  rings them — the trip requires a `DriverCall` from the last 30 min with no trip yet; starting
-  the trip consumes that call (`trip_id`). Prevents undispatched trips and ties each trip to its
-  ring. Error `NOT_DISPATCHED` 409 if not rung. **A branch with no active CALLER cannot
+  rings them — the trip requires a `DriverCall` from the last **2 min** (`DISPATCH_WINDOW_MS`) with
+  no trip yet: the counter packs the order before ringing, so a ring is for right now, and one the
+  driver has not used in time needs ringing again. Starting the trip consumes every live ring for
+  that driver (`trip_id`), so tapping the card twice still dispatches one trip. Prevents
+  undispatched trips and ties each trip to its ring. Error `NOT_DISPATCHED` 409 if not rung. **A branch with no active CALLER cannot
   dispatch at all** — see the deploy checklist.
 - **Fair driver rotation** (`compareForRotation` in `caller.ts`): the caller board orders
   available drivers by who went out **least recently**, so whoever just took an order sinks to
@@ -531,7 +533,7 @@ Full request/response detail is in [API.md](API.md). Summary:
 
 | Schedule | Job | Does |
 |---|---|---|
-| every 5 s | ringRepeater | Web-pushes every unanswered driver call again for **5 minutes** after it rang (`RING_REPEAT_WINDOW_MS`), so a locked phone keeps ringing. Reads the partial index `driver_call_unanswered`. Needs the `VAPID_*` keys in the worker |
+| every 5 s | ringRepeater | Web-pushes every unanswered driver call again for **2 minutes** after it rang - the life of the ring (`RING_REPEAT_WINDOW_MS`), so a locked phone keeps ringing. Reads the partial index `driver_call_unanswered`. Needs the `VAPID_*` keys in the worker |
 | every 30 s | heartbeat | `SELECT 1`, then writes the time to `/tmp/ems-worker-heartbeat`; the container healthcheck is unhealthy when that is over 2 minutes old |
 | 00:10 daily | watchedDetector | Judges the Beirut day that just closed: the day required more than 0 minutes (`requiredMinFor`, so an approved full day off is skipped whether it is a `DAY_OFF` or an `HOURS_CHANGE` to 0) and there were zero punches → WATCHED flag (absence notice, no automatic penalty) |
 | every 1 min | missedCheckout | Open check-in whose elapsed time exceeds that date's required minutes (`requiredMinFor`, so approved time off shortens the threshold) + the branch's shift grace → MISSED_CHECKOUT flag + notify. A date requiring 0 minutes is skipped, not measured against zero |

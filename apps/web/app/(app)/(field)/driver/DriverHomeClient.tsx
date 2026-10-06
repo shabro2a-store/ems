@@ -310,7 +310,7 @@ export default function DriverHomeClient({ username, branch }: { username: strin
               ? 'Clock in first to go out on orders.'
               : !canGoOut
                 ? 'Waiting for the counter to call you — you can go out once they ring.'
-                : `You've been called. Tap OUT, photograph the receipt, then tap BACK when you return.`}
+                : `You've been called - go out within 2 minutes. Tap OUT, photograph the receipt, then tap BACK when you return.`}
         </p>
       </div>
 

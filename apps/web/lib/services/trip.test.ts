@@ -278,6 +278,33 @@ describe('startTrip', () => {
     expect(store.calls[0]!.trip_id).toBe('t1'); // call linked to the trip
   });
 
+  it('a ring the driver has not used within two minutes no longer dispatches', async () => {
+    // The counter packs the order before ringing, so a ring is for right now.
+    // Left longer than that, the counter has to ring the same driver again.
+    const b = makeBranch({ gps_radius_m: 200 });
+    store.branches.set(b.id, b);
+    const driver = makeDriver('d1', b);
+    const now = new Date();
+    store.calls[0]!.created_at = new Date(now.getTime() - 2 * 60_000 - 1000);
+
+    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT, now });
+
+    expect('code' in r && r.code).toBe('NOT_DISPATCHED');
+    expect(store.trips).toHaveLength(0);
+  });
+
+  it('a ring just under two minutes old still dispatches', async () => {
+    const b = makeBranch({ gps_radius_m: 200 });
+    store.branches.set(b.id, b);
+    const driver = makeDriver('d1', b);
+    const now = new Date();
+    store.calls[0]!.created_at = new Date(now.getTime() - 2 * 60_000 + 1000);
+
+    const r = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT, now });
+
+    expect('trip_id' in r).toBe(true);
+  });
+
   it('a second ring for the same order does not authorise a second trip', async () => {
     // The counter taps the card again when the driver is slow to answer. Each
     // tap is its own DriverCall, and the trip used to consume only the newest:
@@ -417,7 +444,7 @@ describe('a driver who is not on shift', () => {
   });
 
   it('is refused after clocking OUT inside the dispatch window', async () => {
-    // The ring is valid for thirty minutes and they can leave in that time,
+    // The ring is valid for two minutes and they can leave in that time,
     // which is why the check is on the trip as well as on the ring.
     const { b, driver } = offShiftDriver();
     store.punches.push(

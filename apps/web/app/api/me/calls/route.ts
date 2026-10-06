@@ -2,12 +2,11 @@ import { NextResponse } from 'next/server';
 import { identity, unauthorized } from '@/lib/auth/identity';
 import { prisma } from '@/lib/db/prisma';
 import { RING_WINDOW_MS } from '@/lib/services/caller';
+import { DISPATCH_WINDOW_MS } from '@/lib/services/trip';
 
 function jsonError(code: string, message: string, status: number) {
   return NextResponse.json({ ok: false, error: { code, message } }, { status });
 }
-
-const DISPATCH_WINDOW_MS = 30 * 60 * 1000;
 
 // The driver's app polls this to know when the caller is ringing (alarm) and
 // whether a valid dispatch exists (so it can enable "out on order").

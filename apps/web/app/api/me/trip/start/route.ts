@@ -107,7 +107,7 @@ export async function POST(req: Request) {
   if (!result.ok) {
     const mapped = ERROR_MAP[result.code] ?? { code: result.code, status: 500 };
     const friendly: Record<string, string> = {
-      NOT_DISPATCHED: 'Wait for the counter to call you before going out on an order.',
+      NOT_DISPATCHED: 'Wait for the counter to call you. A call is good for 2 minutes - if it ran out, ask them to call you again.',
       NOT_CLOCKED_IN: 'Clock in before going out on an order.',
       RECEIPT_REQUIRED: RECEIPT_REQUIRED_MESSAGE,
     };

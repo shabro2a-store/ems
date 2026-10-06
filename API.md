@@ -172,8 +172,8 @@ Summary `{ pending, upcoming: [...] }`; request body
   `RECEIPT_REQUIRED` 400 (no photo / JSON body), `BAD_PHOTO` 400 (not a readable JPEG) or 413
   (a body over 4 MB + 64 KB - refused as it streams in, never read whole),
   `NOT_DISPATCHED` 409 (no ring), `OPEN_TRIP_EXISTS` 409, geofence 422, `NOT_DRIVER` 403.
-  Requires the driver to have been **rung by the caller** in the last 30 min (an unconsumed
-  `DriverCall`); starting the trip consumes that ring.
+  Requires the driver to have been **rung by the caller** in the last 2 min (an unconsumed
+  `DriverCall`); starting the trip consumes every live ring for that driver.
   The geofence is checked against **the branch that rang**, and the trip is filed there.
   Identical to the driver's own branch for anyone who cannot roam (`ringDriver` refuses a
   ring from elsewhere); for a driver covering at another branch it is what stops them
@@ -188,7 +188,7 @@ Summary `{ pending, upcoming: [...] }`; request body
 ### GET /api/me/calls  ·  POST /api/me/calls/ack  *(ack: CSRF)*
 Driver ring inbox. `GET` → `{ ringing: bool, since, canGoOut: bool }` — `ringing` is an
 unacknowledged ring in the last 2 min (drives the alarm); `canGoOut` means a valid unconsumed
-dispatch exists in the last 30 min (enables "out on order"). `POST /ack` marks all pending rings
+dispatch exists in the last 2 min (enables "out on order"). `POST /ack` marks all pending rings
 acknowledged (dismiss the alarm).
 
 ### GET /api/me/push/key  ·  POST /api/me/push/subscribe  *(subscribe: CSRF)*

@@ -5,23 +5,21 @@ import { prisma as defaultPrisma } from '../db/prisma';
 /**
  * The backstop on a ring nobody ever answers.
  *
- * The owner's rule is that it rings until the driver shuts it off, and that is
- * what it does - every five seconds, indefinitely as far as any driver standing
- * in a shop is concerned. This is only the point at which the system accepts
- * that nobody is going to answer.
+ * The owner's rule is that it rings until the driver shuts it off - every five
+ * seconds - or until the ring stops authorising a trip, two minutes after it was
+ * made. The counter packs the order before ringing, so a ring the driver has not
+ * answered by then is over: the counter rings again.
  *
  * It cannot be removed. An unbounded loop pushes twelve times a minute forever
  * at a phone that is switched off or locked in a drawer overnight: the driver
  * comes back to hundreds of queued alerts, the battery is gone, and the VAPID
- * key is the thing Google rate-limits. Five minutes is far past the point where
- * the counter has given the order to somebody else, and it stays a single named
- * constant so raising it is one edit.
+ * key is the thing Google rate-limits.
  *
  * The web app's own RING_WINDOW_MS is pinned to this by ringRepeater.test.ts:
  * if the in-app alarm gave up before the pushes did, a driver holding an open
  * app would watch the alarm screen vanish while their phone kept buzzing.
  */
-export const RING_REPEAT_WINDOW_MS = 5 * 60_000;
+export const RING_REPEAT_WINDOW_MS = 2 * 60_000;
 
 export interface RingRepeaterOpts {
   db?: PrismaClient;
