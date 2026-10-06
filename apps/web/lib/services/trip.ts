@@ -89,11 +89,12 @@ export async function startTrip(
 
   // Must have been dispatched (rung) by the caller, and that ring must not have
   // already been used for another trip.
+  const dispatchSince = new Date(now.getTime() - DISPATCH_WINDOW_MS);
   const call = await db.driverCall.findFirst({
     where: {
       driver_id: user.id,
       trip_id: null,
-      created_at: { gte: new Date(now.getTime() - DISPATCH_WINDOW_MS) },
+      created_at: { gte: dispatchSince },
     },
     orderBy: { created_at: 'desc' },
     select: { id: true, branch_id: true },
@@ -147,10 +148,13 @@ export async function startTrip(
           },
         },
       });
-      // Consume the dispatch call — guard on trip_id null so a concurrent start
-      // can't reuse the same ring.
+      // Consume every live ring, not only the newest one. The counter taps the
+      // card again when the driver is slow to answer, and each tap is its own
+      // DriverCall: leaving the older ones unconsumed let the driver come back
+      // and go out again on them - a trip nobody rang for. Guarded on trip_id
+      // null so a concurrent start can't reuse them.
       await tx.driverCall.updateMany({
-        where: { id: call.id, trip_id: null },
+        where: { driver_id: user.id, trip_id: null, created_at: { gte: dispatchSince } },
         data: { trip_id: t.id },
       });
       return t;

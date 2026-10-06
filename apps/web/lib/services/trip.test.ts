@@ -207,10 +207,13 @@ beforeEach(() => {
     );
   });
 
-  mocks.driverCall.updateMany.mockImplementation(async ({ where, data }: { where: { id: string; trip_id: null }; data: { trip_id: string } }) => {
+  mocks.driverCall.updateMany.mockImplementation(async ({ where, data }: { where: { id?: string; driver_id?: string; trip_id: null; created_at?: { gte: Date } }; data: { trip_id: string } }) => {
     let count = 0;
     for (const c of store.calls) {
-      if (c.id === where.id && c.trip_id === null) { c.trip_id = data.trip_id; count += 1; }
+      if (where.id !== undefined && c.id !== where.id) continue;
+      if (where.driver_id !== undefined && c.driver_id !== where.driver_id) continue;
+      if (where.created_at && c.created_at < where.created_at.gte) continue;
+      if (c.trip_id === null) { c.trip_id = data.trip_id; count += 1; }
     }
     return { count };
   });
@@ -273,6 +276,26 @@ describe('startTrip', () => {
     const r1 = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
     expect('trip_id' in r1).toBe(true);
     expect(store.calls[0]!.trip_id).toBe('t1'); // call linked to the trip
+  });
+
+  it('a second ring for the same order does not authorise a second trip', async () => {
+    // The counter taps the card again when the driver is slow to answer. Each
+    // tap is its own DriverCall, and the trip used to consume only the newest:
+    // the older one stayed live, and the driver went out again on it after
+    // coming back - a trip nobody rang for.
+    const b = makeBranch({ gps_radius_m: 200 });
+    store.branches.set(b.id, b);
+    const driver = makeDriver('d1', b);
+    store.calls.push({ id: 'call-again', driver_id: driver.id, trip_id: null, created_at: new Date() });
+
+    const r1 = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
+    expect('trip_id' in r1).toBe(true);
+    store.trips[0]!.back_at = new Date(); // back from the order
+
+    const r2 = await startTrip({ userId: driver.id, lat: 33.8962, lng: 35.4827, accuracy: 10, receipt: RECEIPT });
+    expect('code' in r2 && r2.code).toBe('NOT_DISPATCHED');
+    expect(store.trips).toHaveLength(1);
+    expect(store.calls.map((c) => c.trip_id)).toEqual(['t1', 't1']);
   });
 
   it('rejects non-driver with NOT_DRIVER', async () => {

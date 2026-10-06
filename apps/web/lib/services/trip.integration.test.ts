@@ -132,6 +132,26 @@ describe('trip integration', () => {
     expect(body2.error?.code).toBe('OPEN_TRIP_EXISTS');
   });
 
+  it('a ring tapped twice dispatches one trip, not two', async () => {
+    // The counter taps the card again when the driver is slow to answer. The
+    // second tap must not leave a spare ring the driver can go out on later.
+    const branch = await seedTestBranch({ gps_radius_m: 200 });
+    const driver = await seedTestDriver({ username: 'trip-drv2b', branch_id: branch.id });
+    await dispatch(driver, branch);
+    await getTestPrisma().driverCall.create({ data: { driver_id: driver.id, caller_id: driver.id, branch_id: branch.id } });
+    const { cookies, csrf } = await loginAs(driver.username, 'test-pass-1');
+
+    const r1 = await postTripStart({ cookies, csrf, body: { lat: 33.8962, lng: 35.4827, accuracy: 10 } });
+    expect(r1.status).toBe(200);
+    await getTestPrisma().trip.updateMany({ where: { driver_id: driver.id }, data: { back_at: new Date(), back_lat: 33.8962, back_lng: 35.4827 } });
+
+    const r2 = await postTripStart({ cookies, csrf, body: { lat: 33.8962, lng: 35.4827, accuracy: 10 } });
+    expect(r2.status).toBe(409);
+    expect((r2.body as { error?: { code: string } }).error?.code).toBe('NOT_DISPATCHED');
+    expect(await getTestPrisma().trip.count({ where: { driver_id: driver.id } })).toBe(1);
+    expect(await getTestPrisma().driverCall.count({ where: { driver_id: driver.id, trip_id: null } })).toBe(0);
+  });
+
   it('driver ends trip with duration_min > 0', async () => {
     const branch = await seedTestBranch({ gps_radius_m: 200 });
     const driver = await seedTestDriver({ username: 'trip-drv3', branch_id: branch.id });
